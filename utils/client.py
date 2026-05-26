@@ -28,6 +28,13 @@ class PensieveAPI:
             },
         }
 
+        print("\n[DEBUG] ── API Request ──────────────────────────")
+        print(f"  URL     : {self.url}")
+        print(f"  building: {self.building}")
+        print(f"  system  : {system_prompt[:100]}...")
+        print(f"  human   : {human_prompt[:100]}")
+        print("────────────────────────────────────────────────\n")
+
         try:
             response = requests.post(
                 self.url,
@@ -39,6 +46,8 @@ class PensieveAPI:
             response.raise_for_status()
 
             raw_text = response.text
+            print(f"[DEBUG] API Response (前 200 字): {raw_text[:200]}\n")
+
             if not raw_text or not raw_text.strip():
                 print("[API] 警告：回傳空白內容。")
                 return None
