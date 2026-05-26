@@ -162,7 +162,7 @@ def api_send_message(session_id):
     add_message(session_id, "user", content)
 
     interviewer = _get_interviewer(session_id)
-    reply_text, tables = interviewer.chat(content)
+    reply_text, tables, summary = interviewer.chat(content)
 
     add_message(session_id, "ai", reply_text)
 
@@ -170,10 +170,7 @@ def api_send_message(session_id):
     key_points = []
 
     if tables_ready:
-        # Extract key points from conversation messages (last few user messages)
-        current_session = get_session(session_id)
-        user_msgs = [m["content"] for m in current_session["messages"] if m["role"] == "user"]
-        key_points = user_msgs  # all user messages, not just last few
+        key_points = summary  # AI-generated summary integrating both sides of the conversation
 
         from web.session_store import set_tables
         set_tables(session_id, tables, key_points)

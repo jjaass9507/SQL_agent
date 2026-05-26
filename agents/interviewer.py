@@ -6,6 +6,15 @@ from utils.client import get_api
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "interviewer.txt").read_text(encoding="utf-8")
 _SPEC_RE = re.compile(r"<TABLE_SPECS>(.*?)</TABLE_SPECS>", re.DOTALL)
+_SUMMARY_RE = re.compile(r"<REQUIREMENTS_SUMMARY>(.*?)</REQUIREMENTS_SUMMARY>", re.DOTALL)
+
+
+def _parse_summary(text: str) -> list[str]:
+    match = _SUMMARY_RE.search(text)
+    if not match:
+        return []
+    lines = [l.strip().lstrip("-").strip() for l in match.group(1).strip().splitlines()]
+    return [l for l in lines if l]
 
 
 def _parse_tables(json_str: str) -> list[TableSpec] | None:
@@ -49,9 +58,9 @@ class Interviewer:
         self._history: list[dict] = []  # {"role": "user"|"assistant", "content": str}
         self._context = context  # existing DB schema injected before SYSTEM_PROMPT
 
-    def chat(self, user_message: str) -> tuple[str, list[TableSpec] | None]:
-        """Send a message. Returns (response_text, tables) where tables is
-        non-None only when the LLM signals requirements are complete."""
+    def chat(self, user_message: str) -> tuple[str, list[TableSpec] | None, list[str]]:
+        """Send a message. Returns (response_text, tables, summary_points).
+        tables and summary_points are non-empty only when requirements are complete."""
         self._history.append({"role": "user", "content": user_message})
         is_first_turn = len(self._history) == 1
 
@@ -74,12 +83,14 @@ class Interviewer:
         )
 
         if not response_text:
-            return "抱歉，無法取得回應，請稍後再試。", None
+            return "抱歉，無法取得回應，請稍後再試。", None, []
 
-        # Extract <TABLE_SPECS> block if present
-        match = _SPEC_RE.search(response_text)
-        tables = _parse_tables(match.group(1)) if match else None
-        clean_text = _SPEC_RE.sub("", response_text).strip()
+        # Extract structured blocks, then strip them from the displayed text
+        spec_match = _SPEC_RE.search(response_text)
+        tables = _parse_tables(spec_match.group(1)) if spec_match else None
+        summary = _parse_summary(response_text) if spec_match else []
+
+        clean_text = _SUMMARY_RE.sub("", _SPEC_RE.sub("", response_text)).strip()
 
         self._history.append({"role": "assistant", "content": clean_text})
-        return clean_text, tables
+        return clean_text, tables, summary
