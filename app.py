@@ -173,7 +173,7 @@ def api_send_message(session_id):
         # Extract key points from conversation messages (last few user messages)
         current_session = get_session(session_id)
         user_msgs = [m["content"] for m in current_session["messages"] if m["role"] == "user"]
-        key_points = user_msgs[-4:] if len(user_msgs) >= 4 else user_msgs
+        key_points = user_msgs  # all user messages, not just last few
 
         from web.session_store import set_tables
         set_tables(session_id, tables, key_points)

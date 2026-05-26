@@ -35,7 +35,7 @@
         {% if session.key_points %}
           {% for point in session.key_points %}
           <div class="key-point-item">
-            <div class="key-point-label">需求 {{ loop.index }}</div>
+            <div class="key-point-label">對話 {{ loop.index }}</div>
             <div class="key-point-text">{{ point }}</div>
           </div>
           {% endfor %}
@@ -73,7 +73,11 @@
               <span class="schema-field-desc">
                 {{ col.description }}
                 {% if col.is_primary_key %} [PK]{% endif %}
-                {% if col.is_foreign_key and col.references %} [FK→{{ col.references }}]{% endif %}
+                {% if col.is_foreign_key and col.references %}
+                  {% if col.references is mapping %} [FK→{{ col.references.table }}.{{ col.references.column }}]
+                  {% else %} [FK→{{ col.references }}]
+                  {% endif %}
+                {% endif %}
                 {% if col.is_unique %} [UNIQUE]{% endif %}
               </span>
             </div>
