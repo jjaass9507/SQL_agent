@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}工作台 — SQL Agent{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-title"><span>SQL</span> Agent</div>
+      <div class="sidebar-logo-sub">資料庫設計助手</div>
+    </div>
+    <div class="sidebar-new-btn">
+      <a href="#" id="new-session-btn">＋ 新建設計</a>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/" class="active"><span class="nav-icon">⊞</span> 工作台</a>
+      <a href="/"><span class="nav-icon">◷</span> 所有專案</a>
+      <a href="#"><span class="nav-icon">◱</span> 範本庫</a>
+      <a href="#"><span class="nav-icon">⚙</span> 設定</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-avatar">PM</div>
+      <div>
+        <div class="sidebar-user-name">SQL Agent</div>
+        <div class="sidebar-user-email">內部工具</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main-content">
+    <div class="topbar">
+      <span class="topbar-title">工作台</span>
+      <div class="topbar-spacer"></div>
+      <div class="search-box">🔍 搜尋專案...</div>
+      <button class="btn btn-primary btn-sm" id="new-session-btn2">＋ 新建設計</button>
+    </div>
+
+    <div style="flex:1;padding:18px 22px;overflow-y:auto;">
+      <!-- Resume banner (shown if any in-progress) -->
+      <div id="resume-banner" class="banner banner-info hidden">
+        <span id="resume-banner-text"></span>
+        <a id="resume-banner-link" href="#" class="btn btn-primary btn-sm">繼續對話 →</a>
+      </div>
+
+      <!-- Section header + filter chips -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <span style="font-size:16px;font-weight:700;">最近的紀錄</span>
+        <div class="filter-chips">
+          <div class="chip active" data-filter="all">全部</div>
+          <div class="chip" data-filter="inprogress">進行中</div>
+          <div class="chip" data-filter="confirming">待確認</div>
+          <div class="chip" data-filter="done">已完成</div>
+        </div>
+      </div>
+
+      <!-- Card grid -->
+      <div class="card-grid" id="sessions-grid">
+        <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);font-size:15px;">
+          載入中...
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New session modal -->
+<div class="modal-overlay hidden" id="new-session-modal">
+  <div class="modal">
+    <div class="modal-title">開始新的資料表設計</div>
+    <div class="modal-label">專案名稱</div>
+    <input class="modal-input" id="new-session-title" placeholder="例如：訂單系統設計" type="text">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-cancel">取消</button>
+      <button class="btn btn-primary" id="modal-confirm">開始設計 →</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/home.js') }}"></script>
+{% endblock %}

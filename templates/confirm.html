@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}需求確認 — {{ session.title }}{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar-mini">
+    <div class="sidebar-mini-logo">S</div>
+    <a href="/" class="sidebar-mini-icon" title="工作台">⊞</a>
+    <a href="/" class="sidebar-mini-icon active" title="所有專案">◷</a>
+    <a href="#" class="sidebar-mini-icon" title="範本庫">◱</a>
+    <a href="#" class="sidebar-mini-icon" title="設定">⚙</a>
+    <div class="sidebar-mini-spacer"></div>
+    <div class="sidebar-mini-avatar">PM</div>
+  </aside>
+
+  <div class="main-content">
+    <div class="topbar">
+      <a href="/sessions/{{ session.id }}/chat" class="topbar-back btn btn-ghost btn-sm">← 返回修改</a>
+      <span class="topbar-session-title">需求確認</span>
+      <div class="topbar-spacer"></div>
+      <div class="stepbar">
+        <div class="step done">✓ 需求收集</div>
+        <div class="step-connector done"></div>
+        <div class="step active">② 確認設計</div>
+        <div class="step-connector"></div>
+        <div class="step">③ 產出文件</div>
+      </div>
+      <div style="width:22px;"></div>
+    </div>
+
+    <div class="confirm-layout">
+      <!-- Left: user's words -->
+      <div class="confirm-left">
+        <div class="confirm-section-title">💬 你的需求描述</div>
+        {% if session.key_points %}
+          {% for point in session.key_points %}
+          <div class="key-point-item">
+            <div class="key-point-label">需求 {{ loop.index }}</div>
+            <div class="key-point-text">{{ point }}</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div style="font-size:14px;color:var(--muted);">（從對話中摘要需求...）</div>
+        {% endif %}
+      </div>
+
+      <!-- Arrow -->
+      <div class="confirm-arrow">
+        <span>→</span>
+        <span class="confirm-arrow-label">AI<br>理解</span>
+      </div>
+
+      <!-- Right: AI schema -->
+      <div class="confirm-right">
+        <div class="confirm-section-title">🤖 AI 理解為</div>
+        {% if session.tables %}
+          {% for table in session.tables %}
+          <div class="schema-table-wrap">
+            <div class="schema-table-header compact">{{ table.table_name }}{% if table.description %} — {{ table.description }}{% endif %}</div>
+            <div class="schema-col-headers">
+              <span class="schema-col-header">欄位</span>
+              <span class="schema-col-header">型態</span>
+              <span class="schema-col-header" style="text-align:center;">NULL</span>
+              <span class="schema-col-header">說明</span>
+            </div>
+            {% for col in table.columns %}
+            <div class="schema-row">
+              <span class="schema-field-name {% if col.is_primary_key %}pk{% endif %}">
+                {% if col.is_primary_key %}🔑 {% elif col.is_foreign_key %}↗ {% endif %}{{ col.name }}
+              </span>
+              <span class="schema-field-type">{{ col.data_type }}{% if col.length %}({{ col.length }}){% endif %}</span>
+              <span class="schema-field-null">{% if col.nullable %}○{% else %}✕{% endif %}</span>
+              <span class="schema-field-desc">
+                {{ col.description }}
+                {% if col.is_primary_key %} [PK]{% endif %}
+                {% if col.is_foreign_key and col.references %} [FK→{{ col.references }}]{% endif %}
+                {% if col.is_unique %} [UNIQUE]{% endif %}
+              </span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        {% else %}
+          <div style="font-size:14px;color:var(--muted);">（無資料表資訊）</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Footer actions -->
+    <div class="confirm-footer">
+      <a href="/sessions/{{ session.id }}/chat" class="btn btn-ghost">← 返回補充需求</a>
+      <button class="btn btn-success" id="confirm-btn">✓ 確認，開始產出文件</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SESSION_ID = "{{ session.id }}";
+</script>
+<script src="{{ url_for('static', filename='js/confirm.js') }}"></script>
+{% endblock %}
