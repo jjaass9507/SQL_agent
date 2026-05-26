@@ -44,9 +44,10 @@ def _parse_tables(json_str: str) -> list[TableSpec] | None:
 
 
 class Interviewer:
-    def __init__(self):
+    def __init__(self, context: str = ""):
         self._api = get_api()
         self._history: list[dict] = []  # {"role": "user"|"assistant", "content": str}
+        self._context = context  # existing DB schema injected before SYSTEM_PROMPT
 
     def chat(self, user_message: str) -> tuple[str, list[TableSpec] | None]:
         """Send a message. Returns (response_text, tables) where tables is
@@ -59,6 +60,8 @@ class Interviewer:
             for h in self._history[:-1]
         )
         system_prompt = SYSTEM_PROMPT
+        if self._context:
+            system_prompt = self._context + "\n\n" + system_prompt
         if history_lines:
             system_prompt += f"\n\n--- 對話歷史 ---\n{history_lines}"
 

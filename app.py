@@ -27,7 +27,9 @@ _interviewer_store: dict[str, Interviewer] = {}
 
 def _get_interviewer(session_id: str) -> Interviewer:
     if session_id not in _interviewer_store:
-        _interviewer_store[session_id] = Interviewer()
+        session = get_session(session_id)
+        context = session.get("context_text", "") if session else ""
+        _interviewer_store[session_id] = Interviewer(context=context)
     return _interviewer_store[session_id]
 
 
@@ -72,10 +74,59 @@ def docs_page(session_id):
 
 @app.post("/api/sessions")
 def api_create_session():
+    from web.db_introspect import extract_schema, format_context
     data = request.get_json(silent=True) or {}
     title = (data.get("title") or "未命名設計").strip()
-    session = create_session(title)
-    return jsonify(session), 201
+    db_url = (data.get("db_url") or "").strip()
+    db_schema = (data.get("db_schema") or "public").strip()
+
+    context_tables_json = []
+    context_text = ""
+    db_error = ""
+
+    if db_url:
+        import dataclasses
+        tables, db_error = extract_schema(db_url, db_schema)
+        if tables:
+            context_tables_json = [dataclasses.asdict(t) for t in tables]
+            context_text = format_context(tables)
+
+    session = create_session(title, context_tables_json, context_text)
+    resp = dict(session)
+    if db_error:
+        resp["db_error"] = db_error
+    elif db_url and context_tables_json:
+        resp["db_imported"] = len(context_tables_json)
+    return jsonify(resp), 201
+
+
+@app.post("/api/sessions/<session_id>/import-db")
+def api_import_db(session_id):
+    """Import (or re-import) existing DB schema into an existing session."""
+    from web.db_introspect import extract_schema, format_context
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    db_url = (data.get("db_url") or "").strip()
+    db_schema = (data.get("db_schema") or "public").strip()
+    if not db_url:
+        return jsonify({"error": "db_url required"}), 400
+
+    import dataclasses
+    tables, error = extract_schema(db_url, db_schema)
+    if error:
+        return jsonify({"error": error}), 400
+
+    context_tables_json = [dataclasses.asdict(t) for t in tables]
+    context_text = format_context(tables)
+    update_session(session_id, {
+        "context_tables": context_tables_json,
+        "context_text": context_text,
+    })
+    # Reset the Interviewer instance so it picks up the new context on next chat
+    _interviewer_store.pop(session_id, None)
+    return jsonify({"imported": len(tables), "tables": [t.table_name for t in tables]})
 
 
 @app.get("/api/sessions")

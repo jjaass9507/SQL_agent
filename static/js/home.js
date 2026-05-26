@@ -118,6 +118,16 @@ function openModal() {
   titleInput.focus();
 }
 
+const dbToggle = document.getElementById('db-import-toggle');
+const dbSection = document.getElementById('db-import-section');
+const dbUrlInput = document.getElementById('db-url');
+const dbSchemaInput = document.getElementById('db-schema');
+const dbStatus = document.getElementById('db-import-status');
+
+dbToggle.addEventListener('change', () => {
+  dbSection.style.display = dbToggle.checked ? 'block' : 'none';
+});
+
 document.getElementById('new-session-btn').addEventListener('click', e => { e.preventDefault(); openModal(); });
 document.getElementById('new-session-btn2').addEventListener('click', openModal);
 document.getElementById('modal-cancel').addEventListener('click', () => modal.classList.add('hidden'));
@@ -128,17 +138,46 @@ titleInput.addEventListener('keydown', e => { if (e.key === 'Enter') createSessi
 
 async function createSession() {
   const title = titleInput.value.trim() || '未命名設計';
+  const useDb = dbToggle.checked;
+  const dbUrl = dbUrlInput ? dbUrlInput.value.trim() : '';
+  const dbSchema = (dbSchemaInput && dbSchemaInput.value.trim()) || 'public';
+  const confirmBtn = document.getElementById('modal-confirm');
+
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = useDb && dbUrl ? '連線中...' : '建立中...';
+  if (dbStatus) dbStatus.textContent = '';
+
+  const payload = { title };
+  if (useDb && dbUrl) {
+    payload.db_url = dbUrl;
+    payload.db_schema = dbSchema;
+  }
+
   try {
     const res = await fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('create failed');
     const session = await res.json();
+    if (!res.ok) throw new Error(session.error || 'create failed');
+
+    if (session.db_error) {
+      if (dbStatus) dbStatus.innerHTML = `<span style="color:var(--error);">⚠ ${escHtml(session.db_error)}</span>`;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '開始設計 →';
+      return;
+    }
+    if (session.db_imported) {
+      // Brief success flash before redirect
+      if (dbStatus) dbStatus.innerHTML = `<span style="color:var(--success);">✓ 已匯入 ${session.db_imported} 張資料表</span>`;
+      await new Promise(r => setTimeout(r, 600));
+    }
     window.location.href = `/sessions/${session.id}/chat`;
   } catch (e) {
-    alert('建立失敗，請稍後再試');
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '開始設計 →';
+    alert('建立失敗：' + e.message);
   }
 }
 

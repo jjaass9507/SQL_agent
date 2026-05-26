@@ -52,7 +52,8 @@ def _tables_from_json(data: list[dict]) -> list[TableSpec]:
     return result
 
 
-def create_session(title: str) -> dict:
+def create_session(title: str, context_tables: list[dict] | None = None,
+                   context_text: str = "") -> dict:
     session_id = str(uuid.uuid4())
     session = {
         "id": session_id,
@@ -64,6 +65,8 @@ def create_session(title: str) -> dict:
         "key_points": [],
         "outputs": {},
         "generation_status": {f: "waiting" for f in GENERATION_FILES},
+        "context_tables": context_tables or [],   # existing DB tables as reference
+        "context_text": context_text,             # formatted text for Interviewer
     }
     _write(session_id, session)
     return session
