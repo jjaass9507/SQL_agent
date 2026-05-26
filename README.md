@@ -2,6 +2,10 @@
 
 透過對話式 AI，收集資料表設計需求後自動產出四份技術文件：規格書、ER Diagram、DDL 腳本、效能安全規劃。
 
+提供兩種操作介面：
+- **網頁平台**（`app.py`）— Flask 網頁介面，含對話、確認、文件檢視頁面
+- **CLI 工具**（`main.py`）— 終端機命令列介面
+
 ---
 
 ## 功能概覽
@@ -11,9 +15,9 @@
      ↓
 Interviewer Agent 追問細節（欄位型態、主鍵、關聯、索引…）
      ↓
-使用者確認摘要（輸入 OK）
+使用者確認摘要
      ↓
-自動產出四個檔案至 output/{timestamp}/
+自動產出四個檔案
 ```
 
 | 輸出檔案 | 內容 |
@@ -68,49 +72,36 @@ PENSIEVE_VERIFY=false
 
 ## 使用方式
 
+### 網頁平台（建議）
+
+```bash
+python app.py
+# 開啟瀏覽器 http://localhost:5000
+```
+
+網頁平台提供四個頁面：首頁（專案管理）→ 對話頁（需求收集）→ 確認頁（語意對照審閱）→ 文件頁（即時進度 + 預覽/下載）。
+
+### CLI 工具
+
 ```bash
 python main.py
 ```
 
-### 對話流程
+對話流程與確認方式同舊版。確認詞：`OK` / `確認` / `yes` / `confirm` / `好` / `可以` / `沒問題`
 
-```
-資料庫建檔管理 Agent
-請描述您想建立的資料表需求...
+---
 
-您> 我想建立一個訂單系統，包含訂單主表和訂單明細
+## 輸出文件
 
-Agent> 好的，請問訂單主表的主鍵設計是用自增 ID 還是 UUID？
-       另外，訂單與哪些表有關聯（例如 users）？
+| 檔案 | 說明 |
+|---|---|
+| `01_specification.md` | 資料庫規格書與資料字典（欄位表格） |
+| `02_er_diagram.md` | Mermaid ER Diagram |
+| `03_ddl.sql` | PostgreSQL DDL + 索引 + Migration + Seed Data |
+| `04_security_plan.md` | 索引策略、存取控制、敏感欄位加密建議 |
 
-您> UUID 主鍵，關聯 users 表，需要訂單狀態欄位
-
-Agent> 了解！還需確認幾點：
-       1. 訂單狀態有哪些值？（pending/paid/shipped/cancelled？）
-       2. 是否需要 created_at / updated_at 時間戳？
-
-您> 狀態用那四個值，要時間戳
-
-Agent> [顯示完整需求摘要表格]
-
-需求已收集完整！輸入 OK 開始產生文件，或說明需要修改的地方。
-
-您> OK
-
-  ✓ 規格書與資料字典  (01_specification.md)
-  ✓ 結構與關聯圖      (02_er_diagram.md)
-  ✓ DDL 腳本          (03_ddl.sql)
-  ✓ 效能與安全規劃書  (04_security_plan.md)
-
-文件產生完成！→ output/20260526_143022/
-```
-
-### 支援的確認指令
-
-在摘要確認階段，可輸入以下任一詞語繼續：
-`OK` / `確認` / `yes` / `confirm` / `好` / `可以` / `沒問題`
-
-輸入其他任何內容則視為修改需求，繼續對話收集。
+網頁平台：在文件頁直接預覽（Mermaid 渲染、SQL 語法高亮），或下載單檔 / 全部打包為 `.zip`。
+CLI 工具：輸出至 `output/{YYYYMMDD_HHMMSS}/`。
 
 ---
 
@@ -127,42 +118,57 @@ pytest tests/ -v
 
 ```
 SQL_agent/
+├── app.py                       # 網頁平台入口（Flask）
 ├── main.py                      # CLI 入口
 ├── requirements.txt
 ├── .env.example
 │
+├── web/                         # 網頁平台後端邏輯
+│   ├── session_store.py         # Session JSON 持久化 + threading.Lock
+│   └── generation_worker.py     # 背景 Thread：文件產出進度管理
+│
+├── templates/                   # Jinja2 HTML 模板
+│   ├── base.html
+│   ├── index.html               # 首頁（專案列表）
+│   ├── chat.html                # 對話頁
+│   ├── confirm.html             # 需求確認頁
+│   └── docs.html                # 文件查閱頁
+│
+├── static/
+│   ├── css/main.css             # 設計系統（色板、排版、組件）
+│   └── js/
+│       ├── home.js
+│       ├── chat.js
+│       ├── confirm.js
+│       └── docs.js
+│
 ├── agents/
-│   ├── orchestrator.py          # 狀態機（COLLECTING→CONFIRMING→GENERATING）
+│   ├── orchestrator.py          # CLI 狀態機
 │   ├── interviewer.py           # 需求收集 Agent
 │   └── writers/
 │       ├── spec_writer.py       # 規格書（模板渲染，不耗 API）
 │       ├── diagram_writer.py    # ER Diagram（Mermaid）
 │       ├── ddl_writer.py        # PostgreSQL DDL + migration
-│       └── security_writer.py  # 效能與安全規劃
+│       └── security_writer.py   # 效能與安全規劃
 │
 ├── models/
 │   ├── schema.py                # ColumnSpec, TableSpec
-│   └── session.py               # 對話狀態機 Phase enum
+│   └── session.py               # CLI 狀態機 Phase enum
 │
 ├── prompts/
-│   ├── interviewer.txt          # Interviewer system prompt
-│   └── writers.txt              # Writer agents 共用 prompt
+│   ├── interviewer.txt
+│   └── writers.txt
 │
 ├── utils/
-│   ├── client.py                # PensieveAPI（HTTP 呼叫封裝）
-│   └── file_writer.py           # 輸出目錄與檔案管理
+│   ├── client.py                # PensieveAPI HTTP 封裝
+│   └── file_writer.py           # CLI 輸出目錄管理
 │
 ├── tests/
 │   ├── fixtures/sample_spec.json
-│   ├── test_models.py
-│   └── test_writers.py
+│   └── test_*.py
 │
-└── output/                      # 產出目錄（git ignored）
-    └── {YYYYMMDD_HHMMSS}/
-        ├── 01_specification.md
-        ├── 02_er_diagram.md
-        ├── 03_ddl.sql
-        └── 04_security_plan.md
+├── data/                        # Session 資料（git ignored）
+└── output/                      # CLI 產出目錄（git ignored）
 ```
 
 ---
