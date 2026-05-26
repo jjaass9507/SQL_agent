@@ -8,10 +8,12 @@ import requests
 class PensieveAPI:
     """與 Pensieve 系統互動，呼叫 AI 進行對話。"""
 
-    def __init__(self, token: str, empno: str, url: str, verify: bool = False):
+    def __init__(self, token: str, empno: str, url: str,
+                 building: str = "question", verify: bool = False):
         self.token = token
         self.empno = empno
         self.url = url
+        self.building = building
         self.verify = verify
 
     def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
@@ -20,6 +22,7 @@ class PensieveAPI:
             "token": self.token,
             "empno": self.empno,
             "variables": {
+                "building": self.building,
                 "other_system_prompt": system_prompt,
                 "other_human_prompt": human_prompt,
             },
@@ -73,6 +76,7 @@ def get_api() -> PensieveAPI:
             token=os.environ["PENSIEVE_TOKEN"],
             empno=os.environ["PENSIEVE_EMPNO"],
             url=os.environ.get("PENSIEVE_URL", "https://pensieve.kh.asegroup.com/api/flow_chat/"),
+            building=os.environ.get("PENSIEVE_BUILDING", "question"),
             verify=os.environ.get("PENSIEVE_VERIFY", "false").lower() == "true",
         )
     return _api
