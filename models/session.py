@@ -14,4 +14,3 @@ class Phase(Enum):
 class SessionState:
     phase: Phase = Phase.COLLECTING
     tables: list[TableSpec] = field(default_factory=list)
-    history: list[dict] = field(default_factory=list)

@@ -1,7 +1,6 @@
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.markdown import Markdown
 
 from agents.interviewer import Interviewer
 from models.schema import TableSpec
@@ -117,16 +116,21 @@ class Orchestrator:
             ("04_security_plan.md", "效能與安全規劃書", SecurityWriter()),
         ]
 
+        failed = []
         for filename, label, writer in writers:
             with console.status(f"[dim]產生{label}...[/dim]", spinner="dots"):
-                outputs[filename] = writer.generate(self._state.tables)
-            console.print(f"  [green]✓[/green] {label}  ({filename})")
-
-        # DDLWriter also produces migration script as a second file
-        if "03_migration.sql" in outputs:
-            pass  # already handled inside DDLWriter.generate via tuple return
+                content = writer.generate(self._state.tables)
+            if content and content.strip():
+                outputs[filename] = content
+                console.print(f"  [green]✓[/green] {label}  ({filename})")
+            else:
+                failed.append(label)
+                console.print(f"  [red]✗[/red] {label} 產出失敗（API 無回應）")
 
         write_outputs(session_dir, outputs)
+
+        if failed:
+            console.print(f"\n[yellow]警告：{', '.join(failed)} 未能產出，請檢查 API 連線後重試。[/yellow]")
 
         console.print(Panel(
             f"[bold green]文件產生完成！[/bold green]\n\n"

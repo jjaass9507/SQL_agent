@@ -14,10 +14,9 @@ class SpecWriter:
                 "|----------|----------|------|-----------|--------|----|----|--------|-------|------|\n"
             )
             for c in t.columns:
-                dtype = c.data_type + (f"({c.length})" if c.length else "")
                 fk_ref = f"→ {c.references}" if c.references else ""
                 sections.append(
-                    f"| `{c.name}` | {dtype} | {c.length or ''} "
+                    f"| `{c.name}` | {c.data_type} | {c.length or ''} "
                     f"| {'是' if c.nullable else '否'} "
                     f"| {c.default or ''} "
                     f"| {'✓' if c.is_primary_key else ''} "
