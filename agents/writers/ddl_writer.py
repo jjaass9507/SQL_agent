@@ -16,7 +16,8 @@ class DDLWriter:
             "1. 建立腳本：完整 CREATE TABLE，含 PRIMARY KEY、FOREIGN KEY、UNIQUE、CHECK constraints，"
             "以及每個欄位的 COMMENT ON COLUMN\n"
             "2. 索引建立：為 is_indexed=true 的欄位建立 CREATE INDEX\n"
-            "3. Migration 腳本：CREATE TABLE IF NOT EXISTS 版本 + 回滾（DROP TABLE IF EXISTS）\n"
+            "3. Migration 腳本：CREATE TABLE IF NOT EXISTS 版本 + 回滾（DROP TABLE IF EXISTS）；"
+            "此區塊只含建表語句與回滾，不要重複輸出 COMMENT ON\n"
             "4. Seed Data：每個表各 5 筆範例 INSERT 語句\n\n"
             "只輸出 SQL，不要加 markdown 程式碼區塊標記。"
         )

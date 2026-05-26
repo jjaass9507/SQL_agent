@@ -14,7 +14,13 @@ class SpecWriter:
                 "|----------|----------|------|-----------|--------|----|----|--------|-------|------|\n"
             )
             for c in t.columns:
-                fk_ref = f"→ {c.references}" if c.references else ""
+                if c.references:
+                    ref = c.references
+                    if isinstance(ref, dict):
+                        ref = f"{ref.get('table', '')}.{ref.get('column', '')}"
+                    fk_ref = f"→ {ref}"
+                else:
+                    fk_ref = ""
                 sections.append(
                     f"| `{c.name}` | {c.data_type} | {c.length or ''} "
                     f"| {'是' if c.nullable else '否'} "
