@@ -3,7 +3,7 @@ from pathlib import Path
 from models.schema import TableSpec
 from utils.client import get_api
 
-_WRITERS_PROMPT = (Path(__file__).parent.parent.parent / "prompts" / "writers.txt").read_text()
+_WRITERS_PROMPT = (Path(__file__).parent.parent.parent / "prompts" / "writers.txt").read_text(encoding="utf-8")
 
 
 class DDLWriter:

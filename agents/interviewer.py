@@ -4,7 +4,7 @@ from pathlib import Path
 from models.schema import ColumnSpec, TableSpec
 from utils.client import get_api
 
-SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "interviewer.txt").read_text()
+SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "interviewer.txt").read_text(encoding="utf-8")
 _SPEC_RE = re.compile(r"<TABLE_SPECS>(.*?)</TABLE_SPECS>", re.DOTALL)
 
 
