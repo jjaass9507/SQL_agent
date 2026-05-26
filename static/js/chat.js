@@ -6,11 +6,13 @@ const progressList = document.getElementById('progress-list');
 const welcomeMsg = document.getElementById('welcome-msg');
 
 let isLoading = false;
+let userMessages = EXISTING_MESSAGES.filter(m => m.role === 'user').map(m => m.content);
 
 // Render existing messages on load
 if (EXISTING_MESSAGES && EXISTING_MESSAGES.length > 0) {
   welcomeMsg.remove();
   EXISTING_MESSAGES.forEach(m => appendBubble(m.role, m.content));
+  if (userMessages.length) updateConversationProgress(userMessages);
 }
 
 function appendBubble(role, content) {
@@ -47,6 +49,7 @@ async function sendMessage() {
 
   if (welcomeMsg.parentNode) welcomeMsg.remove();
   inputEl.value = '';
+  userMessages.push(content);
   appendBubble('user', content);
   const typingRow = appendTyping();
   setLoading(true);
@@ -63,11 +66,12 @@ async function sendMessage() {
     if (data.reply) appendBubble('ai', data.reply);
 
     if (data.tables_ready) {
+      updateProgressPanel(data.tables);
       setTimeout(() => {
         window.location.href = `/sessions/${SESSION_ID}/confirm`;
       }, 1200);
-    } else if (data.tables) {
-      updateProgressPanel(data.tables);
+    } else {
+      updateConversationProgress(userMessages);
     }
   } catch (e) {
     typingRow.remove();
@@ -76,6 +80,19 @@ async function sendMessage() {
     setLoading(false);
     inputEl.focus();
   }
+}
+
+function updateConversationProgress(msgs) {
+  if (!msgs.length) return;
+  const recentMsgs = msgs.slice(-3);
+  progressList.innerHTML = `
+    <div class="progress-item">
+      <div class="progress-item-header">
+        <span class="progress-status active">◉</span>
+        <span class="progress-name">需求收集中（${msgs.length} 輪對話）</span>
+      </div>
+      ${recentMsgs.map(m => `<div class="progress-field">· ${escHtml(m.length > 55 ? m.slice(0, 55) + '…' : m)}</div>`).join('')}
+    </div>`;
 }
 
 function updateProgressPanel(tables) {
