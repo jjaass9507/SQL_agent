@@ -17,23 +17,22 @@ class PensieveAPI:
         self.verify = verify
 
     def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
-        """送出 system_prompt + human_prompt，回傳 AI 純文字回應。"""
+        """送出 system_prompt + human_prompt，回傳 AI 純文字回應。
+        other_system_prompt 不一定會被 API 套用為 system role，
+        因此將指令合併至 other_human_prompt 確保模型一定看到。"""
+        effective_human = (
+            f"【角色指令】\n{system_prompt}\n\n【輸入】\n{human_prompt}"
+            if system_prompt else human_prompt
+        )
         payload = {
             "token": self.token,
             "empno": self.empno,
             "variables": {
                 "building": self.building,
                 "other_system_prompt": system_prompt,
-                "other_human_prompt": human_prompt,
+                "other_human_prompt": effective_human,
             },
         }
-
-        print("\n[DEBUG] ── API Request ──────────────────────────")
-        print(f"  URL     : {self.url}")
-        print(f"  building: {self.building}")
-        print(f"  system  : {system_prompt[:100]}...")
-        print(f"  human   : {human_prompt[:100]}")
-        print("────────────────────────────────────────────────\n")
 
         try:
             response = requests.post(
@@ -46,8 +45,6 @@ class PensieveAPI:
             response.raise_for_status()
 
             raw_text = response.text
-            print(f"[DEBUG] API Response (前 200 字): {raw_text[:200]}\n")
-
             if not raw_text or not raw_text.strip():
                 print("[API] 警告：回傳空白內容。")
                 return None
