@@ -53,6 +53,7 @@ class Interviewer:
         """Send a message. Returns (response_text, tables) where tables is
         non-None only when the LLM signals requirements are complete."""
         self._history.append({"role": "user", "content": user_message})
+        is_first_turn = len(self._history) == 1
 
         # other_system_prompt = role instructions + conversation history (context)
         history_lines = "\n".join(
@@ -60,7 +61,8 @@ class Interviewer:
             for h in self._history[:-1]
         )
         system_prompt = SYSTEM_PROMPT
-        if self._context:
+        # Inject DB schema context only on the first turn; history carries it implicitly after that
+        if self._context and is_first_turn:
             system_prompt = self._context + "\n\n" + system_prompt
         if history_lines:
             system_prompt += f"\n\n--- 對話歷史 ---\n{history_lines}"

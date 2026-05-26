@@ -133,24 +133,49 @@ def extract_schema(db_url: str, schema: str = "public") -> tuple[list[TableSpec]
 
 
 def format_context(tables: list[TableSpec]) -> str:
-    """Format tables as a compact text block for injecting into the Interviewer system prompt."""
+    """Format tables for the Interviewer system prompt. Detail level scales with table count."""
     if not tables:
         return ""
-    lines = [
-        "--- 現有資料庫結構（供參考，設計新表時請注意關聯與命名一致性）---",
-    ]
-    for t in tables:
-        lines.append(f"\n【{t.table_name}】{' — ' + t.description if t.description else ''}")
-        for c in t.columns:
-            flags = []
-            if c.is_primary_key:
-                flags.append("PK")
-            if c.is_foreign_key and c.references:
-                flags.append(f"FK→{c.references}")
-            if c.is_unique:
-                flags.append("UNIQUE")
-            flag_str = f" ({', '.join(flags)})" if flags else ""
-            type_str = f"{c.data_type}({c.length})" if c.length else c.data_type
-            lines.append(f"  {c.name}: {type_str}{flag_str}")
+    n = len(tables)
+    lines = ["--- 現有資料庫結構（供參考，設計新表時請注意關聯與命名一致性）---"]
+
+    if n <= 10:
+        # Full: all columns with types and flags
+        for t in tables:
+            lines.append(f"\n【{t.table_name}】{' — ' + t.description if t.description else ''}")
+            for c in t.columns:
+                flags = []
+                if c.is_primary_key:
+                    flags.append("PK")
+                if c.is_foreign_key and c.references:
+                    flags.append(f"FK→{c.references}")
+                if c.is_unique:
+                    flags.append("UNIQUE")
+                flag_str = f" ({', '.join(flags)})" if flags else ""
+                type_str = f"{c.data_type}({c.length})" if c.length else c.data_type
+                lines.append(f"  {c.name}: {type_str}{flag_str}")
+    elif n <= 30:
+        # Compact: only PK/FK/UNIQUE columns; skip plain ones
+        for t in tables:
+            lines.append(f"\n【{t.table_name}】{' — ' + t.description if t.description else ''} ({len(t.columns)} 欄)")
+            for c in t.columns:
+                if not (c.is_primary_key or c.is_foreign_key or c.is_unique):
+                    continue
+                flags = []
+                if c.is_primary_key:
+                    flags.append("PK")
+                if c.is_foreign_key and c.references:
+                    flags.append(f"FK→{c.references}")
+                if c.is_unique:
+                    flags.append("UNIQUE")
+                type_str = f"{c.data_type}({c.length})" if c.length else c.data_type
+                lines.append(f"  {c.name}: {type_str} ({', '.join(flags)})")
+    else:
+        # Ultra-compact: table name + column count + FK targets only
+        for t in tables:
+            fks = [f"{c.name}→{c.references}" for c in t.columns if c.is_foreign_key and c.references]
+            fk_str = f", FK: {', '.join(fks)}" if fks else ""
+            lines.append(f"  {t.table_name} ({len(t.columns)} 欄{fk_str})")
+
     lines.append("\n--- 現有結構結束 ---")
     return "\n".join(lines)
