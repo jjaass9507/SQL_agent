@@ -53,16 +53,20 @@ class Interviewer:
         non-None only when the LLM signals requirements are complete."""
         self._history.append({"role": "user", "content": user_message})
 
-        # question = system prompt + prior conversation history
+        # other_system_prompt = role instructions + conversation history (context)
         history_lines = "\n".join(
             f"[{'使用者' if h['role'] == 'user' else 'AI架構師'}]: {h['content']}"
             for h in self._history[:-1]
         )
-        question = SYSTEM_PROMPT
+        system_prompt = SYSTEM_PROMPT
         if history_lines:
-            question += f"\n\n--- 對話歷史 ---\n{history_lines}"
+            system_prompt += f"\n\n--- 對話歷史 ---\n{history_lines}"
 
-        response_text = self._api.chat(question=question, answer=user_message)
+        # other_human_prompt = current user message
+        response_text = self._api.chat(
+            system_prompt=system_prompt,
+            human_prompt=user_message,
+        )
 
         if not response_text:
             return "抱歉，無法取得回應，請稍後再試。", None
