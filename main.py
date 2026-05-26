@@ -3,8 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-if not os.getenv("ANTHROPIC_API_KEY"):
-    raise SystemExit("錯誤：請設定環境變數 ANTHROPIC_API_KEY（參考 .env.example）")
+for _var in ("PENSIEVE_TOKEN", "PENSIEVE_EMPNO"):
+    if not os.getenv(_var):
+        raise SystemExit(f"錯誤：請設定環境變數 {_var}（參考 .env.example）")
 
 from agents.orchestrator import Orchestrator
 
