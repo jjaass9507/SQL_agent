@@ -1,4 +1,5 @@
 import io
+import threading
 import zipfile
 from pathlib import Path
 
@@ -18,19 +19,22 @@ from web.session_store import (
     list_sessions,
     update_session,
     update_generation_status,
+    try_start_generation,
     GENERATION_FILES,
 )
 from web.generation_worker import run_generation
 
 _interviewer_store: dict[str, Interviewer] = {}
+_interviewer_lock = threading.Lock()
 
 
 def _get_interviewer(session_id: str) -> Interviewer:
-    if session_id not in _interviewer_store:
-        session = get_session(session_id)
-        context = session.get("context_text", "") if session else ""
-        _interviewer_store[session_id] = Interviewer(context=context)
-    return _interviewer_store[session_id]
+    with _interviewer_lock:
+        if session_id not in _interviewer_store:
+            session = get_session(session_id)
+            context = session.get("context_text", "") if session else ""
+            _interviewer_store[session_id] = Interviewer(context=context)
+        return _interviewer_store[session_id]
 
 
 # ── Page routes ────────────────────────────────────────
@@ -125,7 +129,8 @@ def api_import_db(session_id):
         "context_text": context_text,
     })
     # Reset the Interviewer instance so it picks up the new context on next chat
-    _interviewer_store.pop(session_id, None)
+    with _interviewer_lock:
+        _interviewer_store.pop(session_id, None)
     return jsonify({"imported": len(tables), "tables": [t.table_name for t in tables]})
 
 
@@ -218,12 +223,12 @@ def api_confirm(session_id):
     session = get_session(session_id)
     if not session:
         abort(404)
-    if session["phase"] != "confirming":
-        return jsonify({"error": "session not in confirming phase"}), 400
     if not session.get("tables"):
         return jsonify({"error": "no tables to generate"}), 400
 
-    update_session(session_id, {"phase": "generating"})
+    if not try_start_generation(session_id):
+        return jsonify({"error": "session not in confirming phase"}), 400
+
     run_generation(session_id)
     return jsonify({"status": "generating"})
 

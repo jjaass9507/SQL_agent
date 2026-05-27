@@ -29,18 +29,18 @@ def _parse_tables(json_str: str) -> list[TableSpec] | None:
         columns = [
             ColumnSpec(
                 name=c["name"],
-                data_type=c["data_type"],
+                data_type=c.get("data_type", "text"),
                 length=c.get("length"),
-                nullable=c["nullable"],
+                nullable=c.get("nullable", True),
                 default=c.get("default"),
-                description=c["description"],
-                is_primary_key=c["is_primary_key"],
-                is_foreign_key=c["is_foreign_key"],
+                description=c.get("description", ""),
+                is_primary_key=c.get("is_primary_key", False),
+                is_foreign_key=c.get("is_foreign_key", False),
                 references=c.get("references"),
-                is_unique=c["is_unique"],
-                is_indexed=c["is_indexed"],
+                is_unique=c.get("is_unique", False),
+                is_indexed=c.get("is_indexed", False),
             )
-            for c in t["columns"]
+            for c in t.get("columns", [])
         ]
         result.append(TableSpec(
             table_name=t["table_name"],

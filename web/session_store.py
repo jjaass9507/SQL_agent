@@ -65,6 +65,7 @@ def create_session(title: str, context_tables: list[dict] | None = None,
         "key_points": [],
         "outputs": {},
         "generation_status": {f: "waiting" for f in GENERATION_FILES},
+        "generation_errors": {},
         "context_tables": context_tables or [],   # existing DB tables as reference
         "context_text": context_text,             # formatted text for Interviewer
     }
@@ -139,7 +140,8 @@ def get_tables(session_id: str) -> list[TableSpec] | None:
     return _tables_from_json(session["tables"])
 
 
-def update_generation_status(session_id: str, filename: str, status: str, content: str | None = None) -> None:
+def update_generation_status(session_id: str, filename: str, status: str,
+                             content: str | None = None, error: str | None = None) -> None:
     with _lock_for(session_id):
         p = _path(session_id)
         if not p.exists():
@@ -148,7 +150,24 @@ def update_generation_status(session_id: str, filename: str, status: str, conten
         session["generation_status"][filename] = status
         if content is not None:
             session["outputs"][filename] = content
+        if error is not None:
+            session.setdefault("generation_errors", {})[filename] = error
         p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def try_start_generation(session_id: str) -> bool:
+    """Atomically transitions phase from 'confirming' to 'generating'.
+    Returns True on success, False if already past confirming phase."""
+    with _lock_for(session_id):
+        p = _path(session_id)
+        if not p.exists():
+            return False
+        session = json.loads(p.read_text(encoding="utf-8"))
+        if session.get("phase") != "confirming":
+            return False
+        session["phase"] = "generating"
+        p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
 
 
 def _write(session_id: str, session: dict) -> None:

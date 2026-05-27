@@ -73,9 +73,12 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
   "phase": "collecting | confirming | generating | done",
   "messages": [{"role": "user|ai", "content": "..."}],
   "tables": [ ...TableSpec JSON... ],
-  "key_points": ["使用者說的需求摘要"],
+  "key_points": ["AI 整合雙方對話的需求摘要"],
   "outputs": {"01_specification.md": "...", ...},
-  "generation_status": {"01_specification.md": "waiting|loading|done|failed", ...}
+  "generation_status": {"01_specification.md": "waiting|loading|done|failed", ...},
+  "generation_errors": {"03_ddl.sql": "錯誤訊息（失敗時才有）"},
+  "context_tables": [ ...從現有 DB 匯入的 TableSpec JSON... ],
+  "context_text":   "格式化後的現有 DB 結構文字（注入 Interviewer system prompt）"
 }
 ```
 
@@ -83,18 +86,31 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| `POST` | `/api/sessions` | 建立新 session |
+| `POST` | `/api/sessions` | 建立新 session；可帶 `db_url`、`db_schema` 同步匯入現有 DB 結構 |
 | `GET` | `/api/sessions` | 列出所有 sessions |
-| `GET` | `/api/sessions/<id>` | 取得 session 狀態（含 generation_status）|
+| `GET` | `/api/sessions/<id>` | 取得 session 狀態（含 generation_status、outputs）|
 | `POST` | `/api/sessions/<id>/messages` | 送出訊息，取得 AI 回覆 |
-| `POST` | `/api/sessions/<id>/confirm` | 確認需求，啟動背景產出 |
+| `POST` | `/api/sessions/<id>/confirm` | 確認需求，啟動背景產出（原子性防重複觸發）|
 | `GET` | `/api/sessions/<id>/outputs` | 取得四份文件內容 |
 | `GET` | `/api/sessions/<id>/outputs/zip` | 下載 zip |
+| `POST` | `/api/sessions/<id>/import-db` | 對已存在的 session 匯入（或重新匯入）PostgreSQL DB 結構 |
+
+### `web/db_introspect.py` — PostgreSQL 結構擷取
+
+負責連線 PostgreSQL 並查詢 `information_schema`：
+
+- `extract_schema(db_url, schema) -> (list[TableSpec], error_str)` — 連線並讀取所有 table/column 的 PK、FK、UNIQUE、INDEX 中繼資料
+- `format_context(tables) -> str` — 將 TableSpec 格式化為文字供 Interviewer system prompt 使用；自動依資料表數量分級：
+  - ≤10 張：完整欄位
+  - 11–30 張：僅 PK/FK/UNIQUE 欄
+  - >30 張：超精簡（表名 + 欄位數 + FK 指向）
 
 ### 並發安全
 
-每個 session 有一個 `threading.Lock`（由 `web/session_store.py` 管理），
-確保背景 Thread 更新 JSON 與 Flask request handler 讀取之間不產生競態。
+- 每個 session 有一個 `threading.Lock`（由 `web/session_store.py` 管理），確保背景 Thread 更新 JSON 與 Flask request handler 讀取之間不產生競態
+- `_interviewer_store` 由模組層級 `threading.Lock` 保護，防止同一 session 建立多個 Interviewer 實例
+- `try_start_generation()` 在單一鎖內原子性地將 phase 從 `confirming` 改為 `generating`，防止重複觸發文件產出
+- 四個 Writer 以 `ThreadPoolExecutor(max_workers=4)` 並行執行，互相獨立；各自的 `update_generation_status` 呼叫透過 per-session lock 保護
 
 ---
 

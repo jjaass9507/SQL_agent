@@ -15,8 +15,9 @@ const downloadZipBtn = document.getElementById('download-zip-btn');
 let currentDoc = '01_specification.md';
 let outputs = {};
 let pollTimer = null;
+let pollFailCount = 0;
 
-function updateCard(filename, status, content) {
+function updateCard(filename, status, content, error) {
   const info = FILE_INFO[filename];
   if (!info) return;
   const card = document.getElementById(info.cardId);
@@ -39,7 +40,8 @@ function updateCard(filename, status, content) {
       <div class="gen-loading-text">⟳ 正在生成 ${info.label}...</div>
       <div class="gen-loading-bar-bg"><div class="gen-loading-bar-fill"></div></div>`;
   } else if (status === 'failed') {
-    bodyEl.innerHTML = `<div class="gen-failed-text">✗ 產出失敗</div><button class="btn btn-ghost btn-sm" onclick="retryGeneration()">重試</button>`;
+    const errMsg = error ? escHtml(error.slice(0, 80)) : '';
+    bodyEl.innerHTML = `<div class="gen-failed-text">✗ 產出失敗${errMsg ? '：' + errMsg : ''}</div><div style="font-size:11px;color:var(--muted);margin-top:4px;">請重新整理頁面後再試</div>`;
   } else {
     bodyEl.innerHTML = `<div class="gen-waiting-text">等待產出...</div>`;
   }
@@ -66,10 +68,12 @@ async function poll() {
     const res = await fetch(`/api/sessions/${SESSION_ID}`);
     const session = await res.json();
     const genStatus = session.generation_status || {};
+    const genErrors = session.generation_errors || {};
     outputs = session.outputs || {};
+    pollFailCount = 0;
 
     Object.entries(genStatus).forEach(([filename, status]) => {
-      updateCard(filename, status, outputs[filename]);
+      updateCard(filename, status, outputs[filename], genErrors[filename]);
     });
     updateProgressBar(genStatus);
 
@@ -79,6 +83,13 @@ async function poll() {
     }
   } catch (e) {
     console.error('poll error', e);
+    pollFailCount++;
+    if (pollFailCount >= 3) {
+      clearInterval(pollTimer);
+      const bar = document.getElementById('progress-bar');
+      if (bar) bar.closest('.gen-progress-wrap').innerHTML =
+        '<div style="color:var(--error);font-size:13px;padding:8px 0;">⚠ 連線中斷，請重新整理頁面</div>';
+    }
   }
 }
 
@@ -116,7 +127,8 @@ function renderDoc(filename) {
   if (filename === '02_er_diagram.md') {
     const mermaidMatch = content.match(/```mermaid\n([\s\S]*?)```/);
     if (mermaidMatch) {
-      contentEl.innerHTML = `<div class="mermaid">${escHtml(mermaidMatch[1])}</div>`;
+      // Do NOT escHtml the mermaid source — the library needs raw syntax
+      contentEl.innerHTML = `<div class="mermaid">${mermaidMatch[1]}</div>`;
       mermaid.run({ nodes: contentEl.querySelectorAll('.mermaid') });
     } else {
       contentEl.innerHTML = `<pre>${escHtml(content)}</pre>`;
@@ -142,7 +154,7 @@ function renderMarkdown(md) {
   return escHtml(md)
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^### (.+)$/gm, '<h3 style="font-size:15px;margin:12px 0 6px;font-weight:700;">$3</h3>')
+    .replace(/^### (.+)$/gm, '<h3 style="font-size:15px;margin:12px 0 6px;font-weight:700;">$1</h3>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\n\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n)*)/g, buildTable)

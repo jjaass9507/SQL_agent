@@ -440,7 +440,11 @@ html, body {
   background: var(--accent-light);
   border-radius: 8px 2px 8px 8px;
 }
-.typing-dots { opacity: 0.4; letter-spacing: 6px; }
+@keyframes typing-pulse {
+  0%, 100% { opacity: 0.2; }
+  50%       { opacity: 1;   }
+}
+.typing-dots { letter-spacing: 6px; animation: typing-pulse 1.2s ease-in-out infinite; }
 
 /* ── Progress panel ── */
 .progress-panel {

@@ -1,4 +1,5 @@
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from web.session_store import get_tables, update_generation_status, update_session
 
@@ -29,16 +30,20 @@ def _generate(session_id: str) -> None:
         ("04_security_plan.md", SecurityWriter()),
     ]
 
-    for filename, writer in writers:
+    def run_one(filename: str, writer) -> None:
         update_generation_status(session_id, filename, "loading")
         try:
             content = writer.generate(tables)
             if content and content.strip():
                 update_generation_status(session_id, filename, "done", content)
             else:
-                update_generation_status(session_id, filename, "failed")
+                update_generation_status(session_id, filename, "failed",
+                                         error="Writer 回傳空內容")
         except Exception as e:
             print(f"[generation_worker] {filename} failed: {e}")
-            update_generation_status(session_id, filename, "failed")
+            update_generation_status(session_id, filename, "failed", error=str(e))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda args: run_one(*args), writers))
 
     update_session(session_id, {"phase": "done"})
