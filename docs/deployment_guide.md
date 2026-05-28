@@ -27,9 +27,11 @@ cp .env.example .env
 
 ```dotenv
 # ── Pensieve AI API（必填）──────────────────────────────
-PENSIEVE_API_TOKEN=<your-token>
-PENSIEVE_EMPNO=<your-empno>
-PENSIEVE_API_URL=https://pensieve.example.com/api
+PENSIEVE_TOKEN=your_token_here
+PENSIEVE_EMPNO=your_empno_here
+PENSIEVE_URL=https://pensieve.example.com/api/flow_chat/
+PENSIEVE_BUILDING=question
+PENSIEVE_VERIFY=false
 
 # ── Flask ──────────────────────────────────────────────
 FLASK_ENV=production        # development | production

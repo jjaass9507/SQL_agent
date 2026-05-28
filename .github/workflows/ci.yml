@@ -40,7 +40,7 @@ jobs:
 
       - name: Syntax check
         run: |
-          python -m pyflakes app.py web/ agents/ models/ utils/ || true
+          python -m pyflakes app.py web/ agents/ models/ utils/
           python -c "import ast, sys, pathlib
           errors = []
           for p in pathlib.Path('.').rglob('*.py'):

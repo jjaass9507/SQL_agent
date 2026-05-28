@@ -94,7 +94,8 @@ def _review(session_id: str) -> None:
         report = Reviewer().review(tables)
     except Exception as e:
         logger.error("review failed: %s", e, extra={"session_id": session_id})
-        report = f"審查過程發生錯誤：{e}"
+        update_session(session_id, {"phase": "review_failed"})
+        return
 
     update_session(session_id, {
         "phase": "review_done",

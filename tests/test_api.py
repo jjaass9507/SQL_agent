@@ -308,3 +308,74 @@ def test_regenerate_no_tables(client):
     session_id = _post_session(client).get_json()["id"]
     resp = client.post(f"/api/sessions/{session_id}/outputs/01_specification.md/regenerate")
     assert resp.status_code == 400
+
+
+# ── TC-API-20: mode validation ───────────────────────────
+
+def test_create_session_invalid_mode(client):
+    resp = client.post("/api/sessions", json={"title": "x", "mode": "hack"})
+    assert resp.status_code == 400
+    assert "mode" in resp.get_json()["error"]
+
+
+# ── TC-API-21: message length limit ─────────────────────
+
+def test_send_message_too_long(client):
+    session_id = _post_session(client).get_json()["id"]
+    resp = client.post(f"/api/sessions/{session_id}/messages",
+                       json={"content": "x" * 10_001})
+    assert resp.status_code == 400
+    assert "too long" in resp.get_json()["error"]
+
+
+# ── TC-API-22: 404 returns JSON ──────────────────────────
+
+def test_404_returns_json(client):
+    resp = client.get("/api/sessions/nonexistent-uuid")
+    assert resp.status_code == 404
+    data = resp.get_json()
+    assert data is not None
+    assert "error" in data
+
+
+# ── TC-API-23: restore clears outputs ───────────────────
+
+def test_restore_clears_outputs(client):
+    from web.session_store import set_tables, update_generation_status, get_session
+    session_id = _post_session(client).get_json()["id"]
+    table = _make_table()
+    set_tables(session_id, [table], ["v1"])
+    update_generation_status(session_id, "01_specification.md", "done", content="spec content")
+    set_tables(session_id, [table], ["v2"])
+
+    resp = client.post(f"/api/sessions/{session_id}/versions/1/restore")
+    assert resp.status_code == 200
+
+    s = get_session(session_id)
+    assert s["outputs"] == {}
+    assert s["generation_status"]["01_specification.md"] == "waiting"
+
+
+# ── TC-API-24: clear error on regen success ──────────────
+
+def test_clear_error_on_success(client):
+    from web.session_store import update_generation_status, get_session
+    session_id = _post_session(client).get_json()["id"]
+    update_generation_status(session_id, "01_specification.md", "failed", error="timeout")
+
+    update_generation_status(session_id, "01_specification.md", "done", content="ok")
+
+    s = get_session(session_id)
+    assert "01_specification.md" not in s.get("generation_errors", {})
+
+
+# ── TC-API-25: concurrent regen protection ───────────────
+
+def test_concurrent_regen_blocked(client):
+    from web.session_store import set_tables, update_generation_status
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    update_generation_status(session_id, "01_specification.md", "loading")
+
+    resp = client.post(f"/api/sessions/{session_id}/outputs/01_specification.md/regenerate")
+    assert resp.status_code == 409

@@ -274,6 +274,7 @@ html, body {
 .badge-inprogress { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 .badge-confirming { background: var(--warning-light); color: var(--warning); border-color: var(--warning); }
 .badge-done { background: var(--success-light); color: var(--success); border-color: var(--success); }
+.badge-failed { background: #fde8e8; color: var(--error); border-color: var(--error); }
 .badge-generating { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
 /* ── Search / Filter ── */
@@ -282,9 +283,14 @@ html, body {
   border-radius: 20px;
   padding: 4px 14px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--text);
   background: var(--bg);
+  outline: none;
+  min-width: 180px;
 }
+.search-box::placeholder { color: var(--muted); }
+.search-box:focus { border-color: var(--accent); }
+.nav-coming-soon { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
 .filter-chips { display: flex; gap: 5px; }
 .chip {
   padding: 3px 11px;

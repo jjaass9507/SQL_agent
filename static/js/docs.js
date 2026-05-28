@@ -141,8 +141,9 @@ function renderDoc(filename) {
   if (filename === '02_er_diagram.md') {
     const mermaidMatch = content.match(/```mermaid\n([\s\S]*?)```/);
     if (mermaidMatch) {
-      // Do NOT escHtml the mermaid source — the library needs raw syntax
-      contentEl.innerHTML = `<div class="mermaid">${mermaidMatch[1]}</div>`;
+      // Strip HTML tags to prevent injection; valid Mermaid syntax uses no angle brackets
+      const safeSrc = mermaidMatch[1].replace(/<[^>]*>/g, '');
+      contentEl.innerHTML = `<div class="mermaid">${safeSrc}</div>`;
       mermaid.run({ nodes: contentEl.querySelectorAll('.mermaid') });
     } else {
       contentEl.innerHTML = `<pre>${escHtml(content)}</pre>`;
@@ -193,14 +194,30 @@ document.querySelectorAll('.docs-toc-item').forEach(item => {
   item.addEventListener('click', () => renderDoc(item.dataset.doc));
 });
 
+function _copyText(text) {
+  const btn = document.getElementById('copy-btn');
+  function onSuccess() { btn.textContent = '✓ 已複製'; setTimeout(() => { btn.textContent = '📋 複製'; }, 1500); }
+  function onFail() { btn.textContent = '⚠ 複製失敗'; setTimeout(() => { btn.textContent = '📋 複製'; }, 2000); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onSuccess).catch(() => _execCopy(text, onSuccess, onFail));
+  } else {
+    _execCopy(text, onSuccess, onFail);
+  }
+}
+
+function _execCopy(text, onSuccess, onFail) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  try { document.execCommand('copy') ? onSuccess() : onFail(); } catch { onFail(); }
+  document.body.removeChild(ta);
+}
+
 // Copy button
 document.getElementById('copy-btn').addEventListener('click', () => {
-  const content = outputs[currentDoc] || '';
-  navigator.clipboard.writeText(content).then(() => {
-    const btn = document.getElementById('copy-btn');
-    btn.textContent = '✓ 已複製';
-    setTimeout(() => { btn.textContent = '📋 複製'; }, 1500);
-  });
+  _copyText(outputs[currentDoc] || '');
 });
 
 // Download single file

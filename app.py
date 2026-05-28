@@ -1,6 +1,7 @@
 import io
 import json as _json
 import logging
+import re
 import threading
 import zipfile
 from datetime import datetime, timezone
@@ -65,6 +66,18 @@ from web.generation_worker import run_generation, run_review, run_single_file
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
+
+
+def _sanitize_db_error(msg: str) -> str:
+    """Strip credentials and host details from DB error messages."""
+    msg = re.sub(r'postgresql://[^\s]+', 'postgresql://...', msg)
+    msg = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b', '...', msg)
+    return msg[:300]
+
+
+@app.errorhandler(404)
+def _not_found(e):
+    return jsonify({"error": "not found"}), 404
 
 
 def _get_interviewer(session_id: str) -> Interviewer:
@@ -150,6 +163,8 @@ def api_create_session():
     db_url = (data.get("db_url") or "").strip()
     db_schema = (data.get("db_schema") or "public").strip()
     mode = (data.get("mode") or "design").strip()
+    if mode not in ("design", "review"):
+        return jsonify({"error": "mode must be 'design' or 'review'"}), 400
 
     context_tables_json = []
     context_text = ""
@@ -166,7 +181,7 @@ def api_create_session():
     resp = dict(session)
 
     if db_error:
-        resp["db_error"] = db_error
+        resp["db_error"] = _sanitize_db_error(db_error)
         logger.warning("session created with db_error", extra={"session_id": session["id"], "mode": mode})
     elif db_url and context_tables_json:
         resp["db_imported"] = len(context_tables_json)
@@ -199,15 +214,20 @@ def api_import_db(session_id):
             "last_db_import": {"imported_at": imported_at, "table_count": 0, "error": error},
         })
         logger.error("import-db failed", extra={"session_id": session_id})
-        return jsonify({"error": error}), 400
+        return jsonify({"error": _sanitize_db_error(error)}), 400
 
     context_tables_json = [dataclasses.asdict(t) for t in tables]
     context_text = format_context(tables)
-    update_session(session_id, {
+    import_updates: dict = {
         "context_tables": context_tables_json,
         "context_text": context_text,
         "last_db_import": {"imported_at": imported_at, "table_count": len(tables), "error": None},
-    })
+    }
+    # If the user re-imports while the schema is confirmed, reset to collecting
+    # so they can review the new context before re-confirming
+    if session.get("phase") == "confirming":
+        import_updates.update({"phase": "collecting", "tables": None, "key_points": []})
+    update_session(session_id, import_updates)
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
     logger.info("import-db succeeded", extra={"session_id": session_id, "table_count": len(tables)})
@@ -268,6 +288,8 @@ def api_send_message(session_id):
     content = (data.get("content") or "").strip()
     if not content:
         return jsonify({"error": "content required"}), 400
+    if len(content) > 10_000:
+        return jsonify({"error": "content too long (max 10,000 characters)"}), 400
 
     if session["phase"] == "confirming":
         update_session(session_id, {"phase": "collecting"})
@@ -365,6 +387,8 @@ def api_regenerate_output(session_id, filename):
         return jsonify({"error": "invalid filename"}), 400
     if not session.get("tables"):
         return jsonify({"error": "no tables"}), 400
+    if session.get("generation_status", {}).get(filename) == "loading":
+        return jsonify({"error": "already regenerating"}), 409
     run_single_file(session_id, filename)
     logger.info("file regeneration started", extra={"session_id": session_id, "output_file": filename})
     return jsonify({"status": "regenerating"})

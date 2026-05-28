@@ -1,4 +1,5 @@
 let currentFilter = 'all';
+let currentSearch = '';
 let allSessions = [];
 
 async function loadSessions() {
@@ -15,9 +16,13 @@ async function loadSessions() {
 
 function renderSessions() {
   const grid = document.getElementById('sessions-grid');
-  const filtered = currentFilter === 'all'
+  let filtered = currentFilter === 'all'
     ? allSessions
     : allSessions.filter(s => phaseToFilter(s.phase) === currentFilter);
+  if (currentSearch) {
+    const q = currentSearch.toLowerCase();
+    filtered = filtered.filter(s => s.title.toLowerCase().includes(q));
+  }
 
   if (filtered.length === 0) {
     const emptyMsg = currentFilter === 'all'
@@ -87,7 +92,7 @@ function buildCard(s) {
       <div class="card-actions">
         <a href="${href}" class="btn btn-primary btn-sm">${actionLabel}</a>
         <button class="btn btn-ghost btn-sm" onclick="handleRenameClick(event,'${s.id}')" title="重新命名">✏</button>
-        <button class="btn btn-ghost btn-sm" onclick="handleDeleteClick(event,'${s.id}',${JSON.stringify(s.title)})">🗑</button>
+        <button class="btn btn-ghost btn-sm" onclick="handleDeleteClick(event,'${s.id}')">🗑</button>
       </div>
     </div>`;
 }
@@ -95,7 +100,7 @@ function buildCard(s) {
 // Two-click delete: first click arms, second click within 3s confirms
 const _deletePending = {};
 
-function handleDeleteClick(e, sessionId, title) {
+function handleDeleteClick(e, sessionId) {
   e.stopPropagation();
   const btn = e.currentTarget;
   if (_deletePending[sessionId]) {
@@ -189,13 +194,24 @@ function handleRenameClick(e, sessionId) {
 }
 
 function updateResumeBanner() {
-  const inprog = allSessions.find(s => s.phase === 'collecting' || s.phase === 'reviewing');
+  const inprogList = allSessions.filter(s => s.phase === 'collecting' || s.phase === 'reviewing');
   const banner = document.getElementById('resume-banner');
-  if (!inprog) { banner.classList.add('hidden'); return; }
-  const isReview = inprog.phase === 'reviewing';
-  document.getElementById('resume-banner-text').innerHTML =
-    `⟳ <strong>${escHtml(inprog.title)}</strong> ${isReview ? '審查中 — AI 正在分析資料庫結構' : '進行中 — 需求收集對話待完成'}`;
-  document.getElementById('resume-banner-link').href = sessionHref(inprog);
+  const linkEl = document.getElementById('resume-banner-link');
+  if (!inprogList.length) { banner.classList.add('hidden'); return; }
+  if (inprogList.length === 1) {
+    const s = inprogList[0];
+    const isReview = s.phase === 'reviewing';
+    document.getElementById('resume-banner-text').innerHTML =
+      `⟳ <strong>${escHtml(s.title)}</strong> ${isReview ? '審查中' : '進行中 — 需求收集待完成'}`;
+    linkEl.href = sessionHref(s);
+    linkEl.textContent = isReview ? '繼續審查 →' : '繼續對話 →';
+  } else {
+    document.getElementById('resume-banner-text').innerHTML =
+      `⟳ 有 <strong>${inprogList.length}</strong> 個進行中的專案`;
+    linkEl.href = '#';
+    linkEl.textContent = '查看全部';
+    linkEl.onclick = e => { e.preventDefault(); currentFilter = 'inprogress'; document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.filter === 'inprogress')); renderSessions(); };
+  }
   banner.classList.remove('hidden');
 }
 
@@ -331,6 +347,15 @@ async function createSession() {
       setTimeout(() => errEl.remove(), 4000);
     }
   }
+}
+
+// Search
+const searchEl = document.getElementById('session-search');
+if (searchEl) {
+  searchEl.addEventListener('input', () => {
+    currentSearch = searchEl.value.trim();
+    renderSessions();
+  });
 }
 
 loadSessions();

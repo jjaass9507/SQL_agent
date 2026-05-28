@@ -54,7 +54,7 @@
 1. **Session 所有權**：session 建立時記錄 `user_id`，所有後續操作驗證 `session.user_id == current_user.id`
 2. **Admin bypass**：Admin 角色可存取任意 session，用於支援與除錯
 3. **DB 連線字串**：儲存時加密，只在後端使用，不回傳至前端
-4. **Session 刪除**：目前不提供使用者刪除（避免誤刪），由 Admin 操作
+4. **Session 刪除**：v0.5 提供硬刪除（`DELETE /api/sessions/<id>` + 首頁兩次點擊確認）。刪除後無法復原，未來版本可考慮軟刪除或回收站機制。
 
 ---
 

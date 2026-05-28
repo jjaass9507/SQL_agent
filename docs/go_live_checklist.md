@@ -85,7 +85,7 @@
 - [ ] `README.md` 說明本地啟動步驟（新開發者可依此執行）
 - [ ] `docs/deployment_guide.md` 說明生產部署步驟
 - [ ] `docs/api_spec.yaml` 反映所有現行端點
-- [ ] `docs/architecture.md` 反映最新模組結構
+- [ ] `docs/system_architecture.md` 反映最新模組結構
 - [ ] 維運 Runbook（`docs/ops_runbook.md`）已完成
 
 ---

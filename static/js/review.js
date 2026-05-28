@@ -37,6 +37,9 @@ async function poll() {
       clearInterval(pollTimer);
       const report = (session.outputs || {})['05_review_report.md'] || '（無報告內容）';
       showReport(report);
+    } else if (session.phase === 'review_failed') {
+      clearInterval(pollTimer);
+      showReviewFailed();
     }
   } catch (e) {
     console.error('poll error', e);
@@ -108,8 +111,42 @@ function renderMarkdown(md) {
     .replace(/\n/g, '<br>');
 }
 
+function showReviewFailed() {
+  topbarBadge.textContent = '✗ 審查失敗';
+  topbarBadge.className = 'badge badge-failed';
+  loadingView.innerHTML = `<div style="text-align:center;padding:40px;color:var(--error);">
+    <div style="font-size:32px;margin-bottom:10px;">✗</div>
+    <div style="font-weight:600;margin-bottom:8px;">審查過程發生錯誤</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;">AI API 可能暫時無法使用，請稍後重試</div>
+    <button onclick="restartReview()" class="btn btn-primary btn-sm">↻ 重新審查</button>
+    <a href="/" class="btn btn-ghost btn-sm" style="margin-left:8px;">← 返回首頁</a>
+  </div>`;
+  loadingView.classList.remove('hidden');
+  doneView.classList.add('hidden');
+}
+
+async function restartReview() {
+  try {
+    const res = await fetch(\`/api/sessions/\${SESSION_ID}/review/restart\`, { method: 'POST' });
+    if (!res.ok) throw new Error();
+    topbarBadge.textContent = '⟳ 分析中';
+    topbarBadge.className = 'badge badge-inprogress';
+    loadingView.innerHTML = `<div class="review-loading">
+      <span class="review-loading-spin">⟳</span>
+      <div style="font-size:15px;font-weight:600;">AI 正在重新審查資料庫結構...</div>
+    </div>`;
+    loadingView.classList.remove('hidden');
+    doneView.classList.add('hidden');
+    pollTimer = setInterval(poll, 2000);
+  } catch {
+    location.reload();
+  }
+}
+
 if (INITIAL_PHASE === 'review_done') {
   poll(); // single fetch to get report immediately
+} else if (INITIAL_PHASE === 'review_failed') {
+  showReviewFailed();
 } else {
   pollTimer = setInterval(poll, 2000);
   poll();
