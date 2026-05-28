@@ -260,6 +260,8 @@ html, body {
 .btn-ghost:hover:not(:disabled) { background: var(--bg); }
 .btn-success { background: var(--success); color: #fff; border-color: #2a6a2f; }
 .btn-success:hover:not(:disabled) { opacity: 0.9; }
+.btn-danger { background: #fff; color: var(--error); border-color: var(--error); }
+.btn-danger:hover:not(:disabled) { background: var(--error); color: #fff; }
 
 /* ── Badge ── */
 .badge {

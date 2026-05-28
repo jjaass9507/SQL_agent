@@ -142,6 +142,18 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+    delete:
+      tags: [sessions]
+      summary: Delete a session permanently
+      operationId: deleteSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: Session deleted successfully
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/sessions/{session_id}/import-db:
     post:
       tags: [sessions]

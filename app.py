@@ -49,6 +49,7 @@ from agents.interviewer import Interviewer
 from web.session_store import (
     add_message,
     create_session,
+    delete_session,
     get_session,
     get_tables,
     list_sessions,
@@ -227,6 +228,16 @@ def api_get_session(session_id):
     if not session:
         abort(404)
     return jsonify(session)
+
+
+@app.delete("/api/sessions/<session_id>")
+def api_delete_session(session_id):
+    if not delete_session(session_id):
+        abort(404)
+    with _interviewer_lock:
+        _interviewer_store.pop(session_id, None)
+    logger.info("session deleted", extra={"session_id": session_id})
+    return "", 204
 
 
 @app.post("/api/sessions/<session_id>/messages")

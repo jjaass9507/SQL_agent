@@ -86,9 +86,50 @@ function buildCard(s) {
       </div>
       <div class="card-actions">
         <a href="${href}" class="btn btn-primary btn-sm">${actionLabel}</a>
-        ${isDone ? '' : `<a href="${href}" class="btn btn-ghost btn-sm">繼續</a>`}
+        <button class="btn btn-ghost btn-sm" onclick="handleDeleteClick(event,'${s.id}',${JSON.stringify(s.title)})">🗑</button>
       </div>
     </div>`;
+}
+
+// Two-click delete: first click arms, second click within 3s confirms
+const _deletePending = {};
+
+function handleDeleteClick(e, sessionId, title) {
+  e.stopPropagation();
+  const btn = e.currentTarget;
+  if (_deletePending[sessionId]) {
+    clearTimeout(_deletePending[sessionId]);
+    delete _deletePending[sessionId];
+    executeDelete(sessionId, btn);
+  } else {
+    btn.textContent = '確認刪除？';
+    btn.className = 'btn btn-danger btn-sm';
+    _deletePending[sessionId] = setTimeout(() => {
+      delete _deletePending[sessionId];
+      btn.textContent = '🗑';
+      btn.className = 'btn btn-ghost btn-sm';
+    }, 3000);
+  }
+}
+
+async function executeDelete(sessionId, btn) {
+  btn.disabled = true;
+  btn.textContent = '刪除中...';
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('delete failed');
+    allSessions = allSessions.filter(s => s.id !== sessionId);
+    renderSessions();
+    updateResumeBanner();
+  } catch {
+    btn.disabled = false;
+    btn.textContent = '刪除失敗';
+    btn.className = 'btn btn-danger btn-sm';
+    setTimeout(() => {
+      btn.textContent = '🗑';
+      btn.className = 'btn btn-ghost btn-sm';
+    }, 2000);
+  }
 }
 
 function updateResumeBanner() {

@@ -207,6 +207,18 @@ def try_start_generation(session_id: str) -> bool:
         return True
 
 
+def delete_session(session_id: str) -> bool:
+    """Delete a session's JSON file. Returns True if deleted, False if not found."""
+    with _lock_for(session_id):
+        p = _path(session_id)
+        if not p.exists():
+            return False
+        p.unlink()
+    with _locks_guard:
+        _locks.pop(session_id, None)
+    return True
+
+
 def _write(session_id: str, session: dict) -> None:
     _path(session_id).write_text(
         json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8"

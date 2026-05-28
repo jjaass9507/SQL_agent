@@ -204,3 +204,26 @@ def test_restore_version_reverts_tables(client):
     session = get_session(session_id)
     assert session["phase"] == "confirming"
     assert session["key_points"] == ["v1 point"]
+
+
+# ── TC-API-15: Delete session ────────────────────────────
+
+def test_delete_session(client):
+    session_id = _post_session(client, "To Delete").get_json()["id"]
+
+    resp = client.delete(f"/api/sessions/{session_id}")
+    assert resp.status_code == 204
+
+    # Session is gone
+    assert client.get(f"/api/sessions/{session_id}").status_code == 404
+
+    # No longer in list
+    sessions = client.get("/api/sessions").get_json()
+    assert not any(s["id"] == session_id for s in sessions)
+
+
+# ── TC-API-16: Delete non-existent session ───────────────
+
+def test_delete_nonexistent_session(client):
+    resp = client.delete("/api/sessions/00000000-0000-0000-0000-000000000000")
+    assert resp.status_code == 404
