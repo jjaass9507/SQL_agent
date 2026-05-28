@@ -10,8 +10,8 @@
         ▼                               ▼
 ┌───────────────────┐        ┌─────────────────────┐
 │   Flask (app.py)  │        │  Orchestrator        │
-│   7 REST endpoints│        │  (CLI 狀態機)        │
-│   4 HTML pages    │        └──────────┬──────────┘
+│   9 REST endpoints│        │  (CLI 狀態機)        │
+│   5 HTML pages    │        └──────────┬──────────┘
 └────────┬──────────┘                   │
          │                              │
          ▼                              │
@@ -25,42 +25,68 @@
                        │ 共用核心
                        ▼
         ┌──────────────┴──────────────┐
-        │ 需求收集                     │ 文件產生
+        │ 需求收集                     │ 文件產生 / 審查
         ▼                             ▼
-┌──────────────┐  ┌────────────────────────────────┐
-│ Interviewer  │  │ SpecWriter     → 01_spec.md     │
-│              │  │ DiagramWriter  → 02_diagram.md  │
-│ 追問欄位細節  │  │ DDLWriter      → 03_ddl.sql     │
-│ XML tag 提取 │  │ SecurityWriter → 04_security.md │
-│ → TableSpec  │  └────────────────────────────────┘
-└──────────────┘
+┌──────────────┐  ┌──────────────────────────────────────┐
+│ Interviewer  │  │ SpecWriter     → 01_spec.md           │
+│              │  │ DiagramWriter  → 02_diagram.md        │
+│ 追問欄位細節  │  │ DDLWriter      → 03_ddl.sql           │
+│ XML tag 提取 │  │ SecurityWriter → 04_security.md       │
+│ → TableSpec  │  ├──────────────────────────────────────┤
+└──────────────┘  │ Reviewer       → 05_review_report.md │
+                  │ （僅 review 模式）                    │
+                  └──────────────────────────────────────┘
 ```
 
 ---
 
 ## 網頁平台架構（`app.py` + `web/`）
 
-### Session 生命週期
+### Session 模式與生命週期
+
+網頁平台支援兩種 session 模式，由 `POST /api/sessions` 的 `mode` 欄位決定：
+
+#### 設計模式（`mode: "design"`，預設）
 
 ```
-POST /api/sessions
-  → 建立 data/{uuid}.json，phase="collecting"
+POST /api/sessions  (可帶 db_url 匯入現有 DB 作參考)
+  → phase="collecting"
 
 POST /api/sessions/{id}/messages  (重複多次)
-  → Interviewer.chat() → 更新 messages[]
-  → tables_ready=true → phase="confirming"，寫入 tables[] + key_points[]
+  → Interviewer.chat() 解析 <TABLE_SPECS> + <REQUIREMENTS_SUMMARY>
+  → tables_ready=true → phase="confirming"，寫入 tables[] + key_points[] + table_versions[]
 
-POST /api/sessions/{id}/confirm
+  （每次 set_tables 自動快照版本至 table_versions，最多保留 10 個）
+
+POST /api/sessions/{id}/versions/{n}/restore
+  → 原子性還原至第 n 版，phase 重設為 "confirming"
+
+POST /api/sessions/{id}/confirm  （原子性防重複，try_start_generation）
   → phase="generating"，啟動 generation_worker Thread
 
-  Thread 執行中（每完成一份更新 generation_status + outputs）：
-    SpecWriter   → generation_status["01_spec.md"] = "done"
-    DiagramWriter → ...
-    DDLWriter     → ...
-    SecurityWriter → phase="done"
+  Thread 以 ThreadPoolExecutor(max_workers=4) 並行執行：
+    SpecWriter / DiagramWriter / DDLWriter / SecurityWriter
+    → 各自更新 generation_status[filename] + outputs[filename]
+  → 全部完成後 phase="done"
 
 GET /api/sessions/{id}  (前端每 2 秒輪詢)
-  → 回傳 generation_status，前端更新進度卡
+  → 回傳 generation_status + generation_errors，前端更新進度卡
+```
+
+#### 審查模式（`mode: "review"`）
+
+```
+POST /api/sessions  (必須帶 db_url)
+  → 匯入現有 DB → context_tables[]
+  → phase="reviewing"
+  → 立即啟動 run_review() 背景 Thread
+
+  Thread：
+    Reviewer.review(context_tables) → markdown 報告
+  → phase="review_done"，outputs["05_review_report.md"] = 報告
+
+GET /api/sessions/{id}  (前端每 2 秒輪詢)
+  → phase="review_done" 時前端渲染報告
 ```
 
 ### Session JSON 結構（`data/{id}.json`）
@@ -70,10 +96,19 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
   "id": "uuid",
   "title": "...",
   "created_at": "ISO8601",
-  "phase": "collecting | confirming | generating | done",
+  "mode": "design | review",
+  "phase": "collecting | confirming | generating | done | reviewing | review_done",
   "messages": [{"role": "user|ai", "content": "..."}],
-  "tables": [ ...TableSpec JSON... ],
+  "tables": [ ...TableSpec JSON...（設計模式最新版本） ],
   "key_points": ["AI 整合雙方對話的需求摘要"],
+  "table_versions": [
+    {
+      "version": 1,
+      "created_at": "ISO8601",
+      "tables": [ ...TableSpec JSON... ],
+      "key_points": [...]
+    }
+  ],
   "outputs": {"01_specification.md": "...", ...},
   "generation_status": {"01_specification.md": "waiting|loading|done|failed", ...},
   "generation_errors": {"03_ddl.sql": "錯誤訊息（失敗時才有）"},
@@ -86,14 +121,16 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| `POST` | `/api/sessions` | 建立新 session；可帶 `db_url`、`db_schema` 同步匯入現有 DB 結構 |
-| `GET` | `/api/sessions` | 列出所有 sessions |
+| `POST` | `/api/sessions` | 建立新 session；可帶 `db_url`、`db_schema`、`mode` |
+| `GET` | `/api/sessions` | 列出所有 sessions（含 mode 欄位） |
 | `GET` | `/api/sessions/<id>` | 取得 session 狀態（含 generation_status、outputs）|
 | `POST` | `/api/sessions/<id>/messages` | 送出訊息，取得 AI 回覆 |
 | `POST` | `/api/sessions/<id>/confirm` | 確認需求，啟動背景產出（原子性防重複觸發）|
-| `GET` | `/api/sessions/<id>/outputs` | 取得四份文件內容 |
+| `GET` | `/api/sessions/<id>/outputs` | 取得文件內容 |
 | `GET` | `/api/sessions/<id>/outputs/zip` | 下載 zip |
 | `POST` | `/api/sessions/<id>/import-db` | 對已存在的 session 匯入（或重新匯入）PostgreSQL DB 結構 |
+| `GET` | `/api/sessions/<id>/versions` | 列出所有設計版本的摘要（version, created_at, table_count）|
+| `POST` | `/api/sessions/<id>/versions/<n>/restore` | 原子性還原至第 n 版，phase 重設為 "confirming" |
 
 ### `web/db_introspect.py` — PostgreSQL 結構擷取
 
@@ -105,6 +142,16 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
   - 11–30 張：僅 PK/FK/UNIQUE 欄
   - >30 張：超精簡（表名 + 欄位數 + FK 指向）
 
+### `web/schema_diff.py` — Schema 差異比對
+
+- `compute_diff(designed, existing) -> dict` — 比較設計中的 `list[TableSpec]` 與現有 DB 的 `list[TableSpec]`，回傳：
+  - `has_changes`: bool
+  - `new_tables`: 設計有、DB 無
+  - `dropped_tables`: DB 有、設計未包含
+  - `modified_tables`: 同名資料表中有欄位增減或型態變更（含 added_columns / removed_columns / changed_columns）
+  - `unchanged_tables`: 無差異
+- 差異結果由 `confirm_page()` 計算後傳給 `confirm.html` 渲染
+
 ### 並發安全
 
 - 每個 session 有一個 `threading.Lock`（由 `web/session_store.py` 管理），確保背景 Thread 更新 JSON 與 Flask request handler 讀取之間不產生競態
@@ -115,32 +162,6 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
 ---
 
 ## CLI 架構（`main.py` + `agents/orchestrator.py`）
-
----
-
-## 資料流
-
-所有模組共用同一個資料模型，資料只往下流，不回流：
-
-```
-使用者文字輸入
-    → Interviewer.chat()
-        → PensieveAPI.chat(question, answer)
-        → 解析 <TABLE_SPECS> XML tag
-    → list[TableSpec]
-        → SpecWriter.generate(tables)   → str (Markdown)
-        → DiagramWriter.generate(tables) → str (Markdown)
-        → DDLWriter.generate(tables)     → str (SQL)
-        → SecurityWriter.generate(tables)→ str (Markdown)
-    → file_writer.write_outputs()
-        → output/{timestamp}/*.md /*.sql
-```
-
----
-
-## Agent 角色
-
-### Orchestrator（`agents/orchestrator.py`）
 
 狀態機管理者，不直接呼叫 API。
 
@@ -162,16 +183,49 @@ Phase.GENERATING
 
 ---
 
+## 資料流
+
+```
+【設計模式】
+使用者文字輸入
+    → Interviewer.chat()
+        → PensieveAPI.chat(question, answer)
+        → 解析 <TABLE_SPECS> + <REQUIREMENTS_SUMMARY> XML tags
+    → (reply_text, list[TableSpec], list[str] summary)
+        ↓ 並行（ThreadPoolExecutor max_workers=4）
+        ├─ SpecWriter.generate(tables)    → str (Markdown)
+        ├─ DiagramWriter.generate(tables) → str (Markdown)
+        ├─ DDLWriter.generate(tables)     → str (SQL)
+        └─ SecurityWriter.generate(tables)→ str (Markdown)
+    → outputs["01..04"] + phase="done"
+
+【審查模式】
+現有 DB
+    → db_introspect.extract_schema()
+    → list[TableSpec]  （存為 context_tables）
+    → Reviewer.review(tables)
+        → PensieveAPI.chat(一次呼叫)
+    → str (Markdown 審查報告)
+    → outputs["05_review_report.md"] + phase="review_done"
+```
+
+---
+
+## Agent 角色
+
 ### Interviewer（`agents/interviewer.py`）
 
 - 維護本地 `_history`（`list[dict]`），記錄每輪對話
-- 每次 API 呼叫傳入：
-  - `question` = system prompt + 所有歷史對話
-  - `answer` = 本輪使用者輸入
-- 當需求完整時，LLM 在回覆末尾附加 `<TABLE_SPECS>...</TABLE_SPECS>` JSON
-- Regex 解析後轉換為 `list[TableSpec]`，回傳給 Orchestrator
+- context_text（現有 DB 結構）只在第一輪對話時注入 system prompt，後續省略以節省 token
+- 當需求完整時，LLM 在回覆前附加 `<REQUIREMENTS_SUMMARY>`（3–6 條整合摘要），再附加 `<TABLE_SPECS>` JSON
+- 回傳 `(reply_text, list[TableSpec] | None, list[str] summary)`
 
----
+### Reviewer（`agents/reviewer.py`）
+
+- 單次 API 呼叫，分析匯入的現有 DB 結構
+- 回傳四段 Markdown 報告：設計一致性、資料完整性、效能考量、安全性
+- 每段 3–5 條建議，格式 `- **資料表名**（欄位名）：問題 → 建議`
+- 報告末尾含 `**整體評分：X/10**` 與 2–3 句總評
 
 ### Writers（`agents/writers/`）
 
@@ -241,53 +295,20 @@ payload = {
 
 ### `01_specification.md` — 規格書與資料字典
 
-每個資料表產出一個 Markdown 表格：
-
-```markdown
-## 資料表：`orders`
-**說明**：訂單主表
-
-| 欄位名稱 | 資料型態 | 長度 | 允許 NULL | 預設值 | PK | FK | UNIQUE | INDEX | 說明 |
-|----------|----------|------|-----------|--------|----|----|--------|-------|------|
-| `id`     | UUID     |      | 否        |        | ✓  |    |        |       | 訂單 ID |
-```
+每個資料表產出一個 Markdown 表格（欄位名稱、型態、長度、NULL、預設值、PK/FK/UNIQUE/INDEX 旗標、說明）。
 
 ### `02_er_diagram.md` — ER Diagram
 
-包含設計說明文字 + Mermaid 程式碼區塊，可直接貼到 [mermaid.live](https://mermaid.live) 預覽：
-
-````markdown
-```mermaid
-erDiagram
-    orders {
-        UUID id PK
-        UUID user_id FK
-        ...
-    }
-    orders ||--o{ order_items : "包含"
-```
-````
+包含設計說明文字 + Mermaid 程式碼區塊，網頁平台直接渲染，也可貼到 [mermaid.live](https://mermaid.live) 預覽。
 
 ### `03_ddl.sql` — DDL 腳本
 
-依序包含四個區塊：
-
-```sql
--- === 建立腳本 ===
-CREATE TABLE orders ( ... );
-COMMENT ON COLUMN orders.id IS '訂單唯一識別碼';
-
--- === 索引建立 ===
-CREATE INDEX idx_orders_user_id ON orders(user_id);
-
--- === Migration 腳本 ===
-CREATE TABLE IF NOT EXISTS orders ( ... );
--- 回滾：DROP TABLE IF EXISTS orders;
-
--- === Seed Data ===
-INSERT INTO orders VALUES (...);
-```
+依序包含四個區塊：建立腳本（含 COMMENT）、索引建立、Migration 腳本（含回滾）、Seed Data。
 
 ### `04_security_plan.md` — 效能與安全規劃書
 
 六個章節：索引策略、查詢效能建議、分區策略、存取控制（含 GRANT 範例）、敏感欄位安全、備份與維運建議。
+
+### `05_review_report.md` — 現有 DB 審查報告（審查模式）
+
+四個段落：設計一致性、資料完整性、效能考量、安全性，各含 3–5 條具體建議。報告末尾含整體評分（X/10）與總評。
