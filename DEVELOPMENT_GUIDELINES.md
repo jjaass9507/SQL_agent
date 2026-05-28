@@ -1,206 +1,412 @@
 # DEVELOPMENT_GUIDELINES.md
 
-Project-specific development rules for SQL Agent. Applies to all feature work, maintenance, and extensions.
+Guidelines for building large-scale web platforms from inception to operations.
+These rules apply across the full lifecycle: planning, design, development, testing, deployment, and maintenance.
 
-**Stack:** Python 3.11 / Flask / Jinja2 / Vanilla JS — AI via Pensieve API (internal LLM gateway).
+**Goal:** Every phase produces verifiable output. Nothing proceeds on assumptions.
 
 ---
 
-## 1. Before You Start
+## 1. Project Initiation
 
-**Clarify scope before touching code.**
+**Define why before defining what.**
 
-For every feature or fix:
-- State what problem this solves and what "done" looks like.
-- Check if the change affects session JSON structure — if yes, add a default in `create_session()` and read with `.get("field", default)`.
-- Check if the change affects API response shape — if yes, coordinate with callers.
+Before any design or code:
+- State the project background, objectives, and target users.
+- Define the problem being solved and the expected outcome.
+- Set the project scope explicitly — and list what is out of scope.
+- Identify timeline, team size, budget constraints, and success criteria.
 
-Pre-implementation checklist:
-```
-□ What is the minimum change required?
-□ Does this touch session data structure?
-□ Does this add or change an API endpoint?
-□ Does this affect frontend JS?
-□ Does this need new tests?
-```
+Required outputs:
+- Project charter
+- Scope statement
+- Stakeholder list
+- Preliminary timeline
+- Initial feature list
 
-## 2. Layer Boundaries
+The test: Can a new team member read these documents and explain the project in five minutes?
 
-**Each layer owns one responsibility. Don't cross the lines.**
+## 2. Requirements Analysis
 
-- `app.py` — URL routing, request parsing, response formatting. No business logic. No direct DB access.
-- `web/` — Session management, generation coordination, DB introspection. No direct AI API calls.
-- `agents/` — AI conversation logic, requirement extraction, document writing. No direct session file access.
-- `models/` — Data structure definitions (dataclasses only). No business logic.
-- `utils/` — HTTP wrapper, file I/O. Stateless.
-- `templates/` — HTML structure and Jinja2 rendering. No business logic.
-- `static/js/` — Page interactions, API calls. No direct session data manipulation.
+**Inventory everything before designing anything.**
 
-When adding a session field:
-1. Add a default in `web/session_store.py` → `create_session()`
-2. Read with `.get("field", default)` everywhere — never assume the key exists
-3. Update the Session Field Reference below
+Collect requirements across three dimensions:
 
-## 3. API Design
+User requirements:
+- User roles and use cases
+- Workflows, query needs, edit needs
+- Import / export / notification needs
 
-**Consistent naming. Consistent responses. No surprises.**
+Data requirements:
+- Data sources, formats, and field definitions
+- Update frequency, data owners, cleaning rules
+- Historical data retention needs
 
-URL structure:
-```
-GET    /api/sessions                    # list
-POST   /api/sessions                    # create
-GET    /api/sessions/<id>               # read
-POST   /api/sessions/<id>/messages      # sub-resource action
-POST   /api/sessions/<id>/confirm       # named action (verb)
-GET    /api/sessions/<id>/outputs       # sub-resource read
-GET    /api/sessions/<id>/outputs/zip   # derived resource
-```
+Permission requirements:
+- Which roles can view, create, edit, and delete which data
+- Admin configuration scope
 
-Responses:
-- Success: return the data object directly. Never wrap in `{ "data": ... }`.
-- Error: always `{ "error": "human-readable message" }` with the right status code.
-- `201` for creates, `400` for bad input, `404` for missing resources, `500` for server faults (log these).
+Required outputs:
+- Requirements specification
+- User stories
+- Feature list
+- Permission matrix
+- Data source inventory
+- Workflow diagrams
 
-Never:
-- Return a Python exception message or traceback to the frontend.
-- Return large text fields (AI-generated documents) in list endpoints — only in single-resource endpoints.
-- Skip pagination for list endpoints that could exceed 100 items (`page` / `per_page`).
+Never start system design until requirements are signed off. Undiscovered requirements discovered in development cost 10× more to fix.
 
-## 4. Session Field Reference
+## 3. System Architecture
 
-Sessions are stored in `data/{session_id}.json`.
+**Design the skeleton before adding muscle.**
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | str | UUID, unique session identifier |
-| `title` | str | User-provided design title |
-| `mode` | str | `"design"` or `"review"` |
-| `phase` | str | `collecting` → `confirming` → `generating` → `done` |
-| `messages` | list | Chat history `[{role, content, created_at}]` |
-| `tables` | list | Confirmed TableSpec objects (JSON) |
-| `context_tables` | list | Imported existing DB structure |
-| `context_text` | str | Existing DB description sent to AI |
-| `key_points` | list | AI-extracted requirements summary |
-| `outputs` | dict | Generated documents `{"filename": "content"}` |
-| `generation_status` | dict | Per-document generation status |
-| `table_versions` | list | Design version snapshots |
-| `created_at` | str | ISO 8601 creation time |
-| `updated_at` | str | ISO 8601 last update time |
+Define each layer explicitly:
 
-## 5. Frontend Rules
+Frontend:
+- Page structure, UI components, API integration pattern
+- State management, error display, loading states, responsive design
 
-**One JS file per page. Errors must be visible. Polling must stop.**
+Backend:
+- API structure, business logic, auth/permission layer
+- File handling, scheduled jobs, logging
 
-Each JS file handles exactly one page:
-- `home.js` → session list, create session
-- `chat.js` → message send, AI response rendering, Markdown
-- `confirm.js` → schema preview, diff display, version restore, confirm generation
-- `docs.js` → document polling, Mermaid rendering, SQL highlighting, download
-- `review.js` → review report rendering, progress polling
+Database:
+- Table design, field definitions, relationships, indexes
+- Audit trail strategy, backup strategy
 
-Standard fetch pattern:
-```javascript
-const res = await fetch('/api/...', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-});
-const data = await res.json();
-if (!res.ok) {
-    showError(data.error); // display to user — never only console.error
-    return;
-}
-```
+Integrations — identify which of the following apply:
+- File formats: Excel, CSV, JSON
+- Databases: PostgreSQL, SQL Server
+- Auth: AD / SSO
+- External systems: Email, ERP, AI API, GitHub
+
+Required outputs:
+- System architecture diagram
+- Data flow diagram
+- API specification
+- Database design document
+- Deployment architecture diagram
+- Security design document
+
+## 4. UI / UX Design
+
+**Users must understand the interface without training.**
+
+Design priorities (in order):
+- Show important information first, not what's easiest to build.
+- Query and filter interactions must be fast and obvious.
+- Forms must guide users — validate inline, not on submit.
+- Errors must explain what went wrong and how to fix it.
+- Actions unavailable due to permissions must be hidden or disabled, not just error on click.
+- All views must work on both mobile and large screens.
+
+Pages every platform needs:
+- Login
+- Home dashboard
+- Data query / list
+- Detail view
+- Analytics / charts
+- Admin settings
+- User permissions
+- Import / export
+- System logs
+
+Required outputs:
+- Wireframes
+- Visual mockups
+- Interactive prototype
+- UI component specification
+- Page flow diagram
+
+## 5. Database Design
+
+**Model data for correctness first, performance second, flexibility third.**
 
 Rules:
-- Every async operation must disable its trigger button while in-flight.
-- Polling interval must be ≥ 2 seconds. Stop polling when complete.
-- Render long-form AI output with `marked.js`.
+- Consistent naming convention across all tables and columns.
+- No redundant data — normalise unless there's a measured performance reason not to.
+- All required fields have validation rules.
+- All important records have audit trails (who changed what, when).
+- Frequently queried columns have indexes.
+- Every table has `created_at` and `updated_at`.
 
-## 6. Agent Rules
+Common tables most platforms need:
 
-**All AI calls go through `PensieveAPI`. Prompts live in files. Failures stay isolated.**
+| Table | Purpose |
+|---|---|
+| `users` | User accounts |
+| `roles` | Role definitions |
+| `permissions` | Role–permission mapping |
+| `projects` | Top-level domain entities |
+| `tasks` | Work items |
+| `attachments` | File references |
+| `audit_logs` | User action history |
+| `system_logs` | System-level events |
 
-- Never call the AI directly with `requests` or `httpx` — always use `utils/client.py`.
-- All prompt text lives in `prompts/`. Never hardcode prompts in Python.
-- A failed AI call must not crash the session. Catch and record the error in `generation_status`.
+Required outputs:
+- ERD
+- Table specification
+- Field definition table
+- Data dictionary
+- Migration scripts
 
-`interviewer.chat()` returns a 3-tuple `(reply_text, tables, summary)`:
-- `tables is None` → still collecting requirements
-- `tables is not None` → requirements complete, advance to confirming phase
-- `summary` is `list[str]` of extracted requirement points
+## 6. Backend Development
 
-Writers in `web/generation_worker.py` run in parallel via `ThreadPoolExecutor`. Each writer must be a pure function: `tables → str`. No session state. Raise on failure — the worker catches it.
+**The backend owns data integrity, security, and business logic. Nothing else should.**
 
-## 7. Error Handling and Logging
+Build in this order:
+1. Project structure and configuration
+2. Auth and session management
+3. Role-based permission layer (centralised — not scattered across routes)
+4. Core CRUD endpoints
+5. Query endpoints with filtering and pagination
+6. File upload handling
+7. Import (Excel / CSV) with validation and error reporting
+8. Export
+9. Scheduled jobs
+10. Logging and error handling
 
-**Log what broke. Never expose internals to the frontend.**
+API design rules:
+- Clear, consistent naming. REST conventions unless there's a good reason not to.
+- Request and response formats are consistent across all endpoints.
+- Errors return standardised `{ "error": "..." }` with correct HTTP status codes.
+- Sensitive data never leaves the backend in raw form.
+- Every list endpoint supports pagination.
+- Every state-changing operation is logged.
 
-Always log:
-- AI API failures (include HTTP status and response body, exclude tokens)
-- DB connection failures (exclude password)
-- Document generation failures (include which writer failed)
-- Session file read/write failures
+Common endpoints:
 
-Never send to the frontend:
-- Python tracebacks
-- Database connection strings or passwords
-- API tokens
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/login` | Authentication |
+| `GET/POST /api/users` | User management |
+| `GET/POST /api/projects` | Domain entities |
+| `GET /api/dashboard` | Aggregated stats |
+| `POST /api/upload` | File upload |
+| `GET /api/export` | Data export |
+| `GET /api/settings` | System configuration |
+| `GET /api/logs` | System log access |
 
-Log format:
-```python
-logger.error("generation failed session=%s writer=%s error=%s", session_id, writer_name, str(e))
+## 7. Frontend Development
+
+**The frontend's job is clarity, not cleverness.**
+
+Build in this order:
+1. Page routing
+2. API integration layer
+3. Dashboard
+4. Data tables (with sort and filter)
+5. Query / filter UI
+6. Create / edit forms
+7. Charts and analytics
+8. Modals and dialogs
+9. Import / export UI
+10. Error states and loading states
+11. Permission-aware display logic
+12. Responsive layout
+
+Rules:
+- Important information is above the fold.
+- Buttons and controls are in consistent positions across pages.
+- Tables support sorting and filtering. Large datasets paginate or use virtual scroll.
+- Error messages are written for users, not developers.
+- Charts always have units, labels, and a title.
+- Export filenames include the data scope and timestamp.
+
+## 8. Data Integration and Scheduling
+
+**External data pipelines fail silently unless you build in visibility.**
+
+Before building any integration:
+- Confirm the exact source format and field mapping.
+- Define what happens to invalid or duplicate records.
+- Define whether imports overwrite or append.
+
+Import rules:
+- Validate format before processing. Reject and report bad records — never silently skip.
+- Every import creates a batch record: timestamp, row count, error count, operator.
+- Never overwrite existing records without an explicit confirmation step.
+
+Scheduled job rules:
+- Every job has a start time, end time, and status in the log.
+- Failures produce an actionable error message — never a silent no-op.
+- Jobs must be re-runnable manually without side effects.
+- Duplicate execution must be prevented (lock or idempotency key).
+
+## 9. Testing and Acceptance
+
+**Test at every boundary. Never ship untested permission logic.**
+
+Testing types and what they cover:
+
+| Type | Covers |
+|---|---|
+| Unit | Individual functions and business logic |
+| API | Input/output contracts for every endpoint |
+| Integration | Frontend ↔ backend ↔ database full paths |
+| UI | User interactions and visual states |
+| Permission | Every role × every operation combination |
+| Data | Calculated fields, aggregations, report accuracy |
+| Load | Performance under realistic and peak data volumes |
+| UAT | End-to-end acceptance by actual users |
+
+Rules:
+- Every feature has test cases before it ships.
+- Every role is tested against its permission boundaries.
+- Every report is verified against known data.
+- Import and export are tested with edge-case files.
+- Error scenarios are tested, not just happy paths.
+- Run a smoke test before every production deployment.
+- Every bug fix has a regression test.
+
+Required outputs:
+- Test cases
+- Test records
+- Bug list
+- UAT sign-off
+- Fix log
+
+## 10. Deployment and Go-live
+
+**Production is different from dev. Verify everything, assume nothing.**
+
+Deployment checklist:
+```
+□ Production environment provisioned
+□ Web server configured (IIS / Nginx / Docker)
+□ Database provisioned and migrated
+□ Environment variables set (not hardcoded)
+□ SSL certificate installed
+□ Auth / SSO configured
+□ Firewall rules applied
+□ Scheduled jobs configured
+□ Backup configured and tested
+□ Log path configured and writable
+□ Frontend deployed
+□ Backend deployed
+□ Smoke test passed
 ```
 
-## 8. Testing
-
-**New behaviour needs a test. No exceptions.**
-
-- All tests in `tests/`, named `test_*.py`.
-- Unit tests cover `agents/`, `web/`, `models/`, `utils/` — no API connection required.
-- Integration tests cover Flask routes via `app.test_client()`.
-- Run before every PR: `pytest tests/ -v`
-
-## 9. Version Control
-
-**Branch for every change. Commit messages explain why.**
-
-Branch naming:
-- `feat/<description>` — new features
-- `fix/<description>` — bug fixes
-- `docs/<description>` — documentation only
-- `refactor/<description>` — structural changes with no behaviour change
-
-Commit format: `<type>: <description>`
-
-Pre-merge checklist:
+Go-live sign-off checklist:
 ```
-□ pytest tests/ -v passes
-□ Design mode full flow tested manually (chat → confirm → generate → download)
-□ Review mode full flow tested manually
-□ .env.example updated if new env vars added
-□ requirements.txt updated if new packages added
-□ Old session JSON files still load without KeyError
+□ Site loads
+□ Login works
+□ All APIs respond correctly
+□ Database connection is stable
+□ Permissions behave correctly for each role
+□ Scheduled jobs run on schedule
+□ Import and export work end-to-end
+□ Logs are being written
+□ Backup is running
+□ Error pages render correctly
+□ At least one real user has completed UAT
 ```
 
-## 10. Hard Rules
+## 11. Documentation and Training
 
-**These are never negotiable.**
+**A system no one can maintain or operate is not done.**
 
-1. No secrets in code — all tokens and passwords go in `.env`.
-2. No real user data in AI prompts.
-3. Never commit `data/` session files.
-4. Never develop directly on `main` — always branch and PR.
-5. Never skip tests before merging.
-6. No silent exception swallowing (`except: pass` is always wrong).
+User documentation:
+- User manual (how to use every feature)
+- FAQ
+- Import / export guide
+- Permission guide
 
-## 11. Known Limitations
+Operations documentation:
+- Deployment guide
+- Architecture overview
+- Database guide
+- API reference
+- Scheduled job reference
+- Log reference
+- Incident response runbook
+- Backup and restore SOP
 
-- **Concurrency** — `threading.Lock` only partially protects session writes. Race conditions are possible under high concurrency. (Priority: medium)
-- **Session cleanup** — `data/` files accumulate indefinitely with no TTL or cleanup job. (Priority: low)
-- **Pagination** — `/api/sessions` has no pagination; performance degrades with many sessions. (Priority: low)
-- **Error tracking** — No centralised error tracking (e.g. Sentry). Errors are only in local logs. (Priority: low)
+Training must cover:
+- Login and navigation
+- Querying and filtering data
+- Reading charts and dashboards
+- Creating and editing records
+- Importing data
+- Exporting reports
+- Handling common errors
+
+## 12. Operations and Monitoring
+
+**Problems you can't see are problems you can't fix.**
+
+Monitor these at all times:
+
+| Item | What to check |
+|---|---|
+| Web status | Site is reachable and returns 200 |
+| API status | Endpoints respond within SLA |
+| DB status | Connection pool is healthy |
+| Job status | Scheduled jobs complete without error |
+| Log status | No spike in ERROR-level log entries |
+| Disk usage | Sufficient space for data and logs |
+| Backup status | Last backup completed successfully |
+| Usage | Active user counts and traffic patterns |
+| Performance | Response time and slow query count |
+
+Operations rules:
+- Every system error has a log entry with enough context to diagnose.
+- Scheduled job failures are traceable and alertable.
+- Critical data is backed up on a defined schedule and restore is tested.
+- Permission changes are logged with actor, timestamp, and what changed.
+- Every production change has a version record.
+- Bug fixes are recorded with root cause and resolution.
+- Database capacity is reviewed regularly.
+- Security posture is reviewed regularly.
+
+## 13. Version Control and Continuous Improvement
+
+**Ship controlled versions. Never patch production directly.**
+
+Version control rules:
+- All code is in Git. Production and development branches are separate.
+- Every release has a version number.
+- Every commit has a message that explains the change.
+- Major releases have a Release Note.
+- A rollback path exists before every deployment.
+- Never edit code directly in production.
+
+Version stages:
+
+| Version | Meaning |
+|---|---|
+| v0.1 | Prototype / proof of concept |
+| v0.5 | Core features in development |
+| v1.0 | First production release |
+| v1.x | Bug fixes and minor features |
+| v2.0 | Major architecture change or redesign |
+
+Improvement backlog — regularly review:
+- User feedback
+- Performance bottlenecks
+- UI usability issues
+- Slow queries
+- Data model gaps
+- Permission workflow friction
+- Report feature gaps
+
+## 14. Core Principles
+
+**A platform is not done when features ship. It's done when it can be operated, maintained, and extended.**
+
+Every platform built under these guidelines must be:
+
+1. **Traceable** — requirements link to features link to tests
+2. **Verifiable** — data and calculations can be independently confirmed
+3. **Controlled** — permissions are explicit and auditable
+4. **Deployable** — environment setup is documented and repeatable
+5. **Observable** — errors surface in logs, not just in user complaints
+6. **Handoff-ready** — documentation is complete enough for a new team to operate it
+7. **Extensible** — architecture accommodates new features without rewrites
+8. **Recoverable** — every release can be rolled back
+9. **Sustainable** — operations can continue without the original developers
+10. **Understandable** — users can accomplish their goals without calling support
 
 ---
 
-**These guidelines are working if:** layer boundaries stay clean in diffs, API responses are consistent across all endpoints, test coverage grows with the codebase, and no secrets ever appear in git history.
+**These guidelines are working if:** requirements are stable before development starts, each phase produces documents the next phase can rely on, no feature ships without a test, no deployment happens without a checklist, and six months after go-live the system can be operated by someone who wasn't on the original team.
