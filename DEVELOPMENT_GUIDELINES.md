@@ -273,10 +273,9 @@ Required outputs:
 Deployment checklist:
 ```
 □ Production environment provisioned
-□ Web server configured (IIS / Nginx / Docker)
 □ Database provisioned and migrated
 □ Environment variables set (not hardcoded)
-□ SSL certificate installed
+□ SSL certificate installed(optional)
 □ Auth / SSO configured
 □ Firewall rules applied
 □ Scheduled jobs configured
