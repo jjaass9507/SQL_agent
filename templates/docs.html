@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}文件 — {{ session.title }}{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar-mini">
+    <div class="sidebar-mini-logo">S</div>
+    <a href="/" class="sidebar-mini-icon" title="工作台">⊞</a>
+    <a href="/" class="sidebar-mini-icon active" title="所有專案">◷</a>
+    <a href="#" class="sidebar-mini-icon" title="範本庫">◱</a>
+    <a href="#" class="sidebar-mini-icon" title="設定">⚙</a>
+    <div class="sidebar-mini-spacer"></div>
+    <div class="sidebar-mini-avatar">PM</div>
+  </aside>
+
+  <div class="main-content">
+    <!-- Top bar -->
+    <div class="topbar">
+      <span class="topbar-session-title">{{ session.title }}</span>
+      {% if session.phase == 'done' %}
+      <span id="topbar-badge" class="badge badge-done">✓ 文件產出完成</span>
+      {% else %}
+      <span id="topbar-badge" class="badge badge-generating">⟳ 產出中</span>
+      {% endif %}
+      <div class="topbar-spacer"></div>
+      <a id="download-zip-btn" href="/api/sessions/{{ session.id }}/outputs/zip" class="btn btn-ghost btn-sm"
+         style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">⬇ 全部下載 .zip</a>
+    </div>
+
+    <!-- V2: Generating state (shown while generating) -->
+    <div id="generating-view" class="docs-shell{% if session.phase == 'done' %} hidden{% endif %}">
+      <div class="gen-progress-strip">
+        <div class="gen-progress-strip-row" id="progress-labels">
+          <span>文件產出進度：</span>
+          <span class="text-muted" data-file="01_specification.md">○ 規格書與資料字典</span>
+          <span style="color:var(--line);font-size:18px;">→</span>
+          <span class="text-muted" data-file="02_er_diagram.md">○ ER 關聯圖</span>
+          <span style="color:var(--line);font-size:18px;">→</span>
+          <span class="text-muted" data-file="03_ddl.sql">○ DDL 腳本</span>
+          <span style="color:var(--line);font-size:18px;">→</span>
+          <span class="text-muted" data-file="04_security_plan.md">○ 效能與安全規劃</span>
+        </div>
+        <div class="gen-progress-bar-bg">
+          <div class="gen-progress-bar-fill" id="progress-bar" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="gen-card-grid">
+        <div class="gen-card status-waiting" id="card-spec">
+          <div class="gen-card-title-row">
+            <span class="gen-card-icon">📄</span>
+            <span class="gen-card-label">規格書與資料字典</span>
+            <span class="gen-card-status-icon waiting">○</span>
+          </div>
+          <div class="gen-card-body">
+            <div class="gen-waiting-text">等待產出...</div>
+          </div>
+        </div>
+        <div class="gen-card status-waiting" id="card-diagram">
+          <div class="gen-card-title-row">
+            <span class="gen-card-icon">🗺</span>
+            <span class="gen-card-label">ER 關聯圖</span>
+            <span class="gen-card-status-icon waiting">○</span>
+          </div>
+          <div class="gen-card-body">
+            <div class="gen-waiting-text">等待產出...</div>
+          </div>
+        </div>
+        <div class="gen-card status-waiting" id="card-ddl">
+          <div class="gen-card-title-row">
+            <span class="gen-card-icon">💾</span>
+            <span class="gen-card-label">DDL 腳本</span>
+            <span class="gen-card-status-icon waiting">○</span>
+          </div>
+          <div class="gen-card-body">
+            <div class="gen-waiting-text">等待產出...</div>
+          </div>
+        </div>
+        <div class="gen-card status-waiting" id="card-security">
+          <div class="gen-card-title-row">
+            <span class="gen-card-icon">🔒</span>
+            <span class="gen-card-label">效能與安全規劃</span>
+            <span class="gen-card-status-icon waiting">○</span>
+          </div>
+          <div class="gen-card-body">
+            <div class="gen-waiting-text">等待產出...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- V1: Reading state (shown when done) -->
+    <div id="reading-view" class="docs-layout{% if session.phase != 'done' %} hidden{% endif %}">
+      <!-- TOC -->
+      <div class="docs-toc">
+        <div class="docs-toc-header">
+          <a href="/" class="docs-toc-back">← 工作台</a>
+          <div class="docs-toc-title">{{ session.title }}</div>
+          <div class="docs-toc-status" id="toc-status"></div>
+        </div>
+        <div class="docs-toc-list">
+          <div class="docs-toc-item active" data-doc="01_specification.md">
+            <span>📄</span><span>規格書與資料字典</span>
+          </div>
+          <div class="docs-toc-item" data-doc="02_er_diagram.md">
+            <span>🗺</span><span>ER 關聯圖</span>
+          </div>
+          <div class="docs-toc-item" data-doc="03_ddl.sql">
+            <span>💾</span><span>DDL 腳本</span>
+          </div>
+          <div class="docs-toc-item" data-doc="04_security_plan.md">
+            <span>🔒</span><span>效能與安全規劃</span>
+          </div>
+          <div class="docs-toc-divider"></div>
+          <a href="/api/sessions/{{ session.id }}/outputs/zip" class="docs-toc-action">
+            <span>⬇</span><span>全部下載 .zip</span>
+          </a>
+          <a href="#" class="docs-toc-action" style="opacity:0.4;cursor:default;">
+            <span>🔗</span><span>分享連結</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Content area -->
+      <div class="docs-content-area">
+        <div class="docs-content-topbar">
+          <span class="docs-content-name" id="content-title">📄 規格書與資料字典</span>
+          <div class="docs-content-actions">
+            <button class="btn btn-ghost btn-sm" id="copy-btn">📋 複製</button>
+            <button class="btn btn-ghost btn-sm" id="download-btn">⬇ 下載</button>
+          </div>
+        </div>
+        <div class="docs-body">
+          <div class="docs-body-inner" id="docs-content">
+            <!-- Content injected by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SESSION_ID = "{{ session.id }}";
+  const SESSION_PHASE = "{{ session.phase }}";
+  const INITIAL_GEN_STATUS = {{ (session.generation_status or {}) | tojson }};
+  const INITIAL_OUTPUTS = {{ (session.outputs or {}) | tojson }};
+  const INITIAL_GEN_ERRORS = {{ (session.generation_errors or {}) | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/docs.js') }}"></script>
+{% endblock %}

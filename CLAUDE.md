@@ -62,6 +62,23 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Documentation Hygiene
+
+**Every commit that changes behaviour must update the relevant MD files.**
+
+Before committing, check:
+- `README.md` — Does the project structure section still match? Do the usage instructions still work?
+- `docs/architecture.md` — Does any new module, layer, or data flow need to be reflected?
+- Any other `docs/*.md` that describes something you changed.
+
+Rules:
+- If you add a new top-level directory or entry point, add it to the README structure tree.
+- If you add a new API surface (endpoints, CLI flags, env vars), document it.
+- If you restructure how data flows between modules, update the architecture diagram.
+- Do **not** update MD files for internal refactors that don't change the observable interface.
+
+The test: Could a new developer read README + architecture.md and understand how to run and extend the system?
+
 ---
 
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, clarifying questions come before implementation rather than after mistakes, and documentation never lags behind the code.

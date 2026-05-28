@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ session.title }} — SQL Agent{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <!-- Mini sidebar -->
+  <aside class="sidebar-mini">
+    <div class="sidebar-mini-logo">S</div>
+    <a href="/" class="sidebar-mini-icon" title="工作台">⊞</a>
+    <a href="/" class="sidebar-mini-icon active" title="所有專案">◷</a>
+    <a href="#" class="sidebar-mini-icon" title="範本庫">◱</a>
+    <a href="#" class="sidebar-mini-icon" title="設定">⚙</a>
+    <div class="sidebar-mini-spacer"></div>
+    <div class="sidebar-mini-avatar">PM</div>
+  </aside>
+
+  <div class="main-content">
+    <!-- Top bar -->
+    <div class="topbar">
+      <a href="/" class="topbar-back">← 工作台</a>
+      <span class="topbar-session-title">{{ session.title }}</span>
+      <span class="badge badge-inprogress">進行中</span>
+      <div class="topbar-spacer"></div>
+      <!-- Step bar -->
+      <div class="stepbar">
+        <div class="step active">① 需求收集</div>
+        <div class="step-connector"></div>
+        <div class="step">② 確認設計</div>
+        <div class="step-connector"></div>
+        <div class="step">③ 產出文件</div>
+      </div>
+      <div style="width:22px;"></div>
+    </div>
+
+    <!-- Chat + progress panel -->
+    <div class="chat-layout">
+      <!-- Chat column -->
+      <div class="chat-column">
+        <div class="chat-messages" id="chat-messages">
+          <!-- Welcome message -->
+          <div class="msg-row" id="welcome-msg">
+            <div class="msg-avatar">AI</div>
+            <div class="msg-bubble">您好！請描述您想建立的資料表需求，我會協助您完善設計細節。<br><br>例如：「我想建一個訂單系統，包含訂單主表和訂單明細表」</div>
+          </div>
+          <!-- Messages injected here by JS -->
+        </div>
+        <div class="chat-input-area">
+          <div class="chat-input-row" id="input-row">
+            <textarea class="chat-textarea" id="chat-input" placeholder="輸入訊息... (Enter 送出，Shift+Enter 換行)" rows="1"></textarea>
+            <button class="chat-send-btn" id="send-btn">送出 ↵</button>
+          </div>
+          <div class="chat-hint">Enter 送出 · Shift+Enter 換行</div>
+        </div>
+      </div>
+
+      <!-- Right progress panel -->
+      <div class="progress-panel">
+        <div class="progress-panel-title">📊 目前收集進度</div>
+        <div id="progress-list">
+          <div style="font-size:13px;color:var(--muted);">對話開始後即時更新</div>
+        </div>
+        {% if session.context_tables %}
+        <div style="margin-top:12px;padding:9px 10px;background:var(--success-light);border:1.5px solid var(--success);border-radius:4px;font-size:12px;color:#2a6a2f;">
+          🗄 已載入 {{ session.context_tables | length }} 張現有資料表作為參考
+        </div>
+        {% endif %}
+        <div style="margin-top:8px;padding:9px 10px;background:#fff;border:1.5px dashed var(--muted);border-radius:4px;font-size:12px;color:var(--muted);">
+          需求完整後自動跳轉確認頁
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SESSION_ID = "{{ session.id }}";
+  const EXISTING_MESSAGES = {{ session.messages | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}
