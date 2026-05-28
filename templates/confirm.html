@@ -90,6 +90,83 @@
       </div>
     </div>
 
+    <!-- Schema Diff panel (shown only when context_tables exist) -->
+    {% if diff %}
+    <div class="diff-section">
+      <div class="diff-section-title">🔀 與現有 DB 結構比對</div>
+      {% if not diff.has_changes %}
+        <div class="diff-empty">✓ 設計與現有 DB 結構完全相同，無任何差異</div>
+      {% else %}
+        {% if diff.new_tables %}
+        <div class="diff-group">
+          <div class="diff-group-label">新增資料表（{{ diff.new_tables | length }}）</div>
+          {% for name in diff.new_tables %}
+          <div class="diff-item">
+            <span class="diff-tag diff-tag-new">＋ 新增</span>
+            <span class="diff-item-name">{{ name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if diff.dropped_tables %}
+        <div class="diff-group">
+          <div class="diff-group-label">不再包含（{{ diff.dropped_tables | length }}）— 現有 DB 有，設計未包含</div>
+          {% for name in diff.dropped_tables %}
+          <div class="diff-item">
+            <span class="diff-tag diff-tag-dropped">− 未含</span>
+            <span class="diff-item-name">{{ name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if diff.modified_tables %}
+        <div class="diff-group">
+          <div class="diff-group-label">結構變更（{{ diff.modified_tables | length }}）</div>
+          {% for name, changes in diff.modified_tables.items() %}
+          <div class="diff-item" style="flex-direction:column;align-items:flex-start;">
+            <div style="display:flex;gap:8px;align-items:center;">
+              <span class="diff-tag diff-tag-modified">△ 變更</span>
+              <span class="diff-item-name">{{ name }}</span>
+            </div>
+            {% for col in changes.added_columns %}
+            <div class="diff-col-detail">＋ {{ col.name }}: {{ col.data_type }}</div>
+            {% endfor %}
+            {% for col in changes.removed_columns %}
+            <div class="diff-col-detail" style="color:var(--error);">− {{ col.name }}: {{ col.data_type }}</div>
+            {% endfor %}
+            {% for col in changes.changed_columns %}
+            <div class="diff-col-detail">⟳ {{ col.name }}：{{ col.diffs | join('、') }}</div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if diff.unchanged_tables %}
+        <div class="diff-group">
+          <div class="diff-group-label" style="margin-bottom:3px;">無變更（{{ diff.unchanged_tables | length }}）</div>
+          <div style="font-size:12px;color:var(--muted);">{{ diff.unchanged_tables | join('、') }}</div>
+        </div>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Version history panel (shown when more than 1 version exists) -->
+    {% if session.table_versions and session.table_versions | length > 1 %}
+    <div class="version-section">
+      <div class="version-section-title">🕐 設計版本歷史</div>
+      <div class="version-list" id="version-list">
+        {% for v in session.table_versions %}
+        <button class="version-chip{% if loop.last %} current{% endif %}"
+                data-version="{{ v.version }}"
+                title="{{ v.created_at[:19] | replace('T', ' ') }}">
+          版本 {{ v.version }}（{{ v.tables | length }} 張表）
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Footer actions -->
     <div class="confirm-footer">
       <a href="/sessions/{{ session.id }}/chat" class="btn btn-ghost">← 返回補充需求</a>

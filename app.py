@@ -17,12 +17,14 @@ from web.session_store import (
     get_session,
     get_tables,
     list_sessions,
+    restore_version,
+    tables_from_json,
     update_session,
     update_generation_status,
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation
+from web.generation_worker import run_generation, run_review
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
@@ -63,7 +65,15 @@ def confirm_page(session_id):
         return redirect(url_for("docs_page", session_id=session_id))
     if session["phase"] == "collecting":
         return redirect(url_for("chat_page", session_id=session_id))
-    return render_template("confirm.html", session=session)
+
+    diff = None
+    if session.get("tables") and session.get("context_tables"):
+        from web.schema_diff import compute_diff
+        designed = tables_from_json(session["tables"])
+        existing = tables_from_json(session["context_tables"])
+        diff = compute_diff(designed, existing)
+
+    return render_template("confirm.html", session=session, diff=diff)
 
 
 @app.get("/sessions/<session_id>/docs")
@@ -72,6 +82,16 @@ def docs_page(session_id):
     if not session:
         return redirect(url_for("index"))
     return render_template("docs.html", session=session)
+
+
+@app.get("/sessions/<session_id>/review")
+def review_page(session_id):
+    session = get_session(session_id)
+    if not session:
+        return redirect(url_for("index"))
+    if session.get("mode") != "review":
+        return redirect(url_for("index"))
+    return render_template("review.html", session=session)
 
 
 # ── API routes ─────────────────────────────────────────
@@ -83,6 +103,7 @@ def api_create_session():
     title = (data.get("title") or "未命名設計").strip()
     db_url = (data.get("db_url") or "").strip()
     db_schema = (data.get("db_schema") or "public").strip()
+    mode = (data.get("mode") or "design").strip()
 
     context_tables_json = []
     context_text = ""
@@ -95,12 +116,18 @@ def api_create_session():
             context_tables_json = [dataclasses.asdict(t) for t in tables]
             context_text = format_context(tables)
 
-    session = create_session(title, context_tables_json, context_text)
+    session = create_session(title, context_tables_json, context_text, mode=mode)
     resp = dict(session)
+
     if db_error:
         resp["db_error"] = db_error
     elif db_url and context_tables_json:
         resp["db_imported"] = len(context_tables_json)
+
+    # Auto-start review for review-mode sessions
+    if mode == "review" and context_tables_json and not db_error:
+        run_review(session["id"])
+
     return jsonify(resp), 201
 
 
@@ -128,7 +155,6 @@ def api_import_db(session_id):
         "context_tables": context_tables_json,
         "context_text": context_text,
     })
-    # Reset the Interviewer instance so it picks up the new context on next chat
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
     return jsonify({"imported": len(tables), "tables": [t.table_name for t in tables]})
@@ -160,7 +186,6 @@ def api_send_message(session_id):
     if not content:
         return jsonify({"error": "content required"}), 400
 
-    # If confirming and user wants changes, go back to collecting
     if session["phase"] == "confirming":
         update_session(session_id, {"phase": "collecting"})
 
@@ -175,12 +200,11 @@ def api_send_message(session_id):
     key_points = []
 
     if tables_ready:
-        key_points = summary  # AI-generated summary integrating both sides of the conversation
+        key_points = summary
 
         from web.session_store import set_tables
         set_tables(session_id, tables, key_points)
 
-        from models.schema import TableSpec
         tables_json = [
             {
                 "table_name": t.table_name,
@@ -232,6 +256,33 @@ def api_confirm(session_id):
     run_generation(session_id)
     return jsonify({"status": "generating"})
 
+
+# ── Version management ─────────────────────────────────
+
+@app.get("/api/sessions/<session_id>/versions")
+def api_list_versions(session_id):
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    versions = session.get("table_versions", [])
+    return jsonify([
+        {
+            "version": v["version"],
+            "created_at": v["created_at"],
+            "table_count": len(v["tables"]) if v.get("tables") else 0,
+        }
+        for v in versions
+    ])
+
+
+@app.post("/api/sessions/<session_id>/versions/<int:version_num>/restore")
+def api_restore_version(session_id, version_num):
+    if not restore_version(session_id, version_num):
+        return jsonify({"error": "version not found"}), 404
+    return jsonify({"status": "restored", "version": version_num})
+
+
+# ── Outputs ────────────────────────────────────────────
 
 @app.get("/api/sessions/<session_id>/outputs")
 def api_get_outputs(session_id):

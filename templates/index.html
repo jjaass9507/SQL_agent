@@ -67,19 +67,33 @@
 <!-- New session modal -->
 <div class="modal-overlay hidden" id="new-session-modal">
   <div class="modal">
-    <div class="modal-title">開始新的資料表設計</div>
+    <div class="modal-title">開始新的專案</div>
+
+    <!-- Mode selector -->
+    <div style="margin-bottom:14px;">
+      <div class="modal-label">模式</div>
+      <div class="mode-selector" id="mode-selector">
+        <button class="mode-btn active" data-mode="design">
+          🏗 設計模式<br><span style="font-size:11px;font-weight:400;">從零開始設計資料表</span>
+        </button>
+        <button class="mode-btn" data-mode="review">
+          🔍 審查模式<br><span style="font-size:11px;font-weight:400;">AI 分析現有 DB 結構</span>
+        </button>
+      </div>
+    </div>
+
     <div class="modal-label">專案名稱</div>
     <input class="modal-input" id="new-session-title" placeholder="例如：訂單系統設計" type="text">
 
-    <!-- DB import toggle -->
-    <div style="margin-bottom:12px;">
+    <!-- DB import section -->
+    <div id="db-import-toggle-row" style="margin-bottom:12px;">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--muted);">
         <input type="checkbox" id="db-import-toggle" style="cursor:pointer;">
         從現有 PostgreSQL 資料庫匯入結構作為參考
       </label>
     </div>
     <div id="db-import-section" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg);border:1.5px solid var(--line);border-radius:4px;">
-      <div class="modal-label">連線字串</div>
+      <div class="modal-label">連線字串<span id="db-required-mark" style="color:var(--error);display:none;"> *必填</span></div>
       <input class="modal-input" id="db-url" type="text"
              placeholder="postgresql://user:password@host:5432/dbname" autocomplete="off">
       <div class="modal-label" style="margin-top:4px;">Schema（選填，預設 public）</div>

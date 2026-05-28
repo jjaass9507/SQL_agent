@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}審查報告 — {{ session.title }}{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar-mini">
+    <div class="sidebar-mini-logo">S</div>
+    <a href="/" class="sidebar-mini-icon" title="工作台">⊞</a>
+    <a href="/" class="sidebar-mini-icon active" title="所有專案">◷</a>
+    <a href="#" class="sidebar-mini-icon" title="範本庫">◱</a>
+    <a href="#" class="sidebar-mini-icon" title="設定">⚙</a>
+    <div class="sidebar-mini-spacer"></div>
+    <div class="sidebar-mini-avatar">PM</div>
+  </aside>
+
+  <div class="main-content">
+    <div class="topbar">
+      <a href="/" class="topbar-back btn btn-ghost btn-sm">← 工作台</a>
+      <span class="topbar-session-title">{{ session.title }}</span>
+      <span id="topbar-badge" class="badge badge-inprogress">⟳ 分析中</span>
+      <div class="topbar-spacer"></div>
+      <button id="download-btn" class="btn btn-ghost btn-sm" style="display:none;">⬇ 下載報告</button>
+    </div>
+
+    <!-- Loading state -->
+    <div id="loading-view" class="review-layout">
+      <div class="review-loading">
+        <span class="review-loading-spin">⟳</span>
+        <div style="font-size:15px;font-weight:600;">AI 正在審查資料庫結構...</div>
+        <div style="font-size:13px;">分析 {{ session.context_tables | length }} 張資料表，通常需要 20~40 秒</div>
+      </div>
+    </div>
+
+    <!-- Done state -->
+    <div id="done-view" class="review-layout hidden">
+      <div class="review-header">
+        <div>
+          <div style="font-size:18px;font-weight:700;">🔍 資料庫結構審查報告</div>
+          <div class="review-meta">{{ session.context_tables | length }} 張資料表 · {{ session.title }}</div>
+        </div>
+      </div>
+      <div class="review-report docs-markdown" id="review-content">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SESSION_ID = "{{ session.id }}";
+  const INITIAL_PHASE = "{{ session.phase }}";
+</script>
+<script src="{{ url_for('static', filename='js/review.js') }}"></script>
+{% endblock %}

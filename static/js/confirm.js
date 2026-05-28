@@ -1,3 +1,22 @@
+// Version restore
+document.querySelectorAll('.version-chip').forEach(chip => {
+  chip.addEventListener('click', async () => {
+    const version = chip.dataset.version;
+    if (chip.classList.contains('current') || chip.classList.contains('restoring')) return;
+    chip.classList.add('restoring');
+    chip.textContent = '還原中...';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/versions/${version}/restore`, { method: 'POST' });
+      if (!res.ok) throw new Error('restore failed');
+      window.location.reload();
+    } catch (e) {
+      chip.classList.remove('restoring');
+      chip.textContent = chip.dataset.label || `版本 ${version}`;
+      showConfirmError('版本還原失敗，請稍後再試');
+    }
+  });
+});
+
 function showConfirmError(msg) {
   let el = document.getElementById('confirm-error-msg');
   if (!el) {

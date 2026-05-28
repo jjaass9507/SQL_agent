@@ -53,21 +53,23 @@ def _tables_from_json(data: list[dict]) -> list[TableSpec]:
 
 
 def create_session(title: str, context_tables: list[dict] | None = None,
-                   context_text: str = "") -> dict:
+                   context_text: str = "", mode: str = "design") -> dict:
     session_id = str(uuid.uuid4())
     session = {
         "id": session_id,
         "title": title,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "phase": "collecting",
+        "mode": mode,                                         # "design" | "review"
+        "phase": "reviewing" if mode == "review" else "collecting",
         "messages": [],
         "tables": None,
         "key_points": [],
         "outputs": {},
         "generation_status": {f: "waiting" for f in GENERATION_FILES},
         "generation_errors": {},
-        "context_tables": context_tables or [],   # existing DB tables as reference
-        "context_text": context_text,             # formatted text for Interviewer
+        "table_versions": [],                                 # list of design snapshots
+        "context_tables": context_tables or [],
+        "context_text": context_text,
     }
     _write(session_id, session)
     return session
@@ -91,6 +93,7 @@ def list_sessions() -> list[dict]:
                 "title": data["title"],
                 "created_at": data["created_at"],
                 "phase": data["phase"],
+                "mode": data.get("mode", "design"),
                 "table_count": len(data["tables"]) if data["tables"] else 0,
             })
         except Exception:
@@ -126,11 +129,45 @@ def set_tables(session_id: str, tables: list[TableSpec], key_points: list[str]) 
         if not p.exists():
             return None
         session = json.loads(p.read_text(encoding="utf-8"))
-        session["tables"] = _tables_to_json(tables)
+        tables_json = _tables_to_json(tables)
+        session["tables"] = tables_json
         session["key_points"] = key_points
         session["phase"] = "confirming"
+        # Append to version history (keep last 10 versions)
+        versions = session.setdefault("table_versions", [])
+        versions.append({
+            "version": len(versions) + 1,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "tables": tables_json,
+            "key_points": key_points,
+        })
+        if len(versions) > 10:
+            versions[:] = versions[-10:]
         p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
         return session
+
+
+def restore_version(session_id: str, version_num: int) -> bool:
+    """Restore a previous design version as the current tables. Returns True on success."""
+    with _lock_for(session_id):
+        p = _path(session_id)
+        if not p.exists():
+            return False
+        session = json.loads(p.read_text(encoding="utf-8"))
+        version = next((v for v in session.get("table_versions", [])
+                        if v["version"] == version_num), None)
+        if not version:
+            return False
+        session["tables"] = version["tables"]
+        session["key_points"] = version["key_points"]
+        session["phase"] = "confirming"
+        p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
+
+
+def tables_from_json(data: list[dict]) -> list[TableSpec]:
+    """Public alias for deserialising a list of table dicts into TableSpec objects."""
+    return _tables_from_json(data)
 
 
 def get_tables(session_id: str) -> list[TableSpec] | None:

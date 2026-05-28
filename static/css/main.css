@@ -864,3 +864,90 @@ html, body {
 }
 .modal-input:focus { border-color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── Schema Diff section (confirm page) ── */
+.diff-section {
+  margin: 0 22px 0;
+  padding: 14px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  font-size: 13px;
+}
+.diff-section-title {
+  font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--text);
+}
+.diff-group { margin-bottom: 10px; }
+.diff-group-label { font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.diff-item { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px; }
+.diff-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 3px;
+  font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+}
+.diff-tag-new      { background: var(--success-light); color: var(--success); }
+.diff-tag-dropped  { background: #fde8e8; color: var(--error); }
+.diff-tag-modified { background: var(--warning-light); color: var(--warning); }
+.diff-tag-same     { background: var(--sidebar); color: var(--muted); }
+.diff-item-name    { font-weight: 600; }
+.diff-col-detail   { font-size: 11px; color: var(--muted); margin: 1px 0 0 23px; }
+.diff-empty        { font-size: 13px; color: var(--success); }
+
+/* ── Version history panel (confirm page) ── */
+.version-section {
+  margin: 10px 22px 0;
+  padding: 12px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  font-size: 13px;
+}
+.version-section-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; color: var(--muted); }
+.version-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.version-chip {
+  padding: 4px 12px; border: 1.5px solid var(--line); border-radius: 20px;
+  font-size: 12px; cursor: pointer; background: var(--bg); color: var(--text);
+  transition: border-color .15s, background .15s;
+}
+.version-chip:hover { border-color: var(--accent); background: var(--accent-light); }
+.version-chip.current { border-color: var(--accent); background: var(--accent-light); font-weight: 600; }
+.version-chip.restoring { opacity: .5; cursor: default; }
+
+/* ── Review page ── */
+.review-layout {
+  flex: 1; display: flex; flex-direction: column;
+  padding: 18px 22px; overflow-y: auto; gap: 16px;
+}
+.review-header {
+  display: flex; align-items: center; gap: 12px;
+}
+.review-loading {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; flex: 1; gap: 14px; color: var(--muted);
+}
+.review-loading-spin {
+  font-size: 32px; animation: spin 1.5s linear infinite; display: inline-block;
+}
+.review-report {
+  background: var(--card); border: 1.5px solid var(--line);
+  border-radius: 4px; padding: 20px 24px; line-height: 1.7;
+  flex: 1; overflow-y: auto;
+}
+.review-report h1 { font-size: 20px; margin: 0 0 16px; }
+.review-report h2 { font-size: 16px; font-weight: 700; margin: 20px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.review-report h3 { font-size: 14px; font-weight: 700; margin: 14px 0 6px; }
+.review-report p  { margin: 0 0 8px; }
+.review-report ul { padding-left: 20px; margin: 0 0 8px; }
+.review-report li { margin-bottom: 4px; }
+.review-report strong { font-weight: 700; }
+.review-report code { font-family: var(--mono); font-size: 12px; background: var(--sidebar); padding: 1px 5px; border-radius: 3px; }
+.review-meta { font-size: 12px; color: var(--muted); }
+
+/* ── Modal mode selector ── */
+.mode-selector { display: flex; gap: 8px; margin-bottom: 14px; }
+.mode-btn {
+  flex: 1; padding: 10px; border: 2px solid var(--line); border-radius: 4px;
+  background: var(--bg); cursor: pointer; font-size: 13px; text-align: center;
+  transition: border-color .15s, background .15s; font-family: inherit;
+}
+.mode-btn.active { border-color: var(--accent); background: var(--accent-light); font-weight: 600; }
+.mode-btn .mode-icon { font-size: 20px; display: block; margin-bottom: 4px; }
