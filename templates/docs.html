@@ -21,13 +21,18 @@
     <!-- Top bar -->
     <div class="topbar">
       <span class="topbar-session-title">{{ session.title }}</span>
+      {% if session.phase == 'done' %}
+      <span id="topbar-badge" class="badge badge-done">✓ 文件產出完成</span>
+      {% else %}
       <span id="topbar-badge" class="badge badge-generating">⟳ 產出中</span>
+      {% endif %}
       <div class="topbar-spacer"></div>
-      <a id="download-zip-btn" href="/api/sessions/{{ session.id }}/outputs/zip" class="btn btn-ghost btn-sm" style="display:none;">⬇ 全部下載 .zip</a>
+      <a id="download-zip-btn" href="/api/sessions/{{ session.id }}/outputs/zip" class="btn btn-ghost btn-sm"
+         style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">⬇ 全部下載 .zip</a>
     </div>
 
     <!-- V2: Generating state (shown while generating) -->
-    <div id="generating-view" class="docs-shell">
+    <div id="generating-view" class="docs-shell{% if session.phase == 'done' %} hidden{% endif %}">
       <div class="gen-progress-strip">
         <div class="gen-progress-strip-row" id="progress-labels">
           <span>文件產出進度：</span>
@@ -89,7 +94,7 @@
     </div>
 
     <!-- V1: Reading state (shown when done) -->
-    <div id="reading-view" class="docs-layout hidden">
+    <div id="reading-view" class="docs-layout{% if session.phase != 'done' %} hidden{% endif %}">
       <!-- TOC -->
       <div class="docs-toc">
         <div class="docs-toc-header">
@@ -145,6 +150,9 @@
 <script>
   const SESSION_ID = "{{ session.id }}";
   const SESSION_PHASE = "{{ session.phase }}";
+  const INITIAL_GEN_STATUS = {{ (session.generation_status or {}) | tojson }};
+  const INITIAL_OUTPUTS = {{ (session.outputs or {}) | tojson }};
+  const INITIAL_GEN_ERRORS = {{ (session.generation_errors or {}) | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/docs.js') }}"></script>
 {% endblock %}

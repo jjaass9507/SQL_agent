@@ -225,7 +225,14 @@ async function createSession() {
   } catch (e) {
     confirmBtn.disabled = false;
     confirmBtn.textContent = currentMode === 'review' ? '開始審查 →' : '開始設計 →';
-    alert('建立失敗：' + e.message);
+    if (dbStatus) dbStatus.innerHTML = `<span style="color:var(--error);">⚠ 建立失敗：${escHtml(e.message)}</span>`;
+    else {
+      const errEl = document.createElement('div');
+      errEl.style.cssText = 'color:var(--error);font-size:13px;margin-top:6px;text-align:center;';
+      errEl.textContent = '⚠ 建立失敗：' + e.message;
+      document.querySelector('.modal-actions').before(errEl);
+      setTimeout(() => errEl.remove(), 4000);
+    }
   }
 }
 

@@ -63,6 +63,11 @@ async function sendMessage() {
     const data = await res.json();
     typingRow.remove();
 
+    if (!res.ok) {
+      appendBubble('ai', `⚠ 伺服器錯誤：${data.error || res.status}`);
+      return;
+    }
+
     if (data.reply) appendBubble('ai', data.reply);
 
     if (data.tables_ready) {

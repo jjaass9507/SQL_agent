@@ -14,6 +14,7 @@ const downloadZipBtn = document.getElementById('download-zip-btn');
 
 let currentDoc = '01_specification.md';
 let outputs = {};
+let genErrors = {};
 let pollTimer = null;
 let pollFailCount = 0;
 
@@ -68,7 +69,7 @@ async function poll() {
     const res = await fetch(`/api/sessions/${SESSION_ID}`);
     const session = await res.json();
     const genStatus = session.generation_status || {};
-    const genErrors = session.generation_errors || {};
+    genErrors = session.generation_errors || {};
     outputs = session.outputs || {};
     pollFailCount = 0;
 
@@ -108,6 +109,7 @@ function transitionToReading(session) {
   readingView.classList.remove('hidden');
 
   outputs = session.outputs || {};
+  genErrors = session.generation_errors || genErrors;
   renderDoc(currentDoc);
 }
 
@@ -123,6 +125,17 @@ function renderDoc(filename) {
   });
 
   const contentEl = document.getElementById('docs-content');
+
+  if (!content) {
+    const errMsg = genErrors[filename];
+    contentEl.innerHTML = `<div style="padding:32px;text-align:center;color:var(--muted);">
+      <div style="font-size:32px;margin-bottom:10px;">✗</div>
+      <div style="font-weight:600;color:var(--error);margin-bottom:6px;">此文件產出失敗</div>
+      ${errMsg ? `<div style="font-size:12px;">${escHtml(errMsg)}</div>` : ''}
+      <div style="font-size:12px;margin-top:8px;">請返回確認頁重新產出</div>
+    </div>`;
+    return;
+  }
 
   if (filename === '02_er_diagram.md') {
     const mermaidMatch = content.match(/```mermaid\n([\s\S]*?)```/);
@@ -201,14 +214,20 @@ document.getElementById('download-btn').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
-// Initialise
+// Initialise from server-side data (no need to wait for first poll)
+genErrors = INITIAL_GEN_ERRORS || {};
+
 if (SESSION_PHASE === 'done') {
-  // Already done — fetch outputs immediately and show reading view
-  fetch(`/api/sessions/${SESSION_ID}`)
-    .then(r => r.json())
-    .then(session => transitionToReading(session));
+  outputs = INITIAL_OUTPUTS;
+  transitionToReading({ outputs: INITIAL_OUTPUTS, generation_errors: INITIAL_GEN_ERRORS });
 } else {
-  // Start polling
+  // Apply any already-known status immediately
+  if (INITIAL_GEN_STATUS) {
+    Object.entries(INITIAL_GEN_STATUS).forEach(([filename, status]) => {
+      updateCard(filename, status, (INITIAL_OUTPUTS || {})[filename], (INITIAL_GEN_ERRORS || {})[filename]);
+    });
+    updateProgressBar(INITIAL_GEN_STATUS);
+  }
   pollTimer = setInterval(poll, 2000);
-  poll(); // immediate first check
+  poll();
 }
