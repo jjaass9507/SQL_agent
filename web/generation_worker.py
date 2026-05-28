@@ -1,7 +1,10 @@
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from web.session_store import get_tables, update_generation_status, update_session
+
+logger = logging.getLogger(__name__)
 
 
 def run_generation(session_id: str) -> None:
@@ -40,7 +43,7 @@ def _generate(session_id: str) -> None:
                 update_generation_status(session_id, filename, "failed",
                                          error="Writer 回傳空內容")
         except Exception as e:
-            print(f"[generation_worker] {filename} failed: {e}")
+            logger.error("writer failed: %s", e, extra={"session_id": session_id, "filename": filename})
             update_generation_status(session_id, filename, "failed", error=str(e))
 
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -76,7 +79,7 @@ def _review(session_id: str) -> None:
     try:
         report = Reviewer().review(tables)
     except Exception as e:
-        print(f"[review_worker] failed: {e}")
+        logger.error("review failed: %s", e, extra={"session_id": session_id})
         report = f"審查過程發生錯誤：{e}"
 
     update_session(session_id, {

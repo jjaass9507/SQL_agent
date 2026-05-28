@@ -83,7 +83,7 @@ def get_session(session_id: str) -> dict | None:
         return json.loads(p.read_text(encoding="utf-8"))
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(limit: int = 50, offset: int = 0) -> list[dict]:
     sessions = []
     for p in sorted(DATA_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         try:
@@ -98,7 +98,7 @@ def list_sessions() -> list[dict]:
             })
         except Exception:
             pass
-    return sessions
+    return sessions[offset: offset + limit]
 
 
 def update_session(session_id: str, updates: dict[str, Any]) -> dict | None:
