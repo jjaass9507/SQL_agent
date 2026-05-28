@@ -25,9 +25,35 @@ from web.session_store import (
     GENERATION_FILES,
 )
 from web.generation_worker import run_generation, run_review
+from web.system_log import log_event
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
+
+
+def _api_error(message: str, status_code: int):
+    return jsonify({"error": message}), status_code
+
+
+@app.errorhandler(404)
+def handle_not_found(error):
+    if request.path.startswith("/api/"):
+        return _api_error("resource not found", 404)
+    return error
+
+
+@app.errorhandler(500)
+def handle_internal_error(error):
+    log_event(
+        "api_error",
+        path=request.path,
+        method=request.method,
+        status_code=500,
+        error=str(error),
+    )
+    if request.path.startswith("/api/"):
+        return _api_error("internal server error", 500)
+    return error
 
 
 def _get_interviewer(session_id: str) -> Interviewer:
@@ -105,6 +131,9 @@ def api_create_session():
     db_schema = (data.get("db_schema") or "public").strip()
     mode = (data.get("mode") or "design").strip()
 
+    if mode not in ("design", "review"):
+        return _api_error("mode must be design or review", 400)
+
     context_tables_json = []
     context_text = ""
     db_error = ""
@@ -118,6 +147,15 @@ def api_create_session():
 
     session = create_session(title, context_tables_json, context_text, mode=mode)
     resp = dict(session)
+
+    log_event(
+        "session_created",
+        session_id=session["id"],
+        mode=mode,
+        title=title,
+        db_imported=len(context_tables_json),
+        has_db_error=bool(db_error),
+    )
 
     if db_error:
         resp["db_error"] = db_error
@@ -142,12 +180,13 @@ def api_import_db(session_id):
     db_url = (data.get("db_url") or "").strip()
     db_schema = (data.get("db_schema") or "public").strip()
     if not db_url:
-        return jsonify({"error": "db_url required"}), 400
+        return _api_error("db_url required", 400)
 
     import dataclasses
     tables, error = extract_schema(db_url, db_schema)
     if error:
-        return jsonify({"error": error}), 400
+        log_event("db_import_failed", session_id=session_id, db_schema=db_schema, error=error)
+        return _api_error(error, 400)
 
     context_tables_json = [dataclasses.asdict(t) for t in tables]
     context_text = format_context(tables)
@@ -157,6 +196,7 @@ def api_import_db(session_id):
     })
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
+    log_event("db_imported", session_id=session_id, db_schema=db_schema, table_count=len(tables))
     return jsonify({"imported": len(tables), "tables": [t.table_name for t in tables]})
 
 
@@ -179,12 +219,12 @@ def api_send_message(session_id):
     if not session:
         abort(404)
     if session["phase"] not in ("collecting", "confirming"):
-        return jsonify({"error": "session not in collecting phase"}), 400
+        return _api_error("session not in collecting phase", 400)
 
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
     if not content:
-        return jsonify({"error": "content required"}), 400
+        return _api_error("content required", 400)
 
     if session["phase"] == "confirming":
         update_session(session_id, {"phase": "collecting"})
@@ -204,6 +244,7 @@ def api_send_message(session_id):
 
         from web.session_store import set_tables
         set_tables(session_id, tables, key_points)
+        log_event("tables_ready", session_id=session_id, table_count=len(tables))
 
         tables_json = [
             {
@@ -248,11 +289,12 @@ def api_confirm(session_id):
     if not session:
         abort(404)
     if not session.get("tables"):
-        return jsonify({"error": "no tables to generate"}), 400
+        return _api_error("no tables to generate", 400)
 
     if not try_start_generation(session_id):
-        return jsonify({"error": "session not in confirming phase"}), 400
+        return _api_error("session not in confirming phase", 400)
 
+    log_event("generation_started", session_id=session_id, table_count=len(session.get("tables") or []))
     run_generation(session_id)
     return jsonify({"status": "generating"})
 
@@ -278,7 +320,8 @@ def api_list_versions(session_id):
 @app.post("/api/sessions/<session_id>/versions/<int:version_num>/restore")
 def api_restore_version(session_id, version_num):
     if not restore_version(session_id, version_num):
-        return jsonify({"error": "version not found"}), 404
+        return _api_error("version not found", 404)
+    log_event("version_restored", session_id=session_id, version=version_num)
     return jsonify({"status": "restored", "version": version_num})
 
 
@@ -302,7 +345,7 @@ def api_download_zip(session_id):
         abort(404)
     outputs = session.get("outputs", {})
     if not outputs:
-        return jsonify({"error": "no outputs yet"}), 400
+        return _api_error("no outputs yet", 400)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -311,6 +354,7 @@ def api_download_zip(session_id):
     buf.seek(0)
 
     title = session.get("title", "output").replace(" ", "_")
+    log_event("outputs_downloaded", session_id=session_id, file_count=len(outputs))
     return send_file(
         buf,
         mimetype="application/zip",
