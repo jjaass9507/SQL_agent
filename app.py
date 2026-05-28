@@ -61,7 +61,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_review
+from web.generation_worker import run_generation, run_review, run_single_file
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
@@ -125,6 +125,8 @@ def docs_page(session_id):
     session = get_session(session_id)
     if not session:
         return redirect(url_for("index"))
+    if session.get("mode") == "review":
+        return redirect(url_for("review_page", session_id=session_id))
     return render_template("docs.html", session=session)
 
 
@@ -230,6 +232,20 @@ def api_get_session(session_id):
     return jsonify(session)
 
 
+@app.patch("/api/sessions/<session_id>")
+def api_update_session(session_id):
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()[:200]
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    update_session(session_id, {"title": title})
+    logger.info("session renamed", extra={"session_id": session_id})
+    return jsonify({"title": title})
+
+
 @app.delete("/api/sessions/<session_id>")
 def api_delete_session(session_id):
     if not delete_session(session_id):
@@ -321,6 +337,37 @@ def api_confirm(session_id):
     logger.info("generation started", extra={"session_id": session_id})
     run_generation(session_id)
     return jsonify({"status": "generating"})
+
+
+# ── Review restart ─────────────────────────────────────
+
+@app.post("/api/sessions/<session_id>/review/restart")
+def api_review_restart(session_id):
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    if session.get("mode") != "review":
+        return jsonify({"error": "not a review session"}), 400
+    update_session(session_id, {"phase": "reviewing", "outputs": {}})
+    run_review(session_id)
+    logger.info("review restarted", extra={"session_id": session_id})
+    return jsonify({"status": "reviewing"})
+
+
+# ── Per-file regeneration ───────────────────────────────
+
+@app.post("/api/sessions/<session_id>/outputs/<filename>/regenerate")
+def api_regenerate_output(session_id, filename):
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    if filename not in GENERATION_FILES:
+        return jsonify({"error": "invalid filename"}), 400
+    if not session.get("tables"):
+        return jsonify({"error": "no tables"}), 400
+    run_single_file(session_id, filename)
+    logger.info("file regeneration started", extra={"session_id": session_id, "output_file": filename})
+    return jsonify({"status": "regenerating"})
 
 
 # ── Version management ──────────────────────────────────

@@ -86,6 +86,7 @@ function buildCard(s) {
       </div>
       <div class="card-actions">
         <a href="${href}" class="btn btn-primary btn-sm">${actionLabel}</a>
+        <button class="btn btn-ghost btn-sm" onclick="handleRenameClick(event,'${s.id}')" title="重新命名">✏</button>
         <button class="btn btn-ghost btn-sm" onclick="handleDeleteClick(event,'${s.id}',${JSON.stringify(s.title)})">🗑</button>
       </div>
     </div>`;
@@ -130,6 +131,61 @@ async function executeDelete(sessionId, btn) {
       btn.className = 'btn btn-ghost btn-sm';
     }, 2000);
   }
+}
+
+function handleRenameClick(e, sessionId) {
+  e.stopPropagation();
+  const card = e.currentTarget.closest('.project-card');
+  if (!card) return;
+  const titleEl = card.querySelector('.card-title');
+  if (!titleEl || titleEl.dataset.editing) return;
+
+  const session = allSessions.find(s => s.id === sessionId);
+  if (!session) return;
+
+  titleEl.dataset.editing = '1';
+  const icon = session.mode === 'review' ? '🔍' : '📁';
+  const origTitle = session.title;
+
+  titleEl.innerHTML = `<input class="card-title-input" value="${escHtml(origTitle)}" maxlength="200" />`;
+  const input = titleEl.querySelector('input');
+  input.focus();
+  input.select();
+
+  let done = false;
+
+  async function save() {
+    if (done) return;
+    done = true;
+    const newTitle = input.value.trim();
+    if (!newTitle || newTitle === origTitle) {
+      titleEl.innerHTML = `${icon} ${escHtml(origTitle)}`;
+      delete titleEl.dataset.editing;
+      return;
+    }
+    input.disabled = true;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (!res.ok) throw new Error();
+      const idx = allSessions.findIndex(s => s.id === sessionId);
+      if (idx !== -1) allSessions[idx].title = newTitle;
+      renderSessions();
+      updateResumeBanner();
+    } catch {
+      titleEl.innerHTML = `${icon} ${escHtml(origTitle)}`;
+      delete titleEl.dataset.editing;
+    }
+  }
+
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); done = true; titleEl.innerHTML = `${icon} ${escHtml(origTitle)}`; delete titleEl.dataset.editing; }
+  });
+  input.addEventListener('blur', () => setTimeout(save, 150));
 }
 
 function updateResumeBanner() {

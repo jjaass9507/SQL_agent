@@ -89,7 +89,7 @@ async function poll() {
       clearInterval(pollTimer);
       const bar = document.getElementById('progress-bar');
       if (bar) bar.closest('.gen-progress-wrap').innerHTML =
-        '<div style="color:var(--error);font-size:13px;padding:8px 0;">⚠ 連線中斷，請重新整理頁面</div>';
+        `<div style="color:var(--error);font-size:13px;padding:8px 0;">⚠ 連線中斷，無法取得進度 <button onclick="location.reload()" class="btn btn-ghost btn-sm" style="margin-left:8px;">重新整理</button></div>`;
     }
   }
 }
@@ -131,8 +131,9 @@ function renderDoc(filename) {
     contentEl.innerHTML = `<div style="padding:32px;text-align:center;color:var(--muted);">
       <div style="font-size:32px;margin-bottom:10px;">✗</div>
       <div style="font-weight:600;color:var(--error);margin-bottom:6px;">此文件產出失敗</div>
-      ${errMsg ? `<div style="font-size:12px;">${escHtml(errMsg)}</div>` : ''}
-      <div style="font-size:12px;margin-top:8px;">請返回確認頁重新產出</div>
+      ${errMsg ? `<div style="font-size:12px;margin-bottom:12px;">${escHtml(errMsg)}</div>` : ''}
+      <button class="btn btn-primary btn-sm" id="regen-btn-${escHtml(filename)}"
+        onclick="regenerateFile('${escHtml(filename)}')">↻ 重新產出</button>
     </div>`;
     return;
   }
@@ -213,6 +214,42 @@ document.getElementById('download-btn').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(a.href);
 });
+
+async function regenerateFile(filename) {
+  const btn = document.getElementById(`regen-btn-${filename}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ 產出中...'; }
+  try {
+    const res = await fetch(`/api/sessions/${SESSION_ID}/outputs/${encodeURIComponent(filename)}/regenerate`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '失敗');
+    // Poll until the specific file is done
+    const waitDone = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/sessions/${SESSION_ID}`);
+        const s = await r.json();
+        const status = (s.generation_status || {})[filename];
+        if (status === 'done') {
+          clearInterval(waitDone);
+          outputs = s.outputs || {};
+          genErrors = s.generation_errors || {};
+          renderDoc(filename);
+        } else if (status === 'failed') {
+          clearInterval(waitDone);
+          genErrors = s.generation_errors || {};
+          renderDoc(filename);
+        }
+      } catch { clearInterval(waitDone); }
+    }, 2000);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ 重新產出'; }
+    const contentEl = document.getElementById('docs-content');
+    if (contentEl) {
+      const errNote = document.createElement('div');
+      errNote.style.cssText = 'color:var(--error);font-size:12px;margin-top:8px;';
+      errNote.textContent = '⚠ ' + e.message;
+      contentEl.appendChild(errNote);
+    }
+  }
+}
 
 // Initialise from server-side data (no need to wait for first poll)
 genErrors = INITIAL_GEN_ERRORS || {};

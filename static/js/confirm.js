@@ -36,6 +36,10 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
 
   try {
     const res = await fetch(`/api/sessions/${SESSION_ID}/confirm`, { method: 'POST' });
+    if (res.status === 404) {
+      window.location.href = '/';
+      return;
+    }
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || '確認失敗');

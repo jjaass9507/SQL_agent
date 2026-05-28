@@ -332,6 +332,7 @@ html, body {
 .project-card:hover { box-shadow: 4px 4px 0 rgba(42,36,32,.1); }
 .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .card-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.card-title-input { font-size: 15px; font-weight: 700; color: var(--text); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 4px; outline: none; width: calc(100% - 28px); background: var(--card); font-family: inherit; }
 .card-meta { display: flex; gap: 12px; font-size: 13px; color: var(--muted); }
 .card-actions { display: flex; gap: 7px; }
 

@@ -227,3 +227,84 @@ def test_delete_session(client):
 def test_delete_nonexistent_session(client):
     resp = client.delete("/api/sessions/00000000-0000-0000-0000-000000000000")
     assert resp.status_code == 404
+
+
+# ── TC-API-17: Rename session via PATCH ──────────────────
+
+def test_rename_session(client):
+    session_id = _post_session(client, "Original Title").get_json()["id"]
+
+    resp = client.patch(f"/api/sessions/{session_id}", json={"title": "New Title"})
+    assert resp.status_code == 200
+    assert resp.get_json()["title"] == "New Title"
+
+    # Verify the rename is persisted
+    from web.session_store import get_session
+    assert get_session(session_id)["title"] == "New Title"
+
+
+def test_rename_session_empty_title(client):
+    session_id = _post_session(client, "My Session").get_json()["id"]
+
+    resp = client.patch(f"/api/sessions/{session_id}", json={"title": "   "})
+    assert resp.status_code == 400
+    assert "title required" in resp.get_json()["error"]
+
+
+def test_rename_nonexistent_session(client):
+    resp = client.patch("/api/sessions/00000000-0000-0000-0000-000000000000", json={"title": "x"})
+    assert resp.status_code == 404
+
+
+# ── TC-API-18: Review restart ────────────────────────────
+
+def test_review_restart(client):
+    from web.session_store import update_session
+    session_id = _post_session(client, mode="review").get_json()["id"]
+    update_session(session_id, {"phase": "review_done", "outputs": {"05_review_report.md": "old"}})
+
+    with patch("app.run_review"):
+        resp = client.post(f"/api/sessions/{session_id}/review/restart")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "reviewing"
+
+    from web.session_store import get_session
+    s = get_session(session_id)
+    assert s["phase"] == "reviewing"
+    assert s["outputs"] == {}
+
+
+def test_review_restart_wrong_mode(client):
+    session_id = _post_session(client, mode="design").get_json()["id"]
+    resp = client.post(f"/api/sessions/{session_id}/review/restart")
+    assert resp.status_code == 400
+
+
+# ── TC-API-19: Per-file regenerate ──────────────────────
+
+def test_regenerate_file(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+
+    with patch("app.run_single_file"):
+        resp = client.post(f"/api/sessions/{session_id}/outputs/01_specification.md/regenerate")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "regenerating"
+
+
+def test_regenerate_invalid_file(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+
+    resp = client.post(f"/api/sessions/{session_id}/outputs/malicious.sh/regenerate")
+    assert resp.status_code == 400
+
+
+def test_regenerate_no_tables(client):
+    session_id = _post_session(client).get_json()["id"]
+    resp = client.post(f"/api/sessions/{session_id}/outputs/01_specification.md/regenerate")
+    assert resp.status_code == 400
