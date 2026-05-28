@@ -2,6 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from web.session_store import get_tables, update_generation_status, update_session
+from web.system_log import log_event
 
 
 def run_generation(session_id: str) -> None:
@@ -21,6 +22,7 @@ def _generate(session_id: str) -> None:
 
     tables = get_tables(session_id)
     if not tables:
+        log_event("generation_skipped", session_id=session_id, reason="no tables")
         return
 
     writers = [
@@ -36,17 +38,22 @@ def _generate(session_id: str) -> None:
             content = writer.generate(tables)
             if content and content.strip():
                 update_generation_status(session_id, filename, "done", content)
+                log_event("generation_file_done", session_id=session_id, filename=filename)
             else:
                 update_generation_status(session_id, filename, "failed",
                                          error="Writer 回傳空內容")
+                log_event("generation_file_failed", session_id=session_id, filename=filename,
+                          error="Writer 回傳空內容")
         except Exception as e:
             print(f"[generation_worker] {filename} failed: {e}")
             update_generation_status(session_id, filename, "failed", error=str(e))
+            log_event("generation_file_failed", session_id=session_id, filename=filename, error=str(e))
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(lambda args: run_one(*args), writers))
 
     update_session(session_id, {"phase": "done"})
+    log_event("generation_finished", session_id=session_id)
 
 
 def run_review(session_id: str) -> None:
@@ -61,6 +68,7 @@ def _review(session_id: str) -> None:
 
     session = get_session(session_id)
     if not session:
+        log_event("review_skipped", session_id=session_id, reason="session not found")
         return
     context_tables_data = session.get("context_tables", [])
     if not context_tables_data:
@@ -68,6 +76,7 @@ def _review(session_id: str) -> None:
             "phase": "review_done",
             "outputs": {"05_review_report.md": "（未匯入任何資料表，無法進行審查）"},
         })
+        log_event("review_skipped", session_id=session_id, reason="no context tables")
         return
 
     from web.session_store import tables_from_json
@@ -75,9 +84,11 @@ def _review(session_id: str) -> None:
 
     try:
         report = Reviewer().review(tables)
+        log_event("review_finished", session_id=session_id, table_count=len(tables))
     except Exception as e:
         print(f"[review_worker] failed: {e}")
         report = f"審查過程發生錯誤：{e}"
+        log_event("review_failed", session_id=session_id, error=str(e))
 
     update_session(session_id, {
         "phase": "review_done",
