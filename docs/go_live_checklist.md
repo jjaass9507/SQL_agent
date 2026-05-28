@@ -67,9 +67,7 @@
 
 - [ ] `GET /health` → HTTP 200 `{"status": "ok"}`
 - [ ] 應用程式重啟後 sessions 資料不遺失（data/ 目錄持久化）
-- [ ] Docker 映像建置成功（`docker build` 無錯誤）
-- [ ] 容器啟動後 `/health` 可連通
-- [ ] Log 輸出至 stdout，可被容器平台收集
+- [ ] Log 輸出至 stdout，可被日誌收集工具讀取
 
 ---
 
@@ -85,7 +83,7 @@
 ## 七、文件與知識轉移
 
 - [ ] `README.md` 說明本地啟動步驟（新開發者可依此執行）
-- [ ] `docs/deployment_guide.md` 說明 Docker 部署步驟
+- [ ] `docs/deployment_guide.md` 說明生產部署步驟
 - [ ] `docs/api_spec.yaml` 反映所有現行端點
 - [ ] `docs/architecture.md` 反映最新模組結構
 - [ ] 維運 Runbook（`docs/ops_runbook.md`）已完成
