@@ -310,6 +310,70 @@ def test_regenerate_no_tables(client):
     assert resp.status_code == 400
 
 
+# ── TC-API-26: Edit schema via PUT /tables ──────────────
+
+def test_update_tables_saves_and_versions(client):
+    from web.session_store import set_tables, get_session
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], ["p"])
+
+    edited = {"tables": [{
+        "table_name": "users",
+        "description": "edited",
+        "columns": [
+            {"name": "id", "data_type": "uuid", "nullable": False,
+             "is_primary_key": True, "description": "pk"},
+            {"name": "email", "data_type": "varchar", "length": 255,
+             "nullable": False, "is_unique": True, "description": "mail"},
+        ],
+    }]}
+    resp = client.put(f"/api/sessions/{session_id}/tables", json=edited)
+    assert resp.status_code == 200
+    assert resp.get_json()["table_count"] == 1
+
+    s = get_session(session_id)
+    assert len(s["tables"][0]["columns"]) == 2
+    assert s["tables"][0]["columns"][1]["is_unique"] is True
+    assert len(s["table_versions"]) >= 2  # edit created a new version
+
+
+def test_update_tables_rejects_empty(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    assert client.put(f"/api/sessions/{session_id}/tables",
+                      json={"tables": []}).status_code == 400
+    assert client.put(f"/api/sessions/{session_id}/tables",
+                      json={"tables": [{"table_name": "", "columns": [{"name": "x"}]}]}).status_code == 400
+    assert client.put(f"/api/sessions/{session_id}/tables",
+                      json={"tables": [{"table_name": "t", "columns": []}]}).status_code == 400
+
+
+def test_update_tables_wrong_phase(client):
+    session_id = _post_session(client).get_json()["id"]  # collecting, no tables
+    resp = client.put(f"/api/sessions/{session_id}/tables",
+                      json={"tables": [{"table_name": "t", "columns": [{"name": "x"}]}]})
+    assert resp.status_code == 400
+
+
+# ── TC-API-27: Design advisor warnings on confirm page ──
+
+def test_confirm_page_shows_advisor_warnings(client):
+    from web.session_store import set_tables
+    from models.schema import ColumnSpec, TableSpec
+    session_id = _post_session(client).get_json()["id"]
+    # email without unique + password (secret) → should trigger warnings
+    cols = [
+        ColumnSpec(name="id", data_type="serial", nullable=False, description="pk", is_primary_key=True),
+        ColumnSpec(name="email", data_type="varchar", nullable=False, description="mail"),
+        ColumnSpec(name="password", data_type="varchar", nullable=False, description="pw"),
+    ]
+    set_tables(session_id, [TableSpec(table_name="accounts", description="acc", columns=cols)], ["p"])
+    html = client.get(f"/sessions/{session_id}/confirm").data.decode()
+    assert "設計建議" in html
+    assert "INITIAL_TABLES" in html
+
+
 # ── TC-API-20: mode validation ───────────────────────────
 
 def test_create_session_invalid_mode(client):

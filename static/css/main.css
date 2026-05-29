@@ -960,3 +960,39 @@ html, body {
 }
 .mode-btn.active { border-color: var(--accent); background: var(--accent-light); font-weight: 600; }
 .mode-btn .mode-icon { font-size: 20px; display: block; margin-bottom: 4px; }
+
+/* ── Design advisor warnings ── */
+.advisor-section {
+  margin: 16px 22px; padding: 12px 14px;
+  border: 1.5px solid var(--warning); border-radius: 6px; background: var(--warning-light);
+}
+.advisor-section-title { font-size: 14px; font-weight: 700; color: #7a4800; margin-bottom: 8px; }
+.advisor-item { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 13px; }
+.advisor-badge { flex-shrink: 0; }
+.advisor-badge-warn { color: var(--error); }
+.advisor-badge-info { color: var(--accent); }
+.advisor-target { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text); flex-shrink: 0; }
+.advisor-msg { color: #5a4a30; }
+
+/* ── Schema editor ── */
+.edit-table { border: 1.5px solid var(--line); border-radius: 6px; padding: 10px; margin-bottom: 12px; background: var(--card); }
+.edit-table-head { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+.edit-input {
+  border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px;
+  font-size: 12px; font-family: inherit; color: var(--text); background: #fff; outline: none; min-width: 0;
+}
+.edit-input:focus { border-color: var(--accent); }
+.edit-tname { font-weight: 700; flex: 0 0 140px; }
+.edit-tdesc { flex: 1; }
+.edit-col-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1.2fr 52px 34px 28px 28px 1fr 28px 34px 1.6fr 24px;
+  gap: 4px; align-items: center; padding: 2px 0;
+}
+.edit-col-grid-head { font-size: 11px; color: var(--muted); font-weight: 600; text-align: center; }
+.edit-col-grid-head span:first-child, .edit-col-grid-head span:nth-child(2) { text-align: left; }
+.edit-chk { text-align: center; }
+.edit-len { text-align: center; }
+.edit-col-remove { border: none; background: none; color: var(--error); cursor: pointer; font-size: 13px; padding: 0; }
+.edit-add-col { margin-top: 6px; }
+.edit-actions-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }

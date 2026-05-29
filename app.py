@@ -124,13 +124,17 @@ def confirm_page(session_id):
         return redirect(url_for("chat_page", session_id=session_id))
 
     diff = None
-    if session.get("tables") and session.get("context_tables"):
-        from web.schema_diff import compute_diff
+    warnings = []
+    if session.get("tables"):
+        from web.schema_advisor import analyze
         designed = tables_from_json(session["tables"])
-        existing = tables_from_json(session["context_tables"])
-        diff = compute_diff(designed, existing)
+        warnings = analyze(designed)
+        if session.get("context_tables"):
+            from web.schema_diff import compute_diff
+            existing = tables_from_json(session["context_tables"])
+            diff = compute_diff(designed, existing)
 
-    return render_template("confirm.html", session=session, diff=diff)
+    return render_template("confirm.html", session=session, diff=diff, warnings=warnings)
 
 
 @app.get("/sessions/<session_id>/docs")
@@ -349,6 +353,62 @@ def api_send_message(session_id):
         "tables": tables_json,
         "key_points": key_points,
     })
+
+
+@app.put("/api/sessions/<session_id>/tables")
+def api_update_tables(session_id):
+    """Save a user-edited schema. Creates a new version, keeps phase=confirming."""
+    from models.schema import ColumnSpec, TableSpec
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    if session["phase"] not in ("confirming", "generating", "done"):
+        return jsonify({"error": "schema can only be edited after requirements are collected"}), 400
+
+    data = request.get_json(silent=True) or {}
+    raw_tables = data.get("tables")
+    if not isinstance(raw_tables, list) or not raw_tables:
+        return jsonify({"error": "tables must be a non-empty list"}), 400
+
+    try:
+        tables = []
+        for t in raw_tables:
+            name = (t.get("table_name") or "").strip()
+            if not name:
+                return jsonify({"error": "every table needs a table_name"}), 400
+            columns = []
+            for c in t.get("columns", []):
+                col_name = (c.get("name") or "").strip()
+                if not col_name:
+                    return jsonify({"error": f"table '{name}' has a column without a name"}), 400
+                columns.append(ColumnSpec(
+                    name=col_name,
+                    data_type=(c.get("data_type") or "text").strip(),
+                    nullable=bool(c.get("nullable", True)),
+                    description=(c.get("description") or "").strip(),
+                    is_primary_key=bool(c.get("is_primary_key", False)),
+                    is_foreign_key=bool(c.get("is_foreign_key", False)),
+                    references=(c.get("references") or None),
+                    is_unique=bool(c.get("is_unique", False)),
+                    is_indexed=bool(c.get("is_indexed", False)),
+                    length=c.get("length") or None,
+                    default=(c.get("default") or None),
+                ))
+            if not columns:
+                return jsonify({"error": f"table '{name}' has no columns"}), 400
+            tables.append(TableSpec(
+                table_name=name,
+                description=(t.get("description") or "").strip(),
+                columns=columns,
+                constraints=t.get("constraints", []),
+                related_tables=t.get("related_tables", []),
+            ))
+    except (AttributeError, TypeError) as e:
+        return jsonify({"error": f"invalid table structure: {e}"}), 400
+
+    set_tables(session_id, tables, session.get("key_points", []))
+    logger.info("schema edited", extra={"session_id": session_id, "table_count": len(tables)})
+    return jsonify({"status": "saved", "table_count": len(tables)})
 
 
 @app.post("/api/sessions/<session_id>/confirm")
