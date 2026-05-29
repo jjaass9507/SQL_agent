@@ -996,3 +996,17 @@ html, body {
 .edit-col-remove { border: none; background: none; color: var(--error); cursor: pointer; font-size: 13px; padding: 0; }
 .edit-add-col { margin-top: 6px; }
 .edit-actions-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+
+/* ── Docs extras (on-demand outputs) ── */
+.docs-toc-section-label { font-size: 11px; color: var(--muted); font-weight: 600; padding: 2px 10px 4px; letter-spacing: .3px; }
+.docs-toc-gen-btn {
+  width: 100%; padding: 8px 10px; margin-bottom: 4px; border: 1.5px dashed var(--line);
+  border-radius: 4px; background: var(--bg); cursor: pointer; display: flex; align-items: center;
+  gap: 8px; font-size: 13px; color: var(--muted); font-family: inherit; text-align: left;
+}
+.docs-toc-gen-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.docs-toc-gen-btn:disabled { opacity: .6; cursor: default; }
+.code-block {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre;
+  overflow-x: auto; background: var(--sidebar); padding: 14px 16px; border-radius: 6px;
+}

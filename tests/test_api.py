@@ -374,6 +374,42 @@ def test_confirm_page_shows_advisor_warnings(client):
     assert "INITIAL_TABLES" in html
 
 
+# ── TC-API-28: On-demand extra outputs ──────────────────
+
+def test_generate_extra_orm(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+
+    with patch("app.run_single_file"):
+        resp = client.post(f"/api/sessions/{session_id}/extras/orm/generate")
+    assert resp.status_code == 200
+    assert resp.get_json()["filename"] == "05_orm_models.py"
+
+
+def test_generate_extra_invalid_kind(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    resp = client.post(f"/api/sessions/{session_id}/extras/bogus/generate")
+    assert resp.status_code == 400
+
+
+def test_generate_extra_no_tables(client):
+    session_id = _post_session(client).get_json()["id"]
+    resp = client.post(f"/api/sessions/{session_id}/extras/orm/generate")
+    assert resp.status_code == 400
+
+
+def test_generate_extra_concurrent_blocked(client):
+    from web.session_store import set_tables, update_generation_status
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    update_generation_status(session_id, "05_orm_models.py", "loading")
+    resp = client.post(f"/api/sessions/{session_id}/extras/orm/generate")
+    assert resp.status_code == 409
+
+
 # ── TC-API-20: mode validation ───────────────────────────
 
 def test_create_session_invalid_mode(client):

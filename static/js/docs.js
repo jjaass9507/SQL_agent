@@ -5,7 +5,17 @@ const FILE_INFO = {
   '02_er_diagram.md':    { icon: '🗺', label: 'ER 關聯圖',        cardId: 'card-diagram' },
   '03_ddl.sql':          { icon: '💾', label: 'DDL 腳本',          cardId: 'card-ddl' },
   '04_security_plan.md': { icon: '🔒', label: '效能與安全規劃',    cardId: 'card-security' },
+  '05_orm_models.py':    { icon: '🧩', label: 'ORM 模型（SQLAlchemy）' },
+  '06_migration.py':     { icon: '🔧', label: 'Migration（Alembic）' },
+  '07_queries.sql':      { icon: '🔎', label: '常用查詢範例' },
 };
+
+// On-demand extras: kind → output filename (order defines TOC order)
+const EXTRA_INFO = [
+  { kind: 'orm',       filename: '05_orm_models.py', icon: '🧩', label: 'ORM 模型（SQLAlchemy）' },
+  { kind: 'migration', filename: '06_migration.py',  icon: '🔧', label: 'Migration（Alembic）' },
+  { kind: 'query',     filename: '07_queries.sql',   icon: '🔎', label: '常用查詢範例' },
+];
 
 const generatingView = document.getElementById('generating-view');
 const readingView = document.getElementById('reading-view');
@@ -110,6 +120,7 @@ function transitionToReading(session) {
 
   outputs = session.outputs || {};
   genErrors = session.generation_errors || genErrors;
+  renderExtrasToc();
   renderDoc(currentDoc);
 }
 
@@ -148,13 +159,74 @@ function renderDoc(filename) {
     } else {
       contentEl.innerHTML = `<pre>${escHtml(content)}</pre>`;
     }
-  } else if (filename === '03_ddl.sql') {
+  } else if (filename.endsWith('.sql')) {
     contentEl.innerHTML = `
       <div class="copy-btn-wrap">
         <pre id="ddl-pre">${highlightSQL(content)}</pre>
       </div>`;
+  } else if (filename.endsWith('.py')) {
+    contentEl.innerHTML = `<pre class="code-block">${escHtml(content)}</pre>`;
   } else {
     contentEl.innerHTML = `<div class="docs-markdown">${renderMarkdown(content)}</div>`;
+  }
+}
+
+// ── On-demand extras (ORM / migration / queries) ──
+function renderExtrasToc() {
+  const host = document.getElementById('extras-toc');
+  if (!host) return;
+  host.innerHTML = EXTRA_INFO.map(ex => {
+    const has = !!outputs[ex.filename];
+    const loading = (window._extraLoading || {})[ex.kind];
+    if (has) {
+      return `<div class="docs-toc-item" data-doc="${ex.filename}">
+        <span>${ex.icon}</span><span>${ex.label}</span></div>`;
+    }
+    return `<button class="docs-toc-gen-btn" data-kind="${ex.kind}" ${loading ? 'disabled' : ''}>
+      <span>${loading ? '⟳' : '＋'}</span><span>${loading ? '產生中...' : '產生 ' + ex.label}</span></button>`;
+  }).join('');
+
+  host.querySelectorAll('.docs-toc-item').forEach(item => {
+    item.addEventListener('click', () => renderDoc(item.dataset.doc));
+  });
+  host.querySelectorAll('.docs-toc-gen-btn').forEach(btn => {
+    btn.addEventListener('click', () => generateExtra(btn.dataset.kind));
+  });
+}
+
+async function generateExtra(kind) {
+  const ex = EXTRA_INFO.find(e => e.kind === kind);
+  if (!ex) return;
+  window._extraLoading = window._extraLoading || {};
+  window._extraLoading[kind] = true;
+  renderExtrasToc();
+  try {
+    const res = await fetch(`/api/sessions/${SESSION_ID}/extras/${kind}/generate`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '產生失敗');
+    const wait = setInterval(async () => {
+      try {
+        const s = await (await fetch(`/api/sessions/${SESSION_ID}`)).json();
+        const status = (s.generation_status || {})[ex.filename];
+        if (status === 'done') {
+          clearInterval(wait);
+          window._extraLoading[kind] = false;
+          outputs = s.outputs || outputs;
+          genErrors = s.generation_errors || genErrors;
+          renderExtrasToc();
+          renderDoc(ex.filename);
+        } else if (status === 'failed') {
+          clearInterval(wait);
+          window._extraLoading[kind] = false;
+          genErrors = s.generation_errors || genErrors;
+          renderExtrasToc();
+          alert('產生失敗：' + (genErrors[ex.filename] || '未知錯誤'));
+        }
+      } catch { clearInterval(wait); window._extraLoading[kind] = false; renderExtrasToc(); }
+    }, 2000);
+  } catch (e) {
+    window._extraLoading[kind] = false;
+    renderExtrasToc();
+    alert('⚠ ' + e.message);
   }
 }
 

@@ -62,7 +62,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_review, run_single_file
+from web.generation_worker import run_generation, run_review, run_single_file, EXTRA_FILES
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
@@ -458,6 +458,25 @@ def api_regenerate_output(session_id, filename):
     run_single_file(session_id, filename)
     logger.info("file regeneration started", extra={"session_id": session_id, "output_file": filename})
     return jsonify({"status": "regenerating"})
+
+
+# ── On-demand extra outputs (ORM / migration / queries) ──
+
+@app.post("/api/sessions/<session_id>/extras/<kind>/generate")
+def api_generate_extra(session_id, kind):
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    filename = EXTRA_FILES.get(kind)
+    if not filename:
+        return jsonify({"error": "invalid extra kind"}), 400
+    if not session.get("tables"):
+        return jsonify({"error": "no tables"}), 400
+    if session.get("generation_status", {}).get(filename) == "loading":
+        return jsonify({"error": "already generating"}), 409
+    run_single_file(session_id, filename)
+    logger.info("extra generation started", extra={"session_id": session_id, "output_file": filename})
+    return jsonify({"status": "generating", "filename": filename})
 
 
 # ── Version management ──────────────────────────────────

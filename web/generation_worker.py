@@ -11,6 +11,17 @@ _WRITER_MAP = {
     "02_er_diagram.md":    "agents.writers.diagram_writer:DiagramWriter",
     "03_ddl.sql":          "agents.writers.ddl_writer:DDLWriter",
     "04_security_plan.md": "agents.writers.security_writer:SecurityWriter",
+    # On-demand extras (generated individually, not part of the core 4-doc run)
+    "05_orm_models.py":    "agents.writers.orm_writer:ORMWriter",
+    "06_migration.py":     "agents.writers.migration_writer:MigrationWriter",
+    "07_queries.sql":      "agents.writers.query_writer:QueryWriter",
+}
+
+# kind → output filename for on-demand extra generation
+EXTRA_FILES = {
+    "orm":       "05_orm_models.py",
+    "migration": "06_migration.py",
+    "query":     "07_queries.sql",
 }
 
 
@@ -36,7 +47,7 @@ def _run_one(session_id: str, filename: str, tables) -> None:
         else:
             update_generation_status(session_id, filename, "failed", error="Writer 回傳空內容")
     except Exception as e:
-        logger.error("writer failed: %s", e, extra={"session_id": session_id, "filename": filename})
+        logger.error("writer failed: %s", e, extra={"session_id": session_id, "output_file": filename})
         update_generation_status(session_id, filename, "failed", error=str(e))
 
 
