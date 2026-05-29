@@ -140,6 +140,12 @@ def docs_page(session_id):
         return redirect(url_for("index"))
     if session.get("mode") == "review":
         return redirect(url_for("review_page", session_id=session_id))
+    # Guard against landing on the docs page before generation has started,
+    # otherwise the user sees 4 cards spinning on "等待產出" forever.
+    if session["phase"] == "collecting":
+        return redirect(url_for("chat_page", session_id=session_id))
+    if session["phase"] == "confirming":
+        return redirect(url_for("confirm_page", session_id=session_id))
     return render_template("docs.html", session=session)
 
 
