@@ -374,6 +374,34 @@ def test_confirm_page_shows_advisor_warnings(client):
     assert "INITIAL_TABLES" in html
 
 
+# ── TC-API-29: Continue iterating after generation ──────
+
+def test_continue_reopens_design(client):
+    from web.session_store import set_tables, update_session, get_session
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], ["p"])
+    update_session(session_id, {"phase": "done"})
+
+    resp = client.post(f"/api/sessions/{session_id}/continue")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "collecting"
+    assert get_session(session_id)["phase"] == "collecting"
+
+
+def test_continue_no_design(client):
+    session_id = _post_session(client).get_json()["id"]  # no tables
+    resp = client.post(f"/api/sessions/{session_id}/continue")
+    assert resp.status_code == 400
+
+
+def test_continue_rejects_review(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client, mode="review").get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    resp = client.post(f"/api/sessions/{session_id}/continue")
+    assert resp.status_code == 400
+
+
 # ── TC-API-28: On-demand extra outputs ──────────────────
 
 def test_generate_extra_orm(client):

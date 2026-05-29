@@ -80,11 +80,34 @@ def _not_found(e):
     return jsonify({"error": "not found"}), 404
 
 
+def _schema_summary(tables: list) -> str:
+    """Compact text description of the current designed schema, fed to the
+    interviewer so it can keep iterating on an existing design."""
+    lines = []
+    for t in tables or []:
+        cols = ", ".join(
+            f"{c.get('name')} {c.get('data_type', '')}"
+            f"{'(PK)' if c.get('is_primary_key') else ''}"
+            f"{'(FK)' if c.get('is_foreign_key') else ''}"
+            for c in t.get("columns", [])
+        )
+        lines.append(f"- {t.get('table_name')}：{cols}")
+    return "\n".join(lines)
+
+
 def _get_interviewer(session_id: str) -> Interviewer:
     with _interviewer_lock:
         if session_id not in _interviewer_store:
             session = get_session(session_id)
             context = session.get("context_text", "") if session else ""
+            # If a design already exists (user is iterating on it), bake the
+            # current schema into the context so a freshly-built interviewer
+            # still knows what's been designed — even after a server restart.
+            if session and session.get("tables"):
+                summary = _schema_summary(session["tables"])
+                if summary:
+                    context = (context + "\n\n" if context else "") + \
+                        "使用者已完成以下資料表設計，正在繼續調整，請在此基礎上修改：\n" + summary
             _interviewer_store[session_id] = Interviewer(context=context)
         return _interviewer_store[session_id]
 
@@ -425,6 +448,25 @@ def api_confirm(session_id):
     logger.info("generation started", extra={"session_id": session_id})
     run_generation(session_id)
     return jsonify({"status": "generating"})
+
+
+@app.post("/api/sessions/<session_id>/continue")
+def api_continue(session_id):
+    """Re-open a confirmed/generated design for further iteration via chat."""
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    if session.get("mode") == "review":
+        return jsonify({"error": "review sessions cannot be iterated this way"}), 400
+    if not session.get("tables"):
+        return jsonify({"error": "no design to continue"}), 400
+    # Back to collecting; existing messages + schema-aware interviewer let the
+    # user say e.g. "加一張 order_items 表" and refine the design incrementally.
+    update_session(session_id, {"phase": "collecting"})
+    with _interviewer_lock:
+        _interviewer_store.pop(session_id, None)  # rebuild with current-schema context
+    logger.info("design reopened for iteration", extra={"session_id": session_id})
+    return jsonify({"status": "collecting"})
 
 
 # ── Review restart ─────────────────────────────────────

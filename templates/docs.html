@@ -27,6 +27,8 @@
       <span id="topbar-badge" class="badge badge-generating">⟳ 產出中</span>
       {% endif %}
       <div class="topbar-spacer"></div>
+      <button id="continue-btn" class="btn btn-ghost btn-sm"
+              style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">✏ 繼續修改設計</button>
       <a id="download-zip-btn" href="/api/sessions/{{ session.id }}/outputs/zip" class="btn btn-ghost btn-sm"
          style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">⬇ 全部下載 .zip</a>
     </div>

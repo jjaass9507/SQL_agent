@@ -108,6 +108,8 @@ function transitionToReading(session) {
   topbarBadge.textContent = '✓ 文件產出完成';
   topbarBadge.className = 'badge badge-done';
   downloadZipBtn.style.display = '';
+  const cont = document.getElementById('continue-btn');
+  if (cont) cont.style.display = '';
 
   const tocStatus = document.getElementById('toc-status');
   if (tocStatus) {
@@ -271,6 +273,24 @@ function escHtml(s) {
 document.querySelectorAll('.docs-toc-item').forEach(item => {
   item.addEventListener('click', () => renderDoc(item.dataset.doc));
 });
+
+// Continue iterating: re-open the design for further chat
+const continueBtn = document.getElementById('continue-btn');
+if (continueBtn) {
+  continueBtn.addEventListener('click', async () => {
+    continueBtn.disabled = true;
+    continueBtn.textContent = '⟳ 開啟中...';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/continue`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '失敗');
+      window.location.href = `/sessions/${SESSION_ID}/chat`;
+    } catch (e) {
+      continueBtn.disabled = false;
+      continueBtn.textContent = '✏ 繼續修改設計';
+      alert('⚠ ' + e.message);
+    }
+  });
+}
 
 function _copyText(text) {
   const btn = document.getElementById('copy-btn');
