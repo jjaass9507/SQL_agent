@@ -289,6 +289,8 @@ function renderResultTable(data) {
 
 function initWorkbench() {
   if (typeof HAS_DB === 'undefined' || !HAS_DB) return;
+  if (initWorkbench._done) return;   // idempotent: avoid double event binding
+  initWorkbench._done = true;
   const tocItem = document.getElementById('workbench-toc-item');
   if (tocItem) tocItem.style.display = '';
 

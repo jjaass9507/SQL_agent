@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -122,7 +121,8 @@ def _json_create_session(title, context_tables=None, context_text="", mode="desi
 
 
 def _json_get_session(session_id):
-    return _read(session_id)
+    with _lock_for(session_id):
+        return _read(session_id)
 
 
 def _json_list_sessions(limit=50, offset=0):

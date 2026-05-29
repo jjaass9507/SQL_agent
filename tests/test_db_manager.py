@@ -53,6 +53,29 @@ def test_check_sql_rejects_dml():
     assert _check_sql("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET x=1") is not None
 
 
+def test_check_sql_rejects_leading_comment_bypass():
+    # The forbidden verb is hidden behind a leading comment.
+    assert _check_sql("/* x */ DROP TABLE users") is not None
+    assert _check_sql("-- comment\nDROP TABLE users") is not None
+    assert _check_sql("  /* a */ /* b */  TRUNCATE sessions") is not None
+
+
+def test_check_sql_rejects_cte_dml():
+    assert _check_sql("WITH c AS (SELECT 1) DELETE FROM users") is not None
+    assert _check_sql("WITH c AS (SELECT 1) UPDATE users SET x = 1") is not None
+
+
+def test_check_sql_rejects_select_into():
+    assert _check_sql("SELECT * INTO new_table FROM old_table") is not None
+
+
+def test_check_sql_allows_select_with_keywords_in_literals():
+    # Keywords appearing only inside string literals / identifiers must not trip.
+    assert _check_sql("SELECT * FROM notes WHERE body = 'please delete this'") is None
+    assert _check_sql("SELECT create_date, updated_at FROM events") is None
+    assert _check_sql("SELECT * FROM updates WHERE id IN (1, 2)") is None
+
+
 # ── execute_query ─────────────────────────────────────────────────────────────
 
 def test_execute_query_rejects_forbidden_sql():

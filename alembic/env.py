@@ -1,7 +1,12 @@
 import os
+import sys
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+
+# Ensure the project root is importable so "web.db_schema" resolves when
+# alembic is invoked from any working directory.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 config = context.config
 

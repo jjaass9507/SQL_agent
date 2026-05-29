@@ -602,6 +602,7 @@ def api_query(session_id):
         return jsonify({"error": "sql required"}), 400
     result = execute_query(db_url, sql)
     if "error" in result:
+        result["error"] = _sanitize_db_error(result["error"])
         return jsonify(result), 400
     logger.info("SQL query executed", extra={"session_id": session_id, "sql_len": len(sql)})
     return jsonify(result)
@@ -623,6 +624,7 @@ def api_explain(session_id):
         return jsonify({"error": "sql required"}), 400
     result = explain_query(db_url, sql)
     if "error" in result:
+        result["error"] = _sanitize_db_error(result["error"])
         return jsonify(result), 400
     return jsonify(result)
 

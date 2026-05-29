@@ -17,12 +17,38 @@ _FORBIDDEN_RE = re.compile(
 QUERY_TIMEOUT_MS = 30_000
 
 
+def _sql_skeleton(sql: str) -> str:
+    """
+    Strip comments and string/identifier literals so keyword checks cannot be
+    bypassed by leading comments and cannot false-positive on literal text.
+    """
+    s = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)   # block comments
+    s = re.sub(r"--[^\n]*", " ", s)                        # line comments
+    s = re.sub(r"'(?:''|[^'])*'", " ", s)                  # single-quoted strings
+    s = re.sub(r'"(?:""|[^"])*"', " ", s)                  # quoted identifiers
+    return s
+
+
 def _check_sql(sql: str) -> str | None:
     """Returns an error string if the SQL is forbidden, else None."""
     if not sql or not sql.strip():
         return "SQL query is empty"
-    if _FORBIDDEN_RE.match(sql.strip()):
+    skeleton = _sql_skeleton(sql).strip()
+    if not skeleton:
+        return "SQL query is empty"
+    # First keyword after stripping comments must not be a write/DDL/DCL verb.
+    if _FORBIDDEN_RE.match(skeleton):
         return "Only SELECT and EXPLAIN queries are allowed"
+    # Data-modifying CTE, e.g. WITH x AS (...) DELETE ...
+    if re.match(r"^\s*WITH\b", skeleton, re.IGNORECASE) and re.search(
+        r"\b(INSERT|UPDATE|DELETE|MERGE)\b", skeleton, re.IGNORECASE
+    ):
+        return "Data-modifying statements are not allowed"
+    # SELECT ... INTO creates a table (a write disguised as a SELECT).
+    if re.match(r"^\s*SELECT\b", skeleton, re.IGNORECASE) and re.search(
+        r"\bINTO\b", skeleton, re.IGNORECASE
+    ):
+        return "SELECT ... INTO is not allowed"
     return None
 
 
@@ -41,13 +67,15 @@ def execute_query(db_url: str, sql: str, limit: int = 500) -> dict:
     except ImportError:
         return {"error": "psycopg2-binary is not installed"}
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn = psycopg2.connect(
+            db_url, connect_timeout=10,
+            options=f"-c statement_timeout={QUERY_TIMEOUT_MS}",
+        )
     except Exception as exc:
         return {"error": f"連線失敗：{str(exc)[:200]}"}
     try:
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(f"SET statement_timeout = {QUERY_TIMEOUT_MS}")
             cur.execute(sql)
             rows_raw = cur.fetchmany(limit + 1)
             truncated = len(rows_raw) > limit
@@ -124,10 +152,12 @@ def explain_query(db_url: str, sql: str) -> dict:
         return {"error": err}
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn = psycopg2.connect(
+            db_url, connect_timeout=10,
+            options=f"-c statement_timeout={QUERY_TIMEOUT_MS}",
+        )
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor() as cur:
-            cur.execute(f"SET statement_timeout = {QUERY_TIMEOUT_MS}")
             cur.execute(f"EXPLAIN {sql}")
             plan_rows = cur.fetchall()
         conn.close()
