@@ -27,6 +27,8 @@
       <span id="topbar-badge" class="badge badge-generating">⟳ 產出中</span>
       {% endif %}
       <div class="topbar-spacer"></div>
+      <button id="continue-btn" class="btn btn-ghost btn-sm"
+              style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">✏ 繼續修改設計</button>
       <a id="download-zip-btn" href="/api/sessions/{{ session.id }}/outputs/zip" class="btn btn-ghost btn-sm"
          style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">⬇ 全部下載 .zip</a>
     </div>
@@ -115,6 +117,9 @@
           <div class="docs-toc-item" data-doc="04_security_plan.md">
             <span>🔒</span><span>效能與安全規劃</span>
           </div>
+          <div class="docs-toc-divider"></div>
+          <div class="docs-toc-section-label">額外產出（選配）</div>
+          <div id="extras-toc"><!-- injected by docs.js --></div>
           <div class="docs-toc-divider"></div>
           <a href="/api/sessions/{{ session.id }}/outputs/zip" class="docs-toc-action">
             <span>⬇</span><span>全部下載 .zip</span>

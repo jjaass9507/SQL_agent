@@ -1,4 +1,5 @@
 let currentFilter = 'all';
+let currentSearch = '';
 let allSessions = [];
 
 async function loadSessions() {
@@ -15,9 +16,13 @@ async function loadSessions() {
 
 function renderSessions() {
   const grid = document.getElementById('sessions-grid');
-  const filtered = currentFilter === 'all'
+  let filtered = currentFilter === 'all'
     ? allSessions
     : allSessions.filter(s => phaseToFilter(s.phase) === currentFilter);
+  if (currentSearch) {
+    const q = currentSearch.toLowerCase();
+    filtered = filtered.filter(s => s.title.toLowerCase().includes(q));
+  }
 
   if (filtered.length === 0) {
     const emptyMsg = currentFilter === 'all'
@@ -86,19 +91,127 @@ function buildCard(s) {
       </div>
       <div class="card-actions">
         <a href="${href}" class="btn btn-primary btn-sm">${actionLabel}</a>
-        ${isDone ? '' : `<a href="${href}" class="btn btn-ghost btn-sm">繼續</a>`}
+        <button class="btn btn-ghost btn-sm" onclick="handleRenameClick(event,'${s.id}')" title="重新命名">✏</button>
+        <button class="btn btn-ghost btn-sm" onclick="handleDeleteClick(event,'${s.id}')">🗑</button>
       </div>
     </div>`;
 }
 
+// Two-click delete: first click arms, second click within 3s confirms
+const _deletePending = {};
+
+function handleDeleteClick(e, sessionId) {
+  e.stopPropagation();
+  const btn = e.currentTarget;
+  if (_deletePending[sessionId]) {
+    clearTimeout(_deletePending[sessionId]);
+    delete _deletePending[sessionId];
+    executeDelete(sessionId, btn);
+  } else {
+    btn.textContent = '確認刪除？';
+    btn.className = 'btn btn-danger btn-sm';
+    _deletePending[sessionId] = setTimeout(() => {
+      delete _deletePending[sessionId];
+      btn.textContent = '🗑';
+      btn.className = 'btn btn-ghost btn-sm';
+    }, 3000);
+  }
+}
+
+async function executeDelete(sessionId, btn) {
+  btn.disabled = true;
+  btn.textContent = '刪除中...';
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('delete failed');
+    allSessions = allSessions.filter(s => s.id !== sessionId);
+    renderSessions();
+    updateResumeBanner();
+  } catch {
+    btn.disabled = false;
+    btn.textContent = '刪除失敗';
+    btn.className = 'btn btn-danger btn-sm';
+    setTimeout(() => {
+      btn.textContent = '🗑';
+      btn.className = 'btn btn-ghost btn-sm';
+    }, 2000);
+  }
+}
+
+function handleRenameClick(e, sessionId) {
+  e.stopPropagation();
+  const card = e.currentTarget.closest('.project-card');
+  if (!card) return;
+  const titleEl = card.querySelector('.card-title');
+  if (!titleEl || titleEl.dataset.editing) return;
+
+  const session = allSessions.find(s => s.id === sessionId);
+  if (!session) return;
+
+  titleEl.dataset.editing = '1';
+  const icon = session.mode === 'review' ? '🔍' : '📁';
+  const origTitle = session.title;
+
+  titleEl.innerHTML = `<input class="card-title-input" value="${escHtml(origTitle)}" maxlength="200" />`;
+  const input = titleEl.querySelector('input');
+  input.focus();
+  input.select();
+
+  let done = false;
+
+  async function save() {
+    if (done) return;
+    done = true;
+    const newTitle = input.value.trim();
+    if (!newTitle || newTitle === origTitle) {
+      titleEl.innerHTML = `${icon} ${escHtml(origTitle)}`;
+      delete titleEl.dataset.editing;
+      return;
+    }
+    input.disabled = true;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (!res.ok) throw new Error();
+      const idx = allSessions.findIndex(s => s.id === sessionId);
+      if (idx !== -1) allSessions[idx].title = newTitle;
+      renderSessions();
+      updateResumeBanner();
+    } catch {
+      titleEl.innerHTML = `${icon} ${escHtml(origTitle)}`;
+      delete titleEl.dataset.editing;
+    }
+  }
+
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); done = true; titleEl.innerHTML = `${icon} ${escHtml(origTitle)}`; delete titleEl.dataset.editing; }
+  });
+  input.addEventListener('blur', () => setTimeout(save, 150));
+}
+
 function updateResumeBanner() {
-  const inprog = allSessions.find(s => s.phase === 'collecting' || s.phase === 'reviewing');
+  const inprogList = allSessions.filter(s => s.phase === 'collecting' || s.phase === 'reviewing');
   const banner = document.getElementById('resume-banner');
-  if (!inprog) { banner.classList.add('hidden'); return; }
-  const isReview = inprog.phase === 'reviewing';
-  document.getElementById('resume-banner-text').innerHTML =
-    `⟳ <strong>${escHtml(inprog.title)}</strong> ${isReview ? '審查中 — AI 正在分析資料庫結構' : '進行中 — 需求收集對話待完成'}`;
-  document.getElementById('resume-banner-link').href = sessionHref(inprog);
+  const linkEl = document.getElementById('resume-banner-link');
+  if (!inprogList.length) { banner.classList.add('hidden'); return; }
+  if (inprogList.length === 1) {
+    const s = inprogList[0];
+    const isReview = s.phase === 'reviewing';
+    document.getElementById('resume-banner-text').innerHTML =
+      `⟳ <strong>${escHtml(s.title)}</strong> ${isReview ? '審查中' : '進行中 — 需求收集待完成'}`;
+    linkEl.href = sessionHref(s);
+    linkEl.textContent = isReview ? '繼續審查 →' : '繼續對話 →';
+  } else {
+    document.getElementById('resume-banner-text').innerHTML =
+      `⟳ 有 <strong>${inprogList.length}</strong> 個進行中的專案`;
+    linkEl.href = '#';
+    linkEl.textContent = '查看全部';
+    linkEl.onclick = e => { e.preventDefault(); currentFilter = 'inprogress'; document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.filter === 'inprogress')); renderSessions(); };
+  }
   banner.classList.remove('hidden');
 }
 
@@ -234,6 +347,15 @@ async function createSession() {
       setTimeout(() => errEl.remove(), 4000);
     }
   }
+}
+
+// Search
+const searchEl = document.getElementById('session-search');
+if (searchEl) {
+  searchEl.addEventListener('input', () => {
+    currentSearch = searchEl.value.trim();
+    renderSessions();
+  });
 }
 
 loadSessions();

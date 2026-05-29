@@ -15,8 +15,8 @@
     <nav class="sidebar-nav">
       <a href="/" class="active"><span class="nav-icon">⊞</span> 工作台</a>
       <a href="/"><span class="nav-icon">◷</span> 所有專案</a>
-      <a href="#"><span class="nav-icon">◱</span> 範本庫</a>
-      <a href="#"><span class="nav-icon">⚙</span> 設定</a>
+      <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">◱</span> 範本庫</a>
+      <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">⚙</span> 設定</a>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-avatar">PM</div>
@@ -32,7 +32,7 @@
     <div class="topbar">
       <span class="topbar-title">工作台</span>
       <div class="topbar-spacer"></div>
-      <div class="search-box">🔍 搜尋專案...</div>
+      <input type="search" class="search-box" id="session-search" placeholder="🔍 搜尋專案...">
       <button class="btn btn-primary btn-sm" id="new-session-btn2">＋ 新建設計</button>
     </div>
 
@@ -94,8 +94,8 @@
     </div>
     <div id="db-import-section" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg);border:1.5px solid var(--line);border-radius:4px;">
       <div class="modal-label">連線字串<span id="db-required-mark" style="color:var(--error);display:none;"> *必填</span></div>
-      <input class="modal-input" id="db-url" type="text"
-             placeholder="postgresql://user:password@host:5432/dbname" autocomplete="off">
+      <input class="modal-input" id="db-url" type="password"
+             placeholder="postgresql://user:password@host:5432/dbname" autocomplete="new-password">
       <div class="modal-label" style="margin-top:4px;">Schema（選填，預設 public）</div>
       <input class="modal-input" id="db-schema" type="text" placeholder="public">
       <div id="db-import-status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>

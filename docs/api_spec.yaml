@@ -1,0 +1,660 @@
+openapi: "3.0.3"
+
+info:
+  title: SQL Agent API
+  description: |
+    RESTful API for the SQL Agent web platform.
+    Supports two modes: design mode (conversational DB schema design)
+    and review mode (AI analysis of existing PostgreSQL schemas).
+  version: "0.5.0"
+  contact:
+    email: jjaass9507@gmail.com
+
+servers:
+  - url: http://localhost:5000
+    description: Local development
+
+tags:
+  - name: sessions
+    description: Session lifecycle management
+  - name: messages
+    description: Conversational requirement gathering
+  - name: outputs
+    description: Generated document retrieval
+  - name: versions
+    description: Schema version management
+  - name: system
+    description: System health and diagnostics
+
+paths:
+
+  /health:
+    get:
+      tags: [system]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/sessions:
+    post:
+      tags: [sessions]
+      summary: Create a new session
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+            examples:
+              design_only:
+                summary: Design mode (no existing DB)
+                value:
+                  title: "訂單系統設計"
+                  mode: "design"
+              design_with_db:
+                summary: Design mode with existing DB context
+                value:
+                  title: "訂單系統擴充"
+                  mode: "design"
+                  db_url: "postgresql://user:pass@host:5432/dbname"
+                  db_schema: "public"
+              review:
+                summary: Review mode
+                value:
+                  title: "現有DB審查"
+                  mode: "review"
+                  db_url: "postgresql://user:pass@host:5432/dbname"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      tags: [sessions]
+      summary: List all sessions
+      operationId: listSessions
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of sessions to return
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          description: Number of sessions to skip
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: mode
+          in: query
+          description: Filter by session mode
+          schema:
+            type: string
+            enum: [design, review]
+        - name: phase
+          in: query
+          description: Filter by session phase
+          schema:
+            type: string
+            enum: [collecting, confirming, generating, done, reviewing, review_done]
+      responses:
+        "200":
+          description: List of session summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionSummary"
+
+  /api/sessions/{session_id}:
+    get:
+      tags: [sessions]
+      summary: Get full session detail
+      operationId: getSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Full session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [sessions]
+      summary: Delete a session permanently
+      operationId: deleteSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: Session deleted successfully
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/import-db:
+    post:
+      tags: [sessions]
+      summary: Import (or re-import) existing DB schema into a session
+      description: |
+        Connects to the given PostgreSQL instance, introspects all tables in the
+        specified schema, and stores the structure as design context.
+        For design sessions: provides AI with existing table awareness.
+        Replaces any previously imported context.
+      operationId: importDb
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportDbRequest"
+      responses:
+        "200":
+          description: Import successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportDbResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/messages:
+    post:
+      tags: [messages]
+      summary: Send a user message in design mode
+      description: |
+        Sends a message to the Interviewer agent. The agent may ask follow-up
+        questions or, when requirements are complete, return a structured schema
+        (tables_ready=true) and transition phase to "confirming".
+      operationId: sendMessage
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: AI reply with optional schema
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/confirm:
+    post:
+      tags: [sessions]
+      summary: Confirm schema and start document generation
+      description: |
+        Transitions session phase from "confirming" to "generating" and launches
+        parallel background workers for four document types.
+        Returns immediately; poll GET /api/sessions/{id}/outputs for progress.
+      operationId: confirmSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Generation started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfirmResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/versions:
+    get:
+      tags: [versions]
+      summary: List schema version history
+      description: Each time the AI produces a new schema, a snapshot is saved (max 10).
+      operationId: listVersions
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: List of version summaries (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VersionSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/versions/{version_num}/restore:
+    post:
+      tags: [versions]
+      summary: Restore a previous schema version
+      description: |
+        Atomically replaces current tables and key_points with the specified
+        snapshot and transitions phase back to "confirming".
+      operationId: restoreVersion
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: version_num
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Version restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreVersionResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/outputs:
+    get:
+      tags: [outputs]
+      summary: Get generated document content and status
+      description: |
+        Returns content for all four design documents (or review report).
+        Status per file: "waiting" | "loading" | "done" | "failed".
+        Poll every 2 seconds while phase is "generating" or "reviewing".
+      operationId: getOutputs
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Outputs and generation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutputsResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sessions/{session_id}/outputs/zip:
+    get:
+      tags: [outputs]
+      summary: Download all outputs as a ZIP archive
+      operationId: downloadZip
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: ZIP file containing all generated documents
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+components:
+
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      description: UUID of the session
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters or state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "content required"
+    NotFound:
+      description: Session or resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "session not found"
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "internal server error"
+
+  schemas:
+
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+          example: "0.5.0"
+
+    CreateSessionRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          default: "未命名設計"
+          maxLength: 200
+        mode:
+          type: string
+          enum: [design, review]
+          default: design
+        db_url:
+          type: string
+          description: PostgreSQL connection URL (required for review mode)
+          example: "postgresql://user:pass@host:5432/dbname"
+        db_schema:
+          type: string
+          default: public
+
+    CreateSessionResponse:
+      type: object
+      required: [id, title, mode, phase, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        mode:
+          type: string
+          enum: [design, review]
+        phase:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        db_imported:
+          type: integer
+          description: Number of tables imported (present on success)
+        db_error:
+          type: string
+          description: DB connection error message (present on failure)
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    ImportDbRequest:
+      type: object
+      required: [db_url]
+      properties:
+        db_url:
+          type: string
+          minLength: 1
+        db_schema:
+          type: string
+          default: public
+
+    ImportDbResponse:
+      type: object
+      required: [imported, tables]
+      properties:
+        imported:
+          type: integer
+        tables:
+          type: array
+          items:
+            type: string
+
+    ColumnSpecResponse:
+      type: object
+      required: [name, data_type, nullable, description, is_primary_key,
+                 is_foreign_key, is_unique, is_indexed]
+      properties:
+        name:
+          type: string
+        data_type:
+          type: string
+        length:
+          type: integer
+          nullable: true
+        nullable:
+          type: boolean
+        default:
+          type: string
+          nullable: true
+        description:
+          type: string
+        is_primary_key:
+          type: boolean
+        is_foreign_key:
+          type: boolean
+        references:
+          type: string
+          nullable: true
+          description: "Target in format: table_name.column_name"
+        is_unique:
+          type: boolean
+        is_indexed:
+          type: boolean
+
+    TableSpecResponse:
+      type: object
+      required: [table_name, description, columns, constraints, related_tables]
+      properties:
+        table_name:
+          type: string
+        description:
+          type: string
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/ColumnSpecResponse"
+        constraints:
+          type: array
+          items:
+            type: string
+          description: Extra CHECK constraints
+        related_tables:
+          type: array
+          items:
+            type: string
+
+    SessionSummary:
+      type: object
+      required: [id, title, mode, phase, created_at, table_count]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        mode:
+          type: string
+          enum: [design, review]
+        phase:
+          type: string
+          enum: [collecting, confirming, generating, done, reviewing, review_done]
+        created_at:
+          type: string
+          format: date-time
+        table_count:
+          type: integer
+
+    SessionDetail:
+      type: object
+      required: [id, title, mode, phase, created_at, messages, key_points,
+                 outputs, generation_status, generation_errors, table_versions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        mode:
+          type: string
+          enum: [design, review]
+        phase:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [user, ai]
+              content:
+                type: string
+        tables:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TableSpecResponse"
+        key_points:
+          type: array
+          items:
+            type: string
+        outputs:
+          type: object
+          additionalProperties:
+            type: string
+          description: "filename → markdown/SQL content"
+        generation_status:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [waiting, loading, done, failed]
+        generation_errors:
+          type: object
+          additionalProperties:
+            type: string
+          description: "filename → error message (only for failed files)"
+        table_versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/VersionSummary"
+        context_tables:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TableSpecResponse"
+
+    SendMessageResponse:
+      type: object
+      required: [reply, phase, tables_ready, key_points]
+      properties:
+        reply:
+          type: string
+        phase:
+          type: string
+          enum: [collecting, confirming]
+        tables_ready:
+          type: boolean
+        tables:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TableSpecResponse"
+        key_points:
+          type: array
+          items:
+            type: string
+
+    ConfirmResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [generating]
+
+    VersionSummary:
+      type: object
+      required: [version, created_at, table_count]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        table_count:
+          type: integer
+
+    RestoreVersionResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [restored]
+        version:
+          type: integer
+
+    OutputsResponse:
+      type: object
+      required: [outputs, generation_status]
+      properties:
+        outputs:
+          type: object
+          additionalProperties:
+            type: string
+        generation_status:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [waiting, loading, done, failed]
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

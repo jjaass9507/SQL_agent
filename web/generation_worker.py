@@ -1,52 +1,82 @@
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from web.session_store import get_tables, update_generation_status, update_session
+from web.session_store import get_session, get_tables, update_generation_status, update_session
+
+logger = logging.getLogger(__name__)
+
+_WRITER_MAP = {
+    "01_specification.md": "agents.writers.spec_writer:SpecWriter",
+    "02_er_diagram.md":    "agents.writers.diagram_writer:DiagramWriter",
+    "03_ddl.sql":          "agents.writers.ddl_writer:DDLWriter",
+    "04_security_plan.md": "agents.writers.security_writer:SecurityWriter",
+    # On-demand extras (generated individually, not part of the core 4-doc run)
+    "05_orm_models.py":    "agents.writers.orm_writer:ORMWriter",
+    "06_migration.py":     "agents.writers.migration_writer:MigrationWriter",
+    "07_queries.sql":      "agents.writers.query_writer:QueryWriter",
+}
+
+# kind → output filename for on-demand extra generation
+EXTRA_FILES = {
+    "orm":       "05_orm_models.py",
+    "migration": "06_migration.py",
+    "query":     "07_queries.sql",
+}
+
+
+def _make_writer(filename: str):
+    spec = _WRITER_MAP.get(filename)
+    if not spec:
+        return None
+    module_path, cls_name = spec.split(":")
+    import importlib
+    mod = importlib.import_module(module_path)
+    return getattr(mod, cls_name)()
+
+
+def _run_one(session_id: str, filename: str, tables) -> None:
+    writer = _make_writer(filename)
+    if not writer:
+        return
+    update_generation_status(session_id, filename, "loading")
+    try:
+        content = writer.generate(tables)
+        if content and content.strip():
+            update_generation_status(session_id, filename, "done", content)
+        else:
+            update_generation_status(session_id, filename, "failed", error="Writer 回傳空內容")
+    except Exception as e:
+        logger.error("writer failed: %s", e, extra={"session_id": session_id, "output_file": filename})
+        update_generation_status(session_id, filename, "failed", error=str(e))
 
 
 def run_generation(session_id: str) -> None:
-    thread = threading.Thread(
-        target=_generate,
-        args=(session_id,),
-        daemon=True,
-    )
+    thread = threading.Thread(target=_generate, args=(session_id,), daemon=True)
     thread.start()
 
 
 def _generate(session_id: str) -> None:
-    from agents.writers.spec_writer import SpecWriter
-    from agents.writers.diagram_writer import DiagramWriter
-    from agents.writers.ddl_writer import DDLWriter
-    from agents.writers.security_writer import SecurityWriter
-
     tables = get_tables(session_id)
     if not tables:
         return
-
-    writers = [
-        ("01_specification.md", SpecWriter()),
-        ("02_er_diagram.md", DiagramWriter()),
-        ("03_ddl.sql", DDLWriter()),
-        ("04_security_plan.md", SecurityWriter()),
-    ]
-
-    def run_one(filename: str, writer) -> None:
-        update_generation_status(session_id, filename, "loading")
-        try:
-            content = writer.generate(tables)
-            if content and content.strip():
-                update_generation_status(session_id, filename, "done", content)
-            else:
-                update_generation_status(session_id, filename, "failed",
-                                         error="Writer 回傳空內容")
-        except Exception as e:
-            print(f"[generation_worker] {filename} failed: {e}")
-            update_generation_status(session_id, filename, "failed", error=str(e))
-
+    filenames = list(_WRITER_MAP.keys())
     with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(lambda args: run_one(*args), writers))
-
+        list(pool.map(lambda fn: _run_one(session_id, fn, tables), filenames))
     update_session(session_id, {"phase": "done"})
+
+
+def run_single_file(session_id: str, filename: str) -> None:
+    """Re-generate a single output file for an already-completed session."""
+    tables = get_tables(session_id)
+    if not tables:
+        return
+    thread = threading.Thread(
+        target=_run_one,
+        args=(session_id, filename, tables),
+        daemon=True,
+    )
+    thread.start()
 
 
 def run_review(session_id: str) -> None:
@@ -57,7 +87,7 @@ def run_review(session_id: str) -> None:
 
 def _review(session_id: str) -> None:
     from agents.reviewer import Reviewer
-    from web.session_store import get_session
+    from web.session_store import tables_from_json
 
     session = get_session(session_id)
     if not session:
@@ -70,14 +100,13 @@ def _review(session_id: str) -> None:
         })
         return
 
-    from web.session_store import tables_from_json
     tables = tables_from_json(context_tables_data)
-
     try:
         report = Reviewer().review(tables)
     except Exception as e:
-        print(f"[review_worker] failed: {e}")
-        report = f"審查過程發生錯誤：{e}"
+        logger.error("review failed: %s", e, extra={"session_id": session_id})
+        update_session(session_id, {"phase": "review_failed"})
+        return
 
     update_session(session_id, {
         "phase": "review_done",

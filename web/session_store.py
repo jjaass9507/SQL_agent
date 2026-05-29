@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import logging
 import os
 import threading
 import uuid
@@ -9,8 +10,11 @@ from typing import Any
 
 from models.schema import ColumnSpec, TableSpec
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
+logger = logging.getLogger(__name__)
+
+_data_dir_env = os.environ.get("DATA_DIR")
+DATA_DIR = Path(_data_dir_env) if _data_dir_env else Path(__file__).parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -83,7 +87,7 @@ def get_session(session_id: str) -> dict | None:
         return json.loads(p.read_text(encoding="utf-8"))
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(limit: int = 50, offset: int = 0) -> list[dict]:
     sessions = []
     for p in sorted(DATA_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         try:
@@ -96,9 +100,9 @@ def list_sessions() -> list[dict]:
                 "mode": data.get("mode", "design"),
                 "table_count": len(data["tables"]) if data["tables"] else 0,
             })
-        except Exception:
-            pass
-    return sessions
+        except Exception as e:
+            logger.warning("skipping corrupt session file %s: %s", p.name, e)
+    return sessions[offset: offset + limit]
 
 
 def update_session(session_id: str, updates: dict[str, Any]) -> dict | None:
@@ -161,6 +165,9 @@ def restore_version(session_id: str, version_num: int) -> bool:
         session["tables"] = version["tables"]
         session["key_points"] = version["key_points"]
         session["phase"] = "confirming"
+        session["outputs"] = {}
+        session["generation_status"] = {f: "waiting" for f in GENERATION_FILES}
+        session["generation_errors"] = {}
         p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
 
@@ -189,6 +196,8 @@ def update_generation_status(session_id: str, filename: str, status: str,
             session["outputs"][filename] = content
         if error is not None:
             session.setdefault("generation_errors", {})[filename] = error
+        elif status == "done":
+            session.get("generation_errors", {}).pop(filename, None)
         p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -205,6 +214,18 @@ def try_start_generation(session_id: str) -> bool:
         session["phase"] = "generating"
         p.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a session's JSON file. Returns True if deleted, False if not found."""
+    with _lock_for(session_id):
+        p = _path(session_id)
+        if not p.exists():
+            return False
+        p.unlink()
+    with _locks_guard:
+        _locks.pop(session_id, None)
+    return True
 
 
 def _write(session_id: str, session: dict) -> None:

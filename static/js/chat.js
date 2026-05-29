@@ -63,6 +63,12 @@ async function sendMessage() {
     const data = await res.json();
     typingRow.remove();
 
+    if (res.status === 404) {
+      appendBubble('ai', '⚠ 此對話 session 已不存在，請返回首頁重新建立。');
+      inputEl.disabled = true;
+      sendBtn.disabled = true;
+      return;
+    }
     if (!res.ok) {
       appendBubble('ai', `⚠ 伺服器錯誤：${data.error || res.status}`);
       return;

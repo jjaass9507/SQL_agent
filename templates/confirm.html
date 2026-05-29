@@ -52,7 +52,13 @@
 
       <!-- Right: AI schema -->
       <div class="confirm-right">
-        <div class="confirm-section-title">🤖 AI 理解為</div>
+        <div class="confirm-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>🤖 AI 理解為</span>
+          {% if session.tables %}
+          <button class="btn btn-ghost btn-sm" id="edit-schema-btn">✏ 編輯</button>
+          {% endif %}
+        </div>
+        <div id="schema-readonly">
         {% if session.tables %}
           {% for table in session.tables %}
           <div class="schema-table-wrap">
@@ -87,8 +93,25 @@
         {% else %}
           <div style="font-size:14px;color:var(--muted);">（無資料表資訊）</div>
         {% endif %}
+        </div>
+        <!-- Editor mounts here when editing -->
+        <div id="schema-editor" style="display:none;"></div>
       </div>
     </div>
+
+    <!-- Design advisor warnings -->
+    {% if warnings %}
+    <div class="advisor-section" id="advisor-section">
+      <div class="advisor-section-title">⚠ 設計建議（{{ warnings | length }}）</div>
+      {% for w in warnings %}
+      <div class="advisor-item advisor-{{ w.level }}">
+        <span class="advisor-badge advisor-badge-{{ w.level }}">{% if w.level == 'warn' %}⚠{% else %}ℹ{% endif %}</span>
+        <span class="advisor-target">{{ w.table }}{% if w.column %}.{{ w.column }}{% endif %}</span>
+        <span class="advisor-msg">{{ w.message }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
 
     <!-- Schema Diff panel (shown only when context_tables exist) -->
     {% if diff %}
@@ -179,6 +202,8 @@
 {% block scripts %}
 <script>
   const SESSION_ID = "{{ session.id }}";
+  const INITIAL_TABLES = {{ session.tables | tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/schema_editor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/confirm.js') }}"></script>
 {% endblock %}
