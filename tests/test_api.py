@@ -507,3 +507,66 @@ def test_concurrent_regen_blocked(client):
 
     resp = client.post(f"/api/sessions/{session_id}/outputs/01_specification.md/regenerate")
     assert resp.status_code == 409
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TC-API-DB: Query and Explain endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_query_no_db_url(client, _isolate_data):
+    """POST /query returns 400 when session has no db_url."""
+    resp = client.post("/api/sessions", json={"title": "q-test"})
+    session_id = resp.get_json()["id"]
+    resp2 = client.post(f"/api/sessions/{session_id}/query", json={"sql": "SELECT 1"})
+    assert resp2.status_code == 400
+    assert "no database" in resp2.get_json()["error"]
+
+
+def test_query_empty_sql(client, _isolate_data):
+    """POST /query returns 400 when sql is empty."""
+    resp = client.post("/api/sessions", json={"title": "q-test2"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
+    resp2 = client.post(f"/api/sessions/{session_id}/query", json={"sql": ""})
+    assert resp2.status_code == 400
+
+
+def test_query_forbidden_sql(client, _isolate_data):
+    """POST /query returns 400 for DDL statements."""
+    resp = client.post("/api/sessions", json={"title": "q-test3"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
+    resp2 = client.post(f"/api/sessions/{session_id}/query", json={"sql": "DROP TABLE users"})
+    assert resp2.status_code == 400
+    assert "error" in resp2.get_json()
+
+
+def test_db_url_not_exposed_in_get_session(client, _isolate_data):
+    """GET /api/sessions/<id> must not expose db_url."""
+    resp = client.post("/api/sessions", json={"title": "q-test4"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://secret:pass@host/db"})
+    resp2 = client.get(f"/api/sessions/{session_id}")
+    assert resp2.status_code == 200
+    assert "db_url" not in resp2.get_json()
+
+
+def test_explain_no_db_url(client, _isolate_data):
+    """POST /explain returns 400 when session has no db_url."""
+    resp = client.post("/api/sessions", json={"title": "e-test"})
+    session_id = resp.get_json()["id"]
+    resp2 = client.post(f"/api/sessions/{session_id}/explain", json={"sql": "SELECT 1"})
+    assert resp2.status_code == 400
+
+
+def test_explain_forbidden_sql(client, _isolate_data):
+    """POST /explain returns 400 for DDL statements."""
+    resp = client.post("/api/sessions", json={"title": "e-test2"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
+    resp2 = client.post(f"/api/sessions/{session_id}/explain", json={"sql": "CREATE TABLE x (id int)"})
+    assert resp2.status_code == 400

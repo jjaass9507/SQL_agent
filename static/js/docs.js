@@ -124,6 +124,7 @@ function transitionToReading(session) {
   genErrors = session.generation_errors || genErrors;
   renderExtrasToc();
   renderDoc(currentDoc);
+  initWorkbench();
 }
 
 function renderDoc(filename) {
@@ -269,9 +270,92 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// HAS_DB is injected by Jinja2 in docs.html
+// It is true when the session has a db_url stored server-side
+
+function renderResultTable(data) {
+  if (!data.columns || !data.rows || !data.rows.length) {
+    return '<div style="padding:8px;color:var(--muted);">（無資料）</div>';
+  }
+  const header = data.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
+  const body = data.rows.map(r =>
+    `<tr>${r.map(cell => `<td>${escHtml(String(cell ?? ''))}</td>`).join('')}</tr>`
+  ).join('');
+  const note = data.truncated
+    ? `<div style="font-size:11px;color:var(--muted);padding:4px 0;">（僅顯示前 ${data.rows.length} 筆）</div>`
+    : '';
+  return `<div style="overflow:auto;"><table class="workbench-result-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>${note}</div>`;
+}
+
+function initWorkbench() {
+  if (typeof HAS_DB === 'undefined' || !HAS_DB) return;
+  const tocItem = document.getElementById('workbench-toc-item');
+  if (tocItem) tocItem.style.display = '';
+
+  const runBtn = document.getElementById('wb-run-btn');
+  const explainBtn = document.getElementById('wb-explain-btn');
+  const listBtn = document.getElementById('wb-list-tables-btn');
+  const outEl = document.getElementById('workbench-output');
+
+  async function postQuery(sql, endpoint) {
+    outEl.innerHTML = '<div class="gen-loading-text">⟳ 執行中...</div>';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        outEl.innerHTML = `<div style="color:var(--error);padding:8px;">${escHtml(data.error)}</div>`;
+      } else if (endpoint === 'explain') {
+        outEl.innerHTML = `<pre style="font-size:12px;overflow:auto;">${escHtml(data.plan)}</pre>`;
+      } else {
+        outEl.innerHTML = renderResultTable(data);
+      }
+    } catch (e) {
+      outEl.innerHTML = '<div style="color:var(--error);">連線失敗，請重新整理頁面</div>';
+    }
+  }
+
+  if (runBtn) runBtn.addEventListener('click', () => {
+    const sql = (document.getElementById('workbench-sql').value || '').trim();
+    if (sql) postQuery(sql, 'query');
+  });
+
+  if (explainBtn) explainBtn.addEventListener('click', () => {
+    const sql = (document.getElementById('workbench-sql').value || '').trim();
+    if (sql) postQuery(sql, 'explain');
+  });
+
+  if (listBtn) listBtn.addEventListener('click', () => {
+    postQuery(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name",
+      'query'
+    );
+  });
+
+  // TOC click handler for workbench
+  const wbTocItem = document.getElementById('workbench-toc-item');
+  if (wbTocItem) {
+    wbTocItem.addEventListener('click', () => {
+      document.querySelectorAll('.docs-toc-item').forEach(el => el.classList.remove('active'));
+      wbTocItem.classList.add('active');
+      document.getElementById('docs-content').closest('.docs-body').style.display = 'none';
+      document.getElementById('workbench-panel').style.display = '';
+      document.getElementById('content-title').textContent = '⚙ SQL 工作台';
+    });
+  }
+}
+
 // TOC clicks
 document.querySelectorAll('.docs-toc-item').forEach(item => {
-  item.addEventListener('click', () => renderDoc(item.dataset.doc));
+  item.addEventListener('click', () => {
+    if (item.dataset.doc === '__workbench__') return; // handled by initWorkbench
+    document.getElementById('workbench-panel').style.display = 'none';
+    document.getElementById('docs-content').closest('.docs-body').style.display = '';
+    renderDoc(item.dataset.doc);
+  });
 });
 
 // Continue iterating: re-open the design for further chat
@@ -372,6 +456,7 @@ genErrors = INITIAL_GEN_ERRORS || {};
 if (SESSION_PHASE === 'done') {
   outputs = INITIAL_OUTPUTS;
   transitionToReading({ outputs: INITIAL_OUTPUTS, generation_errors: INITIAL_GEN_ERRORS });
+  initWorkbench();
 } else {
   // Apply any already-known status immediately
   if (INITIAL_GEN_STATUS) {

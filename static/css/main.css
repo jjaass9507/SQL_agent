@@ -1010,3 +1010,19 @@ html, body {
   font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre;
   overflow-x: auto; background: var(--sidebar); padding: 14px 16px; border-radius: 6px;
 }
+
+/* ── SQL Workbench ───────────────────────────────────────────────────────── */
+.workbench-toolbar { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.workbench-actions { margin: 8px 0 12px; }
+.workbench-textarea {
+  width: 100%; min-height: 100px; font-family: var(--mono); font-size: 13px;
+  border: 1.5px solid var(--line); border-radius: 4px; padding: 8px 10px;
+  resize: vertical; outline: none; color: var(--text); background: var(--bg);
+  box-sizing: border-box;
+}
+.workbench-textarea:focus { border-color: var(--accent); }
+.workbench-result-table { border-collapse: collapse; font-size: 12px; width: 100%; min-width: 300px; }
+.workbench-result-table th,
+.workbench-result-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.workbench-result-table th { background: var(--sidebar); font-weight: 600; position: sticky; top: 0; }
+.workbench-result-table tr:nth-child(even) { background: var(--sidebar); }

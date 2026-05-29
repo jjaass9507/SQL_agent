@@ -120,6 +120,9 @@
           <div class="docs-toc-divider"></div>
           <div class="docs-toc-section-label">額外產出（選配）</div>
           <div id="extras-toc"><!-- injected by docs.js --></div>
+          <div id="workbench-toc-item" class="docs-toc-item" data-doc="__workbench__" style="display:none;">
+            <span>⚙</span><span>SQL 工作台</span>
+          </div>
           <div class="docs-toc-divider"></div>
           <a href="/api/sessions/{{ session.id }}/outputs/zip" class="docs-toc-action">
             <span>⬇</span><span>全部下載 .zip</span>
@@ -144,6 +147,21 @@
             <!-- Content injected by JS -->
           </div>
         </div>
+      <!-- SQL Workbench Panel -->
+      <div id="workbench-panel" class="docs-body" style="display:none;">
+        <div class="docs-body-inner">
+          <div class="workbench-toolbar">
+            <button class="btn btn-ghost btn-sm" id="wb-list-tables-btn">列出資料表</button>
+            <button class="btn btn-ghost btn-sm" id="wb-explain-btn">EXPLAIN</button>
+          </div>
+          <textarea id="workbench-sql" class="workbench-textarea"
+                    placeholder="輸入 SELECT 查詢…&#10;例：SELECT * FROM users LIMIT 10"></textarea>
+          <div class="workbench-actions">
+            <button class="btn btn-primary btn-sm" id="wb-run-btn">▶ 執行</button>
+          </div>
+          <div id="workbench-output"></div>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -158,6 +176,7 @@
   const INITIAL_GEN_STATUS = {{ (session.generation_status or {}) | tojson }};
   const INITIAL_OUTPUTS = {{ (session.outputs or {}) | tojson }};
   const INITIAL_GEN_ERRORS = {{ (session.generation_errors or {}) | tojson }};
+  const HAS_DB = {{ 'true' if session.get('db_url') else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/docs.js') }}"></script>
 {% endblock %}

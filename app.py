@@ -210,7 +210,7 @@ def api_create_session():
             context_tables_json = [dataclasses.asdict(t) for t in tables]
             context_text = format_context(tables)
 
-    session = create_session(title, context_tables_json, context_text, mode=mode)
+    session = create_session(title, context_tables_json, context_text, mode=mode, db_url=db_url if db_url else "")
     resp = dict(session)
 
     if db_error:
@@ -255,6 +255,7 @@ def api_import_db(session_id):
         "context_tables": context_tables_json,
         "context_text": context_text,
         "last_db_import": {"imported_at": imported_at, "table_count": len(tables), "error": None},
+        "db_url": db_url,
     }
     # If the user re-imports while the schema is confirmed, reset to collecting
     # so they can review the new context before re-confirming
@@ -282,7 +283,8 @@ def api_get_session(session_id):
     session = get_session(session_id)
     if not session:
         abort(404)
-    return jsonify(session)
+    safe = {k: v for k, v in session.items() if k != "db_url"}
+    return jsonify(safe)
 
 
 @app.patch("/api/sessions/<session_id>")
@@ -582,6 +584,47 @@ def api_download_zip(session_id):
         as_attachment=True,
         download_name=f"{title}.zip",
     )
+
+
+@app.post("/api/sessions/<session_id>/query")
+def api_query(session_id):
+    """Execute a read-only SQL query against the session's target database."""
+    from web.db_manager import execute_query
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "no database URL configured for this session"}), 400
+    data = request.get_json(silent=True) or {}
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "sql required"}), 400
+    result = execute_query(db_url, sql)
+    if "error" in result:
+        return jsonify(result), 400
+    logger.info("SQL query executed", extra={"session_id": session_id, "sql_len": len(sql)})
+    return jsonify(result)
+
+
+@app.post("/api/sessions/<session_id>/explain")
+def api_explain(session_id):
+    """Run EXPLAIN on a SQL query against the session's target database."""
+    from web.db_manager import explain_query
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "no database URL configured for this session"}), 400
+    data = request.get_json(silent=True) or {}
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "sql required"}), 400
+    result = explain_query(db_url, sql)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 if __name__ == "__main__":
