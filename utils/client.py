@@ -1,8 +1,15 @@
 import json
+import logging
 import os
+import time
 from typing import Any, Optional
 
 import requests
+
+logger = logging.getLogger(__name__)
+
+_RATE_LIMIT_PHRASES = ("too many requests", "rate limit", "too many")
+_RETRY_DELAYS = (2, 4, 8)  # seconds between attempts
 
 
 class PensieveAPI:
@@ -18,8 +25,7 @@ class PensieveAPI:
 
     def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
         """送出 system_prompt + human_prompt，回傳 AI 純文字回應。
-        other_system_prompt 不一定會被 API 套用為 system role，
-        因此將指令合併至 other_human_prompt 確保模型一定看到。"""
+        遇到 rate-limit 錯誤時自動重試（最多 3 次，指數退避 2/4/8 秒）。"""
         effective_human = (
             f"【角色指令】\n{system_prompt}\n\n【輸入】\n{human_prompt}"
             if system_prompt else human_prompt
@@ -34,32 +40,57 @@ class PensieveAPI:
             },
         }
 
-        try:
-            response = requests.post(
-                self.url,
-                json=payload,
-                verify=self.verify,
-                proxies={"http": None, "https": None},
-                timeout=300,
-            )
-            response.raise_for_status()
-
-            raw_text = response.text
-            if not raw_text or not raw_text.strip():
-                print("[API] 警告：回傳空白內容。")
-                return None
-
+        last_error: Optional[str] = None
+        for attempt, delay in enumerate((*_RETRY_DELAYS, None), start=1):
             try:
-                res_data = json.loads(raw_text)
-            except json.JSONDecodeError:
-                print("[API] JSON 解析失敗。")
+                response = requests.post(
+                    self.url,
+                    json=payload,
+                    verify=self.verify,
+                    proxies={"http": None, "https": None},
+                    timeout=300,
+                )
+
+                # Handle HTTP-level rate limiting (429)
+                if response.status_code == 429:
+                    last_error = f"HTTP 429 Too Many Requests (attempt {attempt})"
+                    logger.warning("rate limited (429), attempt %d", attempt)
+                    if delay is not None:
+                        time.sleep(delay)
+                    continue
+
+                response.raise_for_status()
+
+                raw_text = response.text
+                if not raw_text or not raw_text.strip():
+                    logger.warning("empty API response")
+                    return None
+
+                try:
+                    res_data = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    logger.warning("API JSON parse failed")
+                    return None
+
+                # Handle response-body rate limiting ("The token has too many requests")
+                extracted = self._extract_text(res_data)
+                if extracted and any(p in extracted.lower() for p in _RATE_LIMIT_PHRASES):
+                    last_error = f"rate limit in response (attempt {attempt}): {extracted[:80]}"
+                    logger.warning("rate limit in response body, attempt %d", attempt)
+                    if delay is not None:
+                        time.sleep(delay)
+                    continue
+
+                return extracted
+
+            except requests.exceptions.RequestException as e:
+                logger.error("API request error: %s", e)
                 return None
 
-            return self._extract_text(res_data)
-
-        except Exception as e:
-            print(f"[API 錯誤] {e}")
-            return None
+        # All retries exhausted
+        logger.error("API rate limit retries exhausted after %d attempts: %s",
+                     len(_RETRY_DELAYS) + 1, last_error)
+        return None
 
     def _extract_text(self, res_data: Any) -> Optional[str]:
         if isinstance(res_data, dict):
