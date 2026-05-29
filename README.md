@@ -85,6 +85,28 @@ PENSIEVE_VERIFY=false
 | `PENSIEVE_URL` | | API 端點（預設官方網址） |
 | `PENSIEVE_BUILDING` | | 使用的 flow 名稱（預設 `question`） |
 | `PENSIEVE_VERIFY` | | SSL 憑證驗證（預設 `false`） |
+| `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
+| `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
+
+---
+
+## 儲存後端
+
+平台支援兩種 Session 儲存模式，由 `DATABASE_URL` 環境變數切換：
+
+- **PostgreSQL 模式**（設定 `DATABASE_URL`）：使用 SQLAlchemy Core，
+  Session 存於 `sessions` / `messages` 資料表，支援連線池與多 worker 部署。
+  首次部署需執行 migration 建表：
+
+  ```bash
+  export DATABASE_URL=postgresql://user:pass@host:5432/sql_agent
+  alembic upgrade head
+  ```
+
+- **JSON 檔案模式**（未設定 `DATABASE_URL`，預設）：Session 存於 `data/*.json`，
+  零外部相依，適合本地開發與測試。
+
+兩種模式的 `web/session_store.py` 對外介面完全相同，切換不需改動其他程式碼。
 
 ---
 
@@ -100,6 +122,15 @@ python app.py
 **設計模式**（預設）：首頁（專案管理）→ 對話頁（需求收集）→ 確認頁（Schema 審閱 + Diff + 版本管理）→ 文件頁（即時進度 + 預覽/下載）。
 
 **審查模式**：首頁（選「🔍 審查模式」並填入 DB 連線字串）→ 審查頁（AI 自動分析並輸出報告）。
+
+**SQL 工作台**：建立 Session 時填入資料庫連線字串後，文件頁的「額外產出」會出現「⚙ SQL 工作台」分頁，
+可直接對該資料庫執行唯讀查詢、`EXPLAIN`、列出資料表。基於安全考量僅允許 `SELECT`／`EXPLAIN`
+（拒絕 DDL／DML／DCL，連線以 read-only 開啟，statement timeout 30 秒），連線字串僅存於後端、不回傳前端。
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |
+| `POST` | `/api/sessions/<id>/explain` | 回傳查詢的 `EXPLAIN` 計畫 |
 
 ### CLI 工具
 
@@ -145,10 +176,17 @@ SQL_agent/
 ├── .env.example
 │
 ├── web/                         # 網頁平台後端邏輯
-│   ├── session_store.py         # Session JSON 持久化 + threading.Lock + 版本管理
+│   ├── session_store.py         # Session 持久化（PostgreSQL / JSON 雙模式）+ 版本管理
+│   ├── db_engine.py             # SQLAlchemy engine 單例 + is_pg_mode() 切換
+│   ├── db_schema.py             # SQLAlchemy Core 資料表定義（sessions / messages）
+│   ├── db_manager.py            # 資料庫管理 Agent：execute_query / explain / DDL（唯讀）
 │   ├── generation_worker.py     # 背景 Thread：文件產出（並行）/ 審查
 │   ├── db_introspect.py         # PostgreSQL 結構擷取 + 格式化
 │   └── schema_diff.py           # 設計 Schema vs 現有 DB 差異比對
+│
+├── alembic/                     # PostgreSQL migration（alembic upgrade head）
+│   ├── env.py
+│   └── versions/0001_initial.py
 │
 ├── templates/                   # Jinja2 HTML 模板
 │   ├── base.html
@@ -175,7 +213,8 @@ SQL_agent/
 │       ├── spec_writer.py       # 規格書（模板渲染，不耗 API）
 │       ├── diagram_writer.py    # ER Diagram（Mermaid）
 │       ├── ddl_writer.py        # PostgreSQL DDL + migration
-│       └── security_writer.py   # 效能與安全規劃
+│       ├── security_writer.py   # 效能與安全規劃
+│       └── query_runner.py      # 依 Schema 產生常用 SELECT 查詢範例
 │
 ├── models/
 │   ├── schema.py                # ColumnSpec, TableSpec
