@@ -177,9 +177,15 @@ function renderMarkdown(md) {
 }
 
 function buildTable(match, headerRow, bodyRows) {
-  const headers = headerRow.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
+  // headerRow already has outer pipes stripped by the regex capture group
+  const headers = headerRow.split('|').map(c => `<th>${c.trim()}</th>`).join('');
   const rows = bodyRows.trim().split('\n').map(row => {
-    const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+    // Drop only the leading/trailing empties from the outer pipes;
+    // keep interior empty cells so columns stay aligned.
+    let parts = row.split('|');
+    if (parts.length && parts[0].trim() === '') parts = parts.slice(1);
+    if (parts.length && parts[parts.length - 1].trim() === '') parts = parts.slice(0, -1);
+    const cells = parts.map(c => `<td>${c.trim()}</td>`).join('');
     return `<tr>${cells}</tr>`;
   }).join('');
   return `<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
