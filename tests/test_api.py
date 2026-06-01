@@ -145,6 +145,31 @@ def test_download_zip_no_outputs(client):
     assert resp.status_code == 400
 
 
+# ── TC-API-11: Incremental migration needs an existing DB ──
+
+def test_incremental_requires_existing_db(client):
+    from web.session_store import set_tables
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    resp = client.post(f"/api/sessions/{session_id}/extras/incremental/generate")
+    assert resp.status_code == 400
+    assert "現有 DB" in resp.get_json()["error"]
+
+
+def test_incremental_starts_with_existing_db(client):
+    import dataclasses
+    from web.session_store import set_tables, update_session
+    session_id = _post_session(client).get_json()["id"]
+    set_tables(session_id, [_make_table()], [])
+    update_session(session_id, {"context_tables": [dataclasses.asdict(_make_table())]})
+
+    with patch("app.run_incremental") as mock_run:
+        resp = client.post(f"/api/sessions/{session_id}/extras/incremental/generate")
+    assert resp.status_code == 200
+    assert resp.get_json()["filename"] == "08_incremental_migration.sql"
+    mock_run.assert_called_once_with(session_id)
+
+
 # ── TC-API-11: Health endpoint ──────────────────────────
 
 def test_health(client):

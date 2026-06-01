@@ -244,6 +244,19 @@ Phase.GENERATING
 
 SpecWriter 不呼叫 API 的原因：規格書格式完全確定，從結構化資料直接渲染比 LLM 更快、更穩定、節省費用。
 
+#### On-demand 延伸產出（`POST /api/sessions/<id>/extras/<kind>/generate`）
+
+非核心 4 文件，由使用者在文件頁按需產生（`web/generation_worker.py:EXTRA_FILES`）：
+
+| kind | 輸出檔 | Writer | 說明 |
+|---|---|---|---|
+| `orm` | `05_orm_models.py` | ORMWriter | SQLAlchemy 2.0 模型 |
+| `migration` | `06_migration.py` | MigrationWriter | 全量 Alembic migration |
+| `query` | `07_queries.sql` | QueryWriter | 常用查詢範例 |
+| `incremental` | `08_incremental_migration.sql` | IncrementalMigrationWriter | **現有 DB → 設計** 的增量 ALTER migration |
+
+`incremental` 與其他不同：需同時有設計結構與已匯入的現有 DB（`context_tables`）。後端走專屬的 `run_incremental()`，內部以 `web/schema_diff.py:compute_diff` 算出差異後交 LLM 產生 ALTER/CREATE（破壞性 DROP 以註解形式提供）+ 回滾區塊；無現有 DB 或無差異時直接短路、不呼叫 API。前端僅在 session 有匯入現有 DB 時顯示此按鈕。
+
 ---
 
 ## 核心資料模型（`models/schema.py`）

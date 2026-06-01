@@ -8,6 +8,7 @@ const FILE_INFO = {
   '05_orm_models.py':    { icon: '🧩', label: 'ORM 模型（SQLAlchemy）' },
   '06_migration.py':     { icon: '🔧', label: 'Migration（Alembic）' },
   '07_queries.sql':      { icon: '🔎', label: '常用查詢範例' },
+  '08_incremental_migration.sql': { icon: '🔀', label: '增量 Migration（現有DB→設計）' },
 };
 
 // On-demand extras: kind → output filename (order defines TOC order)
@@ -16,6 +17,11 @@ const EXTRA_INFO = [
   { kind: 'migration', filename: '06_migration.py',  icon: '🔧', label: 'Migration（Alembic）' },
   { kind: 'query',     filename: '07_queries.sql',   icon: '🔎', label: '常用查詢範例' },
 ];
+// Incremental migration only makes sense when an existing DB was imported to diff against
+if (typeof HAS_EXISTING_DB !== 'undefined' && HAS_EXISTING_DB) {
+  EXTRA_INFO.push({ kind: 'incremental', filename: '08_incremental_migration.sql',
+                    icon: '🔀', label: '增量 Migration（現有DB→設計）' });
+}
 
 const generatingView = document.getElementById('generating-view');
 const readingView = document.getElementById('reading-view');

@@ -17,11 +17,14 @@ _WRITER_MAP = {
     "07_queries.sql":      "agents.writers.query_writer:QueryWriter",
 }
 
+INCREMENTAL_FILE = "08_incremental_migration.sql"
+
 # kind → output filename for on-demand extra generation
 EXTRA_FILES = {
-    "orm":       "05_orm_models.py",
-    "migration": "06_migration.py",
-    "query":     "07_queries.sql",
+    "orm":         "05_orm_models.py",
+    "migration":   "06_migration.py",
+    "query":       "07_queries.sql",
+    "incremental": INCREMENTAL_FILE,
 }
 
 
@@ -77,6 +80,39 @@ def run_single_file(session_id: str, filename: str) -> None:
         daemon=True,
     )
     thread.start()
+
+
+def run_incremental(session_id: str) -> None:
+    """Generate an incremental ALTER migration (existing DB → designed schema)."""
+    thread = threading.Thread(target=_incremental, args=(session_id,), daemon=True)
+    thread.start()
+
+
+def _incremental(session_id: str) -> None:
+    from web.session_store import tables_from_json
+    from agents.writers.incremental_migration_writer import IncrementalMigrationWriter
+
+    session = get_session(session_id)
+    if not session:
+        return
+    designed = get_tables(session_id)
+    existing_data = session.get("context_tables") or []
+    if not designed or not existing_data:
+        update_generation_status(session_id, INCREMENTAL_FILE, "failed",
+                                 error="需要設計結構與已匯入的現有 DB 結構")
+        return
+
+    existing = tables_from_json(existing_data)
+    update_generation_status(session_id, INCREMENTAL_FILE, "loading")
+    try:
+        content = IncrementalMigrationWriter().generate(designed, existing)
+        if content and content.strip():
+            update_generation_status(session_id, INCREMENTAL_FILE, "done", content)
+        else:
+            update_generation_status(session_id, INCREMENTAL_FILE, "failed", error="Writer 回傳空內容")
+    except Exception as e:
+        logger.error("incremental migration failed: %s", e, extra={"session_id": session_id})
+        update_generation_status(session_id, INCREMENTAL_FILE, "failed", error=str(e))
 
 
 def run_review(session_id: str) -> None:

@@ -158,6 +158,7 @@
   const INITIAL_GEN_STATUS = {{ (session.generation_status or {}) | tojson }};
   const INITIAL_OUTPUTS = {{ (session.outputs or {}) | tojson }};
   const INITIAL_GEN_ERRORS = {{ (session.generation_errors or {}) | tojson }};
+  const HAS_EXISTING_DB = {{ ((session.context_tables | default([])) | length > 0) | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/docs.js') }}"></script>
 {% endblock %}

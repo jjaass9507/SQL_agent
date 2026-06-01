@@ -62,7 +62,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_review, run_single_file, EXTRA_FILES
+from web.generation_worker import run_generation, run_incremental, run_review, run_single_file, EXTRA_FILES
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
@@ -529,7 +529,13 @@ def api_generate_extra(session_id, kind):
         return jsonify({"error": "no tables"}), 400
     if session.get("generation_status", {}).get(filename) == "loading":
         return jsonify({"error": "already generating"}), 409
-    run_single_file(session_id, filename)
+    if kind == "incremental":
+        # Needs an existing DB to diff the design against
+        if not session.get("context_tables"):
+            return jsonify({"error": "需要匯入現有 DB 才能產生增量 migration"}), 400
+        run_incremental(session_id)
+    else:
+        run_single_file(session_id, filename)
     logger.info("extra generation started", extra={"session_id": session_id, "output_file": filename})
     return jsonify({"status": "generating", "filename": filename})
 
