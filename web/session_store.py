@@ -210,9 +210,9 @@ def _json_restore_version(session_id, version_num):
 
 def _json_get_tables(session_id):
     session = _read(session_id)
-    if session is None:
+    if session is None or not session.get("tables"):
         return None
-    return session.get("tables")
+    return tables_from_json(session["tables"])
 
 
 def _json_update_generation_status(session_id, filename, status, content=None, error=None):
@@ -481,9 +481,9 @@ def _pg_restore_version(session_id, version_num):
 
 def _pg_get_tables(session_id):
     session = _pg_get_session(session_id)
-    if session is None:
+    if session is None or not session.get("tables"):
         return None
-    return session.get("tables")
+    return tables_from_json(session["tables"])
 
 
 def _pg_update_generation_status(session_id, filename, status, content=None, error=None):

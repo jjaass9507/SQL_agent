@@ -13,6 +13,7 @@ from web.session_store import (
     restore_version,
     try_start_generation,
     list_sessions,
+    get_tables,
 )
 
 
@@ -27,6 +28,19 @@ def _isolate_data(tmp_path, monkeypatch):
 def _make_table(name="users"):
     col = ColumnSpec(name="id", data_type="UUID", nullable=False, description="PK")
     return TableSpec(table_name=name, description="", columns=[col])
+
+
+def test_get_tables_returns_tablespec_objects():
+    """get_tables must deserialise stored dicts back into TableSpec objects so
+    the document writers (which access .table_name / .columns) work. Regression
+    guard: writers crashed with AttributeError when raw dicts leaked through."""
+    s = create_session("t")
+    set_tables(s["id"], [_make_table("orders")], ["kp"])
+    tables = get_tables(s["id"])
+    assert tables is not None and len(tables) == 1
+    assert isinstance(tables[0], TableSpec)
+    assert tables[0].table_name == "orders"
+    assert tables[0].columns[0].name == "id"
 
 
 # ── TC-STORE-01: Concurrent writes to different sessions ─

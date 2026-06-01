@@ -211,7 +211,7 @@ def api_create_session():
             context_text = format_context(tables)
 
     session = create_session(title, context_tables_json, context_text, mode=mode, db_url=db_url if db_url else "")
-    resp = dict(session)
+    resp = {k: v for k, v in session.items() if k != "db_url"}
 
     if db_error:
         resp["db_error"] = _sanitize_db_error(db_error)
