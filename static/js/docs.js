@@ -9,6 +9,10 @@ const FILE_INFO = {
   '06_migration.py':     { icon: '🔧', label: 'Migration（Alembic）' },
   '07_queries.sql':      { icon: '🔎', label: '常用查詢範例' },
   '08_incremental_migration.sql': { icon: '🔀', label: '增量 Migration（現有DB→設計）' },
+  '09_schema.dbml':      { icon: '📐', label: 'DBML（dbdiagram.io）' },
+  '10_schema.puml':      { icon: '🌿', label: 'PlantUML ER 圖' },
+  '11_json_schema.json': { icon: '📦', label: 'JSON Schema' },
+  '12_data_dictionary.csv': { icon: '📊', label: '資料字典（CSV）' },
 };
 
 // On-demand extras: kind → output filename (order defines TOC order)
@@ -16,6 +20,10 @@ const EXTRA_INFO = [
   { kind: 'orm',       filename: '05_orm_models.py', icon: '🧩', label: 'ORM 模型（SQLAlchemy）' },
   { kind: 'migration', filename: '06_migration.py',  icon: '🔧', label: 'Migration（Alembic）' },
   { kind: 'query',     filename: '07_queries.sql',   icon: '🔎', label: '常用查詢範例' },
+  { kind: 'dbml',      filename: '09_schema.dbml',   icon: '📐', label: 'DBML（dbdiagram.io）' },
+  { kind: 'plantuml',  filename: '10_schema.puml',   icon: '🌿', label: 'PlantUML ER 圖' },
+  { kind: 'jsonschema',filename: '11_json_schema.json', icon: '📦', label: 'JSON Schema' },
+  { kind: 'datadict',  filename: '12_data_dictionary.csv', icon: '📊', label: '資料字典（CSV）' },
 ];
 // Incremental migration only makes sense when an existing DB was imported to diff against
 if (typeof HAS_EXISTING_DB !== 'undefined' && HAS_EXISTING_DB) {
@@ -172,7 +180,7 @@ function renderDoc(filename) {
       <div class="copy-btn-wrap">
         <pre id="ddl-pre">${highlightSQL(content)}</pre>
       </div>`;
-  } else if (filename.endsWith('.py')) {
+  } else if (/\.(py|dbml|puml|json|csv)$/.test(filename)) {
     contentEl.innerHTML = `<pre class="code-block">${escHtml(content)}</pre>`;
   } else {
     contentEl.innerHTML = `<div class="docs-markdown">${renderMarkdown(content)}</div>`;

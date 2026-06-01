@@ -2,7 +2,13 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from web.session_store import get_session, get_tables, update_generation_status, update_session
+from web.session_store import (
+    GENERATION_FILES,
+    get_session,
+    get_tables,
+    update_generation_status,
+    update_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +21,13 @@ _WRITER_MAP = {
     "05_orm_models.py":    "agents.writers.orm_writer:ORMWriter",
     "06_migration.py":     "agents.writers.migration_writer:MigrationWriter",
     "07_queries.sql":      "agents.writers.query_writer:QueryWriter",
+    # NOTE: 08_incremental_migration.sql is NOT here — its writer needs both the
+    # designed and existing schema, so it runs via run_incremental(), not _run_one.
+    # Pure-template exports (no LLM)
+    "09_schema.dbml":      "agents.writers.dbml_writer:DBMLWriter",
+    "10_schema.puml":      "agents.writers.plantuml_writer:PlantUMLWriter",
+    "11_json_schema.json": "agents.writers.json_schema_writer:JSONSchemaWriter",
+    "12_data_dictionary.csv": "agents.writers.data_dict_writer:DataDictWriter",
 }
 
 INCREMENTAL_FILE = "08_incremental_migration.sql"
@@ -25,6 +38,10 @@ EXTRA_FILES = {
     "migration":   "06_migration.py",
     "query":       "07_queries.sql",
     "incremental": INCREMENTAL_FILE,
+    "dbml":        "09_schema.dbml",
+    "plantuml":    "10_schema.puml",
+    "jsonschema":  "11_json_schema.json",
+    "datadict":    "12_data_dictionary.csv",
 }
 
 
@@ -63,9 +80,10 @@ def _generate(session_id: str) -> None:
     tables = get_tables(session_id)
     if not tables:
         return
-    filenames = list(_WRITER_MAP.keys())
+    # Only the core 4 docs run on confirm; everything else in _WRITER_MAP is
+    # an on-demand extra generated individually via run_single_file.
     with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(lambda fn: _run_one(session_id, fn, tables), filenames))
+        list(pool.map(lambda fn: _run_one(session_id, fn, tables), GENERATION_FILES))
     update_session(session_id, {"phase": "done"})
 
 
