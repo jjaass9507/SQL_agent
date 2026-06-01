@@ -3,6 +3,8 @@
 Pure rule-based analysis (no LLM). Returns a list of warnings so the confirm
 page can act like a senior architect raising red flags before generation.
 """
+import re
+
 from models.schema import TableSpec
 
 # Column-name keywords that usually warrant a UNIQUE constraint
@@ -12,6 +14,9 @@ _SECRET_HINTS = ("password", "passwd", "pwd", "token", "secret", "api_key", "api
 # Column-name keywords that look like enum/status fields
 _ENUM_HINTS = ("status", "state", "type", "kind", "狀態", "類型")
 _AUDIT_COLS = ("created_at", "updated_at", "create_time", "update_time")
+_SOFT_DELETE_COLS = ("deleted_at", "is_deleted", "deleted", "archived_at", "is_archived")
+# Generic catch-all column names that often hide an under-designed schema
+_BLOB_HINTS = ("data", "info", "details", "extra", "metadata", "payload", "attributes")
 
 
 def _ref_str(ref) -> str:
@@ -76,5 +81,20 @@ def analyze(tables: list[TableSpec]) -> list[dict]:
             if type_l == "timestamp":
                 warnings.append({"level": "info", "table": t.table_name, "column": c.name,
                                  "message": "建議使用 timestamptz 而非 timestamp 以避免時區問題"})
+
+            # 9. camelCase column name (PostgreSQL folds unquoted identifiers)
+            if re.search(r"[a-z][A-Z]", c.name):
+                warnings.append({"level": "warn", "table": t.table_name, "column": c.name,
+                                 "message": "使用 camelCase 命名，PostgreSQL 慣例為 underscore_case，否則查詢需加引號"})
+
+            # 10. generic blob column — likely under-modelled
+            if name_l in _BLOB_HINTS and type_l in ("json", "jsonb", "text"):
+                warnings.append({"level": "info", "table": t.table_name, "column": c.name,
+                                 "message": "泛用欄位（如 data/metadata）建議拆成具名欄位，較易查詢與索引"})
+
+        # 11. entity table with audit fields but no soft-delete column
+        if (col_names & set(_AUDIT_COLS)) and not (col_names & set(_SOFT_DELETE_COLS)) and len(cols) >= 5:
+            warnings.append({"level": "info", "table": t.table_name, "column": "",
+                             "message": "可考慮加入 deleted_at（軟刪除），避免實刪資料破壞關聯"})
 
     return warnings

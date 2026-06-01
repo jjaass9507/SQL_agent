@@ -123,12 +123,22 @@ python app.py
 
 **審查模式**：首頁（選「🔍 審查模式」並填入 DB 連線字串）→ 審查頁（AI 自動分析並輸出報告）。
 
-**SQL 工作台**：建立 Session 時填入資料庫連線字串後，文件頁的「額外產出」會出現「⚙ SQL 工作台」分頁，
-可直接對該資料庫執行唯讀查詢、`EXPLAIN`、列出資料表。基於安全考量僅允許 `SELECT`／`EXPLAIN`
-（拒絕 DDL／DML／DCL，連線以 read-only 開啟，statement timeout 30 秒），連線字串僅存於後端、不回傳前端。
+**DDL 匯入**：首頁（選「📋 DDL 匯入」）貼上既有的 `CREATE TABLE` 語句，系統解析成 Schema 後
+直接進入確認頁，可調整後產出文件——適合已有資料庫、想快速補文件的情境。
+
+確認頁會以規則式「設計顧問」即時標出常見問題（缺主鍵、外鍵未建索引、疑似唯一值未加 UNIQUE、
+明文密碼、camelCase 命名、泛用 JSON 欄位、缺軟刪除欄位等），不需 LLM。
+
+**SQL 工作台**：建立 Session 時填入資料庫連線字串後，文件頁會出現「⚙ SQL 工作台」分頁：
+左側為結構瀏覽器（資料表／欄位樹，標示 PK/FK，點欄位插入名稱、雙擊資料表帶入 SELECT 範本），
+右側可執行唯讀查詢與 `EXPLAIN`、查看查詢記錄、匯出 CSV，並支援 `Ctrl+Enter` 執行 / `Ctrl+Shift+E` 說明計畫。
+基於安全考量僅允許 `SELECT`／`EXPLAIN`（拒絕 DDL／DML／DCL，包含註解繞過與 CTE-DML；連線以 read-only
+開啟，statement timeout 30 秒），連線字串僅存於後端、不回傳前端。
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
+| `POST` | `/api/ddl-import` | 由貼上的 CREATE TABLE DDL 建立設計 Session |
+| `GET` | `/api/sessions/<id>/schema-tree` | 結構瀏覽器資料（實際 DB 或設計 Schema） |
 | `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |
 | `POST` | `/api/sessions/<id>/explain` | 回傳查詢的 `EXPLAIN` 計畫 |
 
@@ -179,7 +189,9 @@ SQL_agent/
 │   ├── session_store.py         # Session 持久化（PostgreSQL / JSON 雙模式）+ 版本管理
 │   ├── db_engine.py             # SQLAlchemy engine 單例 + is_pg_mode() 切換
 │   ├── db_schema.py             # SQLAlchemy Core 資料表定義（sessions / messages）
-│   ├── db_manager.py            # 資料庫管理 Agent：execute_query / explain / DDL（唯讀）
+│   ├── db_manager.py            # 資料庫管理 Agent：execute_query / explain / schema_tree（唯讀）
+│   ├── ddl_parser.py            # CREATE TABLE DDL → TableSpec 解析器
+│   ├── schema_advisor.py        # 規則式設計顧問（確認頁警告）
 │   ├── generation_worker.py     # 背景 Thread：文件產出（並行）/ 審查
 │   ├── db_introspect.py         # PostgreSQL 結構擷取 + 格式化
 │   └── schema_diff.py           # 設計 Schema vs 現有 DB 差異比對
