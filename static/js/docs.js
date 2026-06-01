@@ -1,4 +1,8 @@
-mermaid.initialize({ startOnLoad: false, theme: 'default' });
+// Guard against the mermaid CDN failing to load (offline / blocked / CSP):
+// an unguarded reference here would throw and abort the entire docs page.
+if (typeof mermaid !== 'undefined') {
+  mermaid.initialize({ startOnLoad: false, theme: 'default' });
+}
 
 const FILE_INFO = {
   '01_specification.md': { icon: '📄', label: '規格書與資料字典', cardId: 'card-spec' },
@@ -124,6 +128,7 @@ function transitionToReading(session) {
   genErrors = session.generation_errors || genErrors;
   renderExtrasToc();
   renderDoc(currentDoc);
+  initWorkbench();
 }
 
 function renderDoc(filename) {
@@ -156,8 +161,14 @@ function renderDoc(filename) {
     if (mermaidMatch) {
       // Strip HTML tags to prevent injection; valid Mermaid syntax uses no angle brackets
       const safeSrc = mermaidMatch[1].replace(/<[^>]*>/g, '');
-      contentEl.innerHTML = `<div class="mermaid">${safeSrc}</div>`;
-      mermaid.run({ nodes: contentEl.querySelectorAll('.mermaid') });
+      if (typeof mermaid !== 'undefined') {
+        contentEl.innerHTML = `<div class="mermaid">${safeSrc}</div>`;
+        mermaid.run({ nodes: contentEl.querySelectorAll('.mermaid') });
+      } else {
+        // Diagram library unavailable — degrade gracefully to the raw source
+        contentEl.innerHTML = `<div class="banner banner-warning">圖表元件無法載入，以下為原始碼</div>`
+          + `<pre>${escHtml(safeSrc)}</pre>`;
+      }
     } else {
       contentEl.innerHTML = `<pre>${escHtml(content)}</pre>`;
     }
@@ -269,9 +280,219 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// HAS_DB is injected by Jinja2 in docs.html
+// It is true when the session has a db_url stored server-side
+
+function renderResultTable(data) {
+  if (!data.columns || !data.rows || !data.rows.length) {
+    return '<div style="padding:8px;color:var(--muted);">（無資料）</div>';
+  }
+  window._lastQueryResult = data;
+  const header = data.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
+  const body = data.rows.map(r =>
+    `<tr>${r.map(cell => `<td>${escHtml(String(cell ?? ''))}</td>`).join('')}</tr>`
+  ).join('');
+  const note = data.truncated
+    ? `<div style="font-size:11px;color:var(--muted);padding:4px 0;">（僅顯示前 ${data.rows.length} 筆）</div>`
+    : '';
+  const toolbar = `<div class="wb-result-toolbar"><span>${data.row_count} 筆</span>`
+    + `<button class="btn btn-ghost btn-sm" onclick="exportQueryCSV()">⬇ CSV</button></div>`;
+  return `${toolbar}<div style="overflow:auto;"><table class="workbench-result-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>${note}</div>`;
+}
+
+function exportQueryCSV() {
+  const data = window._lastQueryResult;
+  if (!data) return;
+  const esc = v => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [data.columns.map(esc).join(',')];
+  for (const row of data.rows) lines.push(row.map(esc).join(','));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'query_result.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function initWorkbench() {
+  if (typeof HAS_DB === 'undefined' || !HAS_DB) return;
+  if (initWorkbench._done) return;   // idempotent: avoid double event binding
+  initWorkbench._done = true;
+  const tocItem = document.getElementById('workbench-toc-item');
+  if (tocItem) tocItem.style.display = '';
+
+  const runBtn = document.getElementById('wb-run-btn');
+  const explainBtn = document.getElementById('wb-explain-btn');
+  const listBtn = document.getElementById('wb-list-tables-btn');
+  const outEl = document.getElementById('workbench-output');
+  const sqlEl = document.getElementById('workbench-sql');
+
+  async function postQuery(sql, endpoint) {
+    outEl.innerHTML = '<div class="gen-loading-text">⟳ 執行中...</div>';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        outEl.innerHTML = `<div style="color:var(--error);padding:8px;">${escHtml(data.error)}</div>`;
+      } else if (endpoint === 'explain') {
+        outEl.innerHTML = `<pre style="font-size:12px;overflow:auto;">${escHtml(data.plan)}</pre>`;
+      } else {
+        outEl.innerHTML = renderResultTable(data);
+        saveHistory(sql);
+      }
+    } catch (e) {
+      outEl.innerHTML = '<div style="color:var(--error);">連線失敗，請重新整理頁面</div>';
+    }
+  }
+
+  if (runBtn) runBtn.addEventListener('click', () => {
+    const sql = (sqlEl.value || '').trim();
+    if (sql) postQuery(sql, 'query');
+  });
+
+  if (explainBtn) explainBtn.addEventListener('click', () => {
+    const sql = (sqlEl.value || '').trim();
+    if (sql) postQuery(sql, 'explain');
+  });
+
+  if (listBtn) listBtn.addEventListener('click', () => {
+    postQuery(
+      "SELECT table_name, pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS size FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name",
+      'query'
+    );
+  });
+
+  // Keyboard shortcuts: Ctrl+Enter run, Ctrl+Shift+E explain
+  if (sqlEl) sqlEl.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      const sql = sqlEl.value.trim();
+      if (sql) postQuery(sql, 'query');
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      const sql = sqlEl.value.trim();
+      if (sql) postQuery(sql, 'explain');
+    }
+  });
+
+  // ── Query history (localStorage) ──────────────────────────────────────
+  const HIST_KEY = `wb-history-${SESSION_ID}`;
+  function loadHistory() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch { return []; } }
+  function saveHistory(sql) {
+    let h = loadHistory().filter(s => s !== sql);
+    h.unshift(sql);
+    if (h.length > 20) h = h.slice(0, 20);
+    localStorage.setItem(HIST_KEY, JSON.stringify(h));
+    renderHistory();
+  }
+  function renderHistory() {
+    const list = document.getElementById('wb-history-list');
+    if (!list) return;
+    const h = loadHistory();
+    list.innerHTML = h.length
+      ? h.map((sql, i) => `<div class="wb-history-item" data-idx="${i}" title="${escHtml(sql)}">${escHtml(sql.slice(0, 90))}${sql.length > 90 ? '…' : ''}</div>`).join('')
+      : '<div style="padding:8px;color:var(--muted);font-size:12px;">無記錄</div>';
+    list.querySelectorAll('.wb-history-item').forEach(el => {
+      el.addEventListener('click', () => {
+        sqlEl.value = loadHistory()[parseInt(el.dataset.idx)];
+        document.getElementById('wb-history-panel').style.display = 'none';
+        sqlEl.focus();
+      });
+    });
+  }
+  const histBtn = document.getElementById('wb-history-btn');
+  if (histBtn) histBtn.addEventListener('click', () => {
+    const p = document.getElementById('wb-history-panel');
+    p.style.display = p.style.display === 'none' ? '' : 'none';
+    if (p.style.display !== 'none') renderHistory();
+  });
+  const clearHistBtn = document.getElementById('wb-clear-history-btn');
+  if (clearHistBtn) clearHistBtn.addEventListener('click', () => { localStorage.removeItem(HIST_KEY); renderHistory(); });
+
+  // ── Schema browser ────────────────────────────────────────────────────
+  async function loadSchemaTree() {
+    const tree = document.getElementById('workbench-schema-tree');
+    if (!tree) return;
+    tree.innerHTML = '<div class="workbench-sidebar-loading">載入中…</div>';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/schema-tree`);
+      const data = await res.json();
+      if (!data.tables || !data.tables.length) {
+        tree.innerHTML = '<div class="workbench-sidebar-loading">無結構資料</div>';
+        return;
+      }
+      tree.innerHTML = data.tables.map(t => `
+        <div class="wb-tree-table">
+          <div class="wb-tree-table-name" data-table="${escHtml(t.name)}">
+            <span class="wb-tree-icon">▶</span>${escHtml(t.name)}
+          </div>
+          <div class="wb-tree-cols" style="display:none;">
+            ${(t.columns || []).map(col => `
+              <div class="wb-tree-col" data-table="${escHtml(t.name)}" data-col="${escHtml(col.name)}"
+                   title="${escHtml(col.type)}${col.is_pk ? ' · PK' : ''}${col.is_fk ? ' · FK→' + escHtml(col.fk_table || '') : ''}">
+                <span class="wb-tree-col-key">${col.is_pk ? '🔑' : col.is_fk ? '🔗' : ''}</span>
+                <span class="wb-tree-col-name">${escHtml(col.name)}</span>
+                <span class="wb-tree-col-type">${escHtml((col.type || '').replace('character varying', 'varchar'))}</span>
+              </div>`).join('')}
+          </div>
+        </div>`).join('');
+      tree.querySelectorAll('.wb-tree-table-name').forEach(el => {
+        el.addEventListener('click', () => {
+          const cols = el.nextElementSibling;
+          const open = cols.style.display !== 'none';
+          cols.style.display = open ? 'none' : '';
+          el.querySelector('.wb-tree-icon').textContent = open ? '▶' : '▼';
+          el.classList.toggle('active', !open);
+        });
+        el.addEventListener('dblclick', () => {
+          sqlEl.value = `SELECT *\nFROM ${el.dataset.table}\nLIMIT 100;`;
+          sqlEl.focus();
+        });
+      });
+      tree.querySelectorAll('.wb-tree-col').forEach(el => {
+        el.addEventListener('click', () => {
+          const ref = el.dataset.col;
+          const pos = sqlEl.selectionStart, val = sqlEl.value;
+          sqlEl.value = val.slice(0, pos) + ref + val.slice(sqlEl.selectionEnd);
+          sqlEl.setSelectionRange(pos + ref.length, pos + ref.length);
+          sqlEl.focus();
+        });
+      });
+    } catch (e) {
+      tree.innerHTML = '<div class="workbench-sidebar-loading" style="color:var(--error);">載入失敗</div>';
+    }
+  }
+  loadSchemaTree();
+  const refreshBtn = document.getElementById('wb-refresh-schema');
+  if (refreshBtn) refreshBtn.addEventListener('click', loadSchemaTree);
+
+  // TOC click handler for workbench
+  const wbTocItem = document.getElementById('workbench-toc-item');
+  if (wbTocItem) {
+    wbTocItem.addEventListener('click', () => {
+      document.querySelectorAll('.docs-toc-item').forEach(el => el.classList.remove('active'));
+      wbTocItem.classList.add('active');
+      document.getElementById('docs-content').closest('.docs-body').style.display = 'none';
+      document.getElementById('workbench-panel').style.display = '';
+      document.getElementById('content-title').textContent = '⚙ SQL 工作台';
+    });
+  }
+}
+
 // TOC clicks
 document.querySelectorAll('.docs-toc-item').forEach(item => {
-  item.addEventListener('click', () => renderDoc(item.dataset.doc));
+  item.addEventListener('click', () => {
+    if (item.dataset.doc === '__workbench__') return; // handled by initWorkbench
+    document.getElementById('workbench-panel').style.display = 'none';
+    document.getElementById('docs-content').closest('.docs-body').style.display = '';
+    renderDoc(item.dataset.doc);
+  });
 });
 
 // Continue iterating: re-open the design for further chat
@@ -372,6 +593,7 @@ genErrors = INITIAL_GEN_ERRORS || {};
 if (SESSION_PHASE === 'done') {
   outputs = INITIAL_OUTPUTS;
   transitionToReading({ outputs: INITIAL_OUTPUTS, generation_errors: INITIAL_GEN_ERRORS });
+  initWorkbench();
 } else {
   // Apply any already-known status immediately
   if (INITIAL_GEN_STATUS) {

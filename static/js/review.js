@@ -127,7 +127,7 @@ function showReviewFailed() {
 
 async function restartReview() {
   try {
-    const res = await fetch(\`/api/sessions/\${SESSION_ID}/review/restart\`, { method: 'POST' });
+    const res = await fetch(`/api/sessions/${SESSION_ID}/review/restart`, { method: 'POST' });
     if (!res.ok) throw new Error();
     topbarBadge.textContent = '⟳ 分析中';
     topbarBadge.className = 'badge badge-inprogress';

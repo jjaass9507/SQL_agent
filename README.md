@@ -85,6 +85,36 @@ PENSIEVE_VERIFY=false
 | `PENSIEVE_URL` | | API 端點（預設官方網址） |
 | `PENSIEVE_BUILDING` | | 使用的 flow 名稱（預設 `question`） |
 | `PENSIEVE_VERIFY` | | SSL 憑證驗證（預設 `false`） |
+| `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
+| `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
+
+---
+
+## 儲存後端
+
+平台支援兩種 Session 儲存模式：
+
+- **PostgreSQL 模式**：使用 SQLAlchemy Core，Session 存於 `sessions` / `messages`
+  資料表，支援連線池與多 worker 部署。連線來源有兩種（設定頁優先於環境變數）：
+
+  - **設定頁（建議）**：開啟側欄「⚙ 設定」，填入 PostgreSQL 連線字串並儲存。
+    系統會測試連線、自動建立所需資料表，之後平台的所有專案與對話即存入該資料庫作為記憶。
+    連線字串存於本機 `data/app_settings.json`（git ignored），回傳前端時密碼一律遮罩。
+
+  - **環境變數**：部署時可設 `DATABASE_URL`，首次需執行 migration 建表：
+
+    ```bash
+    export DATABASE_URL=postgresql://user:pass@host:5432/sql_agent
+    alembic upgrade head
+    ```
+
+  連接資料庫後，平台會把使用紀錄（建立／確認設計、完成審查、執行查詢、設定變更等）
+  寫入 `activity_log` 資料表，作為操作軌跡，可由 `GET /api/activity` 查詢。
+
+- **JSON 檔案模式**（未設定上述任一者，預設）：Session 存於 `data/*.json`，
+  零外部相依，適合本地開發與測試。
+
+兩種模式的 `web/session_store.py` 對外介面完全相同，切換不需改動其他程式碼。
 
 ---
 
@@ -100,6 +130,28 @@ python app.py
 **設計模式**（預設）：首頁（專案管理）→ 對話頁（需求收集）→ 確認頁（Schema 審閱 + Diff + 版本管理）→ 文件頁（即時進度 + 預覽/下載）。
 
 **審查模式**：首頁（選「🔍 審查模式」並填入 DB 連線字串）→ 審查頁（AI 自動分析並輸出報告）。
+
+**DDL 匯入**：首頁（選「📋 DDL 匯入」）貼上既有的 `CREATE TABLE` 語句，系統解析成 Schema 後
+直接進入確認頁，可調整後產出文件——適合已有資料庫、想快速補文件的情境。
+
+確認頁會以規則式「設計顧問」即時標出常見問題（缺主鍵、外鍵未建索引、疑似唯一值未加 UNIQUE、
+明文密碼、camelCase 命名、泛用 JSON 欄位、缺軟刪除欄位等），不需 LLM。
+
+**SQL 工作台**：建立 Session 時填入資料庫連線字串後，文件頁會出現「⚙ SQL 工作台」分頁：
+左側為結構瀏覽器（資料表／欄位樹，標示 PK/FK，點欄位插入名稱、雙擊資料表帶入 SELECT 範本），
+右側可執行唯讀查詢與 `EXPLAIN`、查看查詢記錄、匯出 CSV，並支援 `Ctrl+Enter` 執行 / `Ctrl+Shift+E` 說明計畫。
+基於安全考量僅允許 `SELECT`／`EXPLAIN`（拒絕 DDL／DML／DCL，包含註解繞過與 CTE-DML；連線以 read-only
+開啟，statement timeout 30 秒），連線字串僅存於後端、不回傳前端。
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| `GET` | `/api/settings` | 取得目前記憶後端狀態（密碼遮罩） |
+| `POST` | `/api/settings` | 設定／清除作為記憶的資料庫連線（測試連線並建表） |
+| `GET` | `/api/activity` | 平台使用紀錄（寫入設定的 PostgreSQL，JSON 模式回空陣列） |
+| `POST` | `/api/ddl-import` | 由貼上的 CREATE TABLE DDL 建立設計 Session |
+| `GET` | `/api/sessions/<id>/schema-tree` | 結構瀏覽器資料（實際 DB 或設計 Schema） |
+| `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |
+| `POST` | `/api/sessions/<id>/explain` | 回傳查詢的 `EXPLAIN` 計畫 |
 
 ### CLI 工具
 
@@ -145,10 +197,23 @@ SQL_agent/
 ├── .env.example
 │
 ├── web/                         # 網頁平台後端邏輯
-│   ├── session_store.py         # Session JSON 持久化 + threading.Lock + 版本管理
+│   ├── session_store.py         # Session 持久化（PostgreSQL / JSON 雙模式）+ 版本管理
+│   ├── app_settings.py          # 平台設定（記憶用 DB 連線字串）持久化
+│   ├── activity_log.py          # 平台使用紀錄寫入 PostgreSQL（best-effort）
+│   ├── db_engine.py             # SQLAlchemy engine 單例 + is_pg_mode() 切換
+│   ├── db_schema.py             # SQLAlchemy Core 資料表定義（sessions / messages / activity_log）
+│   ├── db_manager.py            # 資料庫管理 Agent：execute_query / explain / schema_tree（唯讀）
+│   ├── ddl_parser.py            # CREATE TABLE DDL → TableSpec 解析器
+│   ├── schema_advisor.py        # 規則式設計顧問（確認頁警告）
 │   ├── generation_worker.py     # 背景 Thread：文件產出（並行）/ 審查
 │   ├── db_introspect.py         # PostgreSQL 結構擷取 + 格式化
 │   └── schema_diff.py           # 設計 Schema vs 現有 DB 差異比對
+│
+├── alembic/                     # PostgreSQL migration（alembic upgrade head）
+│   ├── env.py
+│   └── versions/
+│       ├── 0001_initial.py      # sessions / messages
+│       └── 0002_activity_log.py # 平台使用紀錄表
 │
 ├── templates/                   # Jinja2 HTML 模板
 │   ├── base.html
@@ -156,7 +221,8 @@ SQL_agent/
 │   ├── chat.html                # 對話頁
 │   ├── confirm.html             # 需求確認頁（含 Diff + 版本歷史）
 │   ├── docs.html                # 文件查閱頁
-│   └── review.html              # 審查報告頁
+│   ├── review.html              # 審查報告頁
+│   └── settings.html            # 設定頁（記憶用 DB 連線）
 │
 ├── static/
 │   ├── css/main.css             # 設計系統（色板、排版、組件）
@@ -165,7 +231,8 @@ SQL_agent/
 │       ├── chat.js
 │       ├── confirm.js
 │       ├── docs.js
-│       └── review.js
+│       ├── review.js
+│       └── settings.js
 │
 ├── agents/
 │   ├── orchestrator.py          # CLI 狀態機
@@ -175,7 +242,8 @@ SQL_agent/
 │       ├── spec_writer.py       # 規格書（模板渲染，不耗 API）
 │       ├── diagram_writer.py    # ER Diagram（Mermaid）
 │       ├── ddl_writer.py        # PostgreSQL DDL + migration
-│       └── security_writer.py   # 效能與安全規劃
+│       ├── security_writer.py   # 效能與安全規劃
+│       └── query_runner.py      # 依 Schema 產生常用 SELECT 查詢範例
 │
 ├── models/
 │   ├── schema.py                # ColumnSpec, TableSpec

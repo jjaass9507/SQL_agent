@@ -9,9 +9,13 @@ from models.schema import ColumnSpec, TableSpec
 
 @pytest.fixture(autouse=True)
 def _isolate_data(tmp_path, monkeypatch):
-    """Redirect session store to a per-test temp directory."""
+    """Redirect session store to a per-test temp directory and force JSON mode,
+    so a developer's configured DB (data/app_settings.json) can't leak in."""
     import web.session_store as ss
+    import web.app_settings as settings
     monkeypatch.setattr(ss, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(settings, "_SETTINGS_PATH", tmp_path / "app_settings.json")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -507,3 +511,118 @@ def test_concurrent_regen_blocked(client):
 
     resp = client.post(f"/api/sessions/{session_id}/outputs/01_specification.md/regenerate")
     assert resp.status_code == 409
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TC-API-DB: Query and Explain endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_query_no_db_url(client, _isolate_data):
+    """POST /query returns 400 when session has no db_url."""
+    resp = client.post("/api/sessions", json={"title": "q-test"})
+    session_id = resp.get_json()["id"]
+    resp2 = client.post(f"/api/sessions/{session_id}/query", json={"sql": "SELECT 1"})
+    assert resp2.status_code == 400
+    assert "no database" in resp2.get_json()["error"]
+
+
+def test_query_empty_sql(client, _isolate_data):
+    """POST /query returns 400 when sql is empty."""
+    resp = client.post("/api/sessions", json={"title": "q-test2"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
+    resp2 = client.post(f"/api/sessions/{session_id}/query", json={"sql": ""})
+    assert resp2.status_code == 400
+
+
+def test_query_forbidden_sql(client, _isolate_data):
+    """POST /query returns 400 for DDL statements."""
+    resp = client.post("/api/sessions", json={"title": "q-test3"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
+    resp2 = client.post(f"/api/sessions/{session_id}/query", json={"sql": "DROP TABLE users"})
+    assert resp2.status_code == 400
+    assert "error" in resp2.get_json()
+
+
+def test_db_url_not_exposed_in_get_session(client, _isolate_data):
+    """GET /api/sessions/<id> must not expose db_url."""
+    resp = client.post("/api/sessions", json={"title": "q-test4"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://secret:pass@host/db"})
+    resp2 = client.get(f"/api/sessions/{session_id}")
+    assert resp2.status_code == 200
+    assert "db_url" not in resp2.get_json()
+
+
+def test_db_url_not_exposed_in_create(client, _isolate_data):
+    """POST /api/sessions must not echo db_url back in the response."""
+    resp = client.post("/api/sessions", json={"title": "c-test", "db_url": ""})
+    assert resp.status_code == 201
+    assert "db_url" not in resp.get_json()
+
+
+def test_schema_tree_design_fallback(client, _isolate_data):
+    """schema-tree returns designed tables when no db_url is set."""
+    import web.session_store as ss
+    from models.schema import ColumnSpec, TableSpec
+    resp = client.post("/api/sessions", json={"title": "st-test"})
+    session_id = resp.get_json()["id"]
+    t = TableSpec(table_name="widgets", description="",
+                  columns=[ColumnSpec(name="id", data_type="uuid", nullable=False,
+                                      description="", is_primary_key=True)])
+    ss.set_tables(session_id, [t], ["kp"])
+    resp2 = client.get(f"/api/sessions/{session_id}/schema-tree")
+    assert resp2.status_code == 200
+    data = resp2.get_json()
+    assert data["source"] == "design"
+    assert data["tables"][0]["name"] == "widgets"
+    assert data["tables"][0]["columns"][0]["is_pk"] is True
+
+
+def test_schema_tree_404(client, _isolate_data):
+    resp = client.get("/api/sessions/nonexistent/schema-tree")
+    assert resp.status_code == 404
+
+
+def test_ddl_import_valid(client, _isolate_data):
+    ddl = ("CREATE TABLE users (id serial PRIMARY KEY, email varchar(255) NOT NULL);\n"
+           "CREATE TABLE posts (id serial PRIMARY KEY, user_id integer REFERENCES users(id), title text);")
+    resp = client.post("/api/ddl-import", json={"title": "DDL", "ddl": ddl})
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["table_count"] == 2
+    sess = client.get(f"/api/sessions/{data['id']}").get_json()
+    assert sess["phase"] == "confirming"
+    assert len(sess["tables"]) == 2
+
+
+def test_ddl_import_invalid(client, _isolate_data):
+    resp = client.post("/api/ddl-import", json={"ddl": "this is not ddl"})
+    assert resp.status_code == 400
+
+
+def test_ddl_import_empty(client, _isolate_data):
+    resp = client.post("/api/ddl-import", json={"ddl": ""})
+    assert resp.status_code == 400
+
+
+def test_explain_no_db_url(client, _isolate_data):
+    """POST /explain returns 400 when session has no db_url."""
+    resp = client.post("/api/sessions", json={"title": "e-test"})
+    session_id = resp.get_json()["id"]
+    resp2 = client.post(f"/api/sessions/{session_id}/explain", json={"sql": "SELECT 1"})
+    assert resp2.status_code == 400
+
+
+def test_explain_forbidden_sql(client, _isolate_data):
+    """POST /explain returns 400 for DDL statements."""
+    resp = client.post("/api/sessions", json={"title": "e-test2"})
+    session_id = resp.get_json()["id"]
+    import web.session_store as ss
+    ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
+    resp2 = client.post(f"/api/sessions/{session_id}/explain", json={"sql": "CREATE TABLE x (id int)"})
+    assert resp2.status_code == 400

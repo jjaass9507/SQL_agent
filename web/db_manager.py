@@ -1,0 +1,228 @@
+"""
+DB Management Agent — runs SELECT/EXPLAIN queries against a session's target database.
+Security enforcement is centralised here; app.py routes only call these functions.
+db_url is always sourced from the server-side session record, never from the frontend.
+"""
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Reject DML, DDL, and DCL
+_FORBIDDEN_RE = re.compile(
+    r"^\s*(CREATE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|INSERT|UPDATE|DELETE|MERGE)\b",
+    re.IGNORECASE,
+)
+
+QUERY_TIMEOUT_MS = 30_000
+
+
+def _sql_skeleton(sql: str) -> str:
+    """
+    Strip comments and string/identifier literals so keyword checks cannot be
+    bypassed by leading comments and cannot false-positive on literal text.
+    """
+    s = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)   # block comments
+    s = re.sub(r"--[^\n]*", " ", s)                        # line comments
+    s = re.sub(r"'(?:''|[^'])*'", " ", s)                  # single-quoted strings
+    s = re.sub(r'"(?:""|[^"])*"', " ", s)                  # quoted identifiers
+    return s
+
+
+def _check_sql(sql: str) -> str | None:
+    """Returns an error string if the SQL is forbidden, else None."""
+    if not sql or not sql.strip():
+        return "SQL query is empty"
+    skeleton = _sql_skeleton(sql).strip()
+    if not skeleton:
+        return "SQL query is empty"
+    # First keyword after stripping comments must not be a write/DDL/DCL verb.
+    if _FORBIDDEN_RE.match(skeleton):
+        return "Only SELECT and EXPLAIN queries are allowed"
+    # Data-modifying CTE, e.g. WITH x AS (...) DELETE ...
+    if re.match(r"^\s*WITH\b", skeleton, re.IGNORECASE) and re.search(
+        r"\b(INSERT|UPDATE|DELETE|MERGE)\b", skeleton, re.IGNORECASE
+    ):
+        return "Data-modifying statements are not allowed"
+    # SELECT ... INTO creates a table (a write disguised as a SELECT).
+    if re.match(r"^\s*SELECT\b", skeleton, re.IGNORECASE) and re.search(
+        r"\bINTO\b", skeleton, re.IGNORECASE
+    ):
+        return "SELECT ... INTO is not allowed"
+    return None
+
+
+def execute_query(db_url: str, sql: str, limit: int = 500) -> dict:
+    """
+    Execute a read-only SQL query against db_url.
+    Returns {"columns": [...], "rows": [[...], ...], "row_count": N, "truncated": bool}
+    or {"error": "..."}.
+    """
+    err = _check_sql(sql)
+    if err:
+        return {"error": err}
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError:
+        return {"error": "psycopg2-binary is not installed"}
+    try:
+        conn = psycopg2.connect(
+            db_url, connect_timeout=10,
+            options=f"-c statement_timeout={QUERY_TIMEOUT_MS}",
+        )
+    except Exception as exc:
+        return {"error": f"連線失敗：{str(exc)[:200]}"}
+    try:
+        conn.set_session(readonly=True, autocommit=True)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql)
+            rows_raw = cur.fetchmany(limit + 1)
+            truncated = len(rows_raw) > limit
+            rows_raw = rows_raw[:limit]
+            if rows_raw:
+                columns = list(rows_raw[0].keys())
+                rows = [list(r.values()) for r in rows_raw]
+            else:
+                columns = [desc[0] for desc in cur.description] if cur.description else []
+                rows = []
+        return {"columns": columns, "rows": rows, "row_count": len(rows), "truncated": truncated}
+    except Exception as exc:
+        logger.warning("execute_query error: %s", exc)
+        return {"error": str(exc)[:300]}
+    finally:
+        conn.close()
+
+
+def list_tables(db_url: str, schema: str = "public") -> dict:
+    """Returns {"tables": [...]} or {"error": "..."}."""
+    sql = """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = %s AND table_type = 'BASE TABLE'
+        ORDER BY table_name
+    """
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        with conn.cursor() as cur:
+            cur.execute(sql, (schema,))
+            tables = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return {"tables": tables}
+    except Exception as exc:
+        return {"error": str(exc)[:300]}
+
+
+def get_table_ddl(db_url: str, table_name: str, schema: str = "public") -> dict:
+    """Returns {"ddl": "CREATE TABLE ..."} or {"error": "..."}."""
+    sql = """
+        SELECT column_name, data_type, character_maximum_length,
+               is_nullable, column_default
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+    """
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        with conn.cursor() as cur:
+            cur.execute(sql, (schema, table_name))
+            cols = cur.fetchall()
+        conn.close()
+        if not cols:
+            return {"error": f"Table '{table_name}' not found in schema '{schema}'"}
+        lines = []
+        for col in cols:
+            cname, dtype, maxlen, nullable, default = col
+            type_str = f"{dtype}({maxlen})" if maxlen else dtype
+            null_str = "" if nullable == "YES" else " NOT NULL"
+            def_str = f" DEFAULT {default}" if default else ""
+            lines.append(f"  {cname} {type_str}{null_str}{def_str}")
+        ddl = f"CREATE TABLE {schema}.{table_name} (\n" + ",\n".join(lines) + "\n);"
+        return {"ddl": ddl}
+    except Exception as exc:
+        return {"error": str(exc)[:300]}
+
+
+def schema_tree(db_url: str, schema: str = "public") -> dict:
+    """
+    Return tables + columns (with PK/FK flags and row-count estimate) for the
+    workbench schema browser. Returns {"tables": [...]} or {"error": "..."}.
+    """
+    sql = """
+        SELECT c.table_name, c.column_name, c.data_type,
+               c.character_maximum_length, c.is_nullable,
+               (pk.column_name IS NOT NULL) AS is_pk,
+               (fk.column_name IS NOT NULL) AS is_fk,
+               fk.foreign_table_name
+        FROM information_schema.columns c
+        JOIN information_schema.tables t
+             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+            AND t.table_type = 'BASE TABLE'
+        LEFT JOIN (
+            SELECT kcu.table_name, kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                 ON kcu.constraint_name = tc.constraint_name
+                AND kcu.table_schema = tc.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = %(schema)s
+        ) pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
+        LEFT JOIN (
+            SELECT kcu.table_name, kcu.column_name,
+                   ccu.table_name AS foreign_table_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                 ON kcu.constraint_name = tc.constraint_name
+                AND kcu.table_schema = tc.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+                 ON ccu.constraint_name = tc.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = %(schema)s
+        ) fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
+        WHERE c.table_schema = %(schema)s
+        ORDER BY c.table_name, c.ordinal_position
+    """
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        with conn.cursor() as cur:
+            cur.execute(sql, {"schema": schema})
+            rows = cur.fetchall()
+        conn.close()
+    except Exception as exc:
+        return {"error": str(exc)[:300]}
+
+    tables: dict = {}
+    for tname, cname, dtype, maxlen, nullable, is_pk, is_fk, fk_table in rows:
+        t = tables.setdefault(tname, {"name": tname, "columns": []})
+        type_str = f"{dtype}({maxlen})" if maxlen else dtype
+        t["columns"].append({
+            "name": cname,
+            "type": type_str,
+            "nullable": nullable == "YES",
+            "is_pk": bool(is_pk),
+            "is_fk": bool(is_fk),
+            "fk_table": fk_table,
+        })
+    return {"tables": list(tables.values())}
+
+
+def explain_query(db_url: str, sql: str) -> dict:
+    """Returns {"plan": "..."} or {"error": "..."}."""
+    err = _check_sql(sql)
+    if err:
+        return {"error": err}
+    try:
+        import psycopg2
+        conn = psycopg2.connect(
+            db_url, connect_timeout=10,
+            options=f"-c statement_timeout={QUERY_TIMEOUT_MS}",
+        )
+        conn.set_session(readonly=True, autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(f"EXPLAIN {sql}")
+            plan_rows = cur.fetchall()
+        conn.close()
+        return {"plan": "\n".join(row[0] for row in plan_rows)}
+    except Exception as exc:
+        return {"error": str(exc)[:300]}
