@@ -112,3 +112,5 @@ def _review(session_id: str) -> None:
         "phase": "review_done",
         "outputs": {"05_review_report.md": report},
     })
+    from web import activity_log
+    activity_log.record("review_completed", session_id, {"table_count": len(tables)})

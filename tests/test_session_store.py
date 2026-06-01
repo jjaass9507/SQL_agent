@@ -22,7 +22,10 @@ from web.session_store import (
 @pytest.fixture(autouse=True)
 def _isolate_data(tmp_path, monkeypatch):
     import web.session_store as ss
+    import web.app_settings as settings
     monkeypatch.setattr(ss, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(settings, "_SETTINGS_PATH", tmp_path / "app_settings.json")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 def _make_table(name="users"):

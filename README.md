@@ -108,6 +108,9 @@ PENSIEVE_VERIFY=false
     alembic upgrade head
     ```
 
+  連接資料庫後，平台會把使用紀錄（建立／確認設計、完成審查、執行查詢、設定變更等）
+  寫入 `activity_log` 資料表，作為操作軌跡，可由 `GET /api/activity` 查詢。
+
 - **JSON 檔案模式**（未設定上述任一者，預設）：Session 存於 `data/*.json`，
   零外部相依，適合本地開發與測試。
 
@@ -144,6 +147,7 @@ python app.py
 |---|---|---|
 | `GET` | `/api/settings` | 取得目前記憶後端狀態（密碼遮罩） |
 | `POST` | `/api/settings` | 設定／清除作為記憶的資料庫連線（測試連線並建表） |
+| `GET` | `/api/activity` | 平台使用紀錄（寫入設定的 PostgreSQL，JSON 模式回空陣列） |
 | `POST` | `/api/ddl-import` | 由貼上的 CREATE TABLE DDL 建立設計 Session |
 | `GET` | `/api/sessions/<id>/schema-tree` | 結構瀏覽器資料（實際 DB 或設計 Schema） |
 | `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |
@@ -195,8 +199,9 @@ SQL_agent/
 ├── web/                         # 網頁平台後端邏輯
 │   ├── session_store.py         # Session 持久化（PostgreSQL / JSON 雙模式）+ 版本管理
 │   ├── app_settings.py          # 平台設定（記憶用 DB 連線字串）持久化
+│   ├── activity_log.py          # 平台使用紀錄寫入 PostgreSQL（best-effort）
 │   ├── db_engine.py             # SQLAlchemy engine 單例 + is_pg_mode() 切換
-│   ├── db_schema.py             # SQLAlchemy Core 資料表定義（sessions / messages）
+│   ├── db_schema.py             # SQLAlchemy Core 資料表定義（sessions / messages / activity_log）
 │   ├── db_manager.py            # 資料庫管理 Agent：execute_query / explain / schema_tree（唯讀）
 │   ├── ddl_parser.py            # CREATE TABLE DDL → TableSpec 解析器
 │   ├── schema_advisor.py        # 規則式設計顧問（確認頁警告）
@@ -206,7 +211,9 @@ SQL_agent/
 │
 ├── alembic/                     # PostgreSQL migration（alembic upgrade head）
 │   ├── env.py
-│   └── versions/0001_initial.py
+│   └── versions/
+│       ├── 0001_initial.py      # sessions / messages
+│       └── 0002_activity_log.py # 平台使用紀錄表
 │
 ├── templates/                   # Jinja2 HTML 模板
 │   ├── base.html

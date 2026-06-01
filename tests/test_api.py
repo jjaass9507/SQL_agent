@@ -9,9 +9,13 @@ from models.schema import ColumnSpec, TableSpec
 
 @pytest.fixture(autouse=True)
 def _isolate_data(tmp_path, monkeypatch):
-    """Redirect session store to a per-test temp directory."""
+    """Redirect session store to a per-test temp directory and force JSON mode,
+    so a developer's configured DB (data/app_settings.json) can't leak in."""
     import web.session_store as ss
+    import web.app_settings as settings
     monkeypatch.setattr(ss, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(settings, "_SETTINGS_PATH", tmp_path / "app_settings.json")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)

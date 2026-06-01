@@ -32,3 +32,13 @@ messages_table = Table("messages", metadata,
     Column("content", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+
+# Platform usage trail. No FK to sessions: records are kept for audit even
+# after a session is deleted (session_id may also be null for global events).
+activity_log_table = Table("activity_log", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("session_id", String(36), nullable=True),
+    Column("event", String(50), nullable=False),
+    Column("detail", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)

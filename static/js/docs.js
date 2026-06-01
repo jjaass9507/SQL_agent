@@ -1,4 +1,8 @@
-mermaid.initialize({ startOnLoad: false, theme: 'default' });
+// Guard against the mermaid CDN failing to load (offline / blocked / CSP):
+// an unguarded reference here would throw and abort the entire docs page.
+if (typeof mermaid !== 'undefined') {
+  mermaid.initialize({ startOnLoad: false, theme: 'default' });
+}
 
 const FILE_INFO = {
   '01_specification.md': { icon: '📄', label: '規格書與資料字典', cardId: 'card-spec' },
@@ -157,8 +161,14 @@ function renderDoc(filename) {
     if (mermaidMatch) {
       // Strip HTML tags to prevent injection; valid Mermaid syntax uses no angle brackets
       const safeSrc = mermaidMatch[1].replace(/<[^>]*>/g, '');
-      contentEl.innerHTML = `<div class="mermaid">${safeSrc}</div>`;
-      mermaid.run({ nodes: contentEl.querySelectorAll('.mermaid') });
+      if (typeof mermaid !== 'undefined') {
+        contentEl.innerHTML = `<div class="mermaid">${safeSrc}</div>`;
+        mermaid.run({ nodes: contentEl.querySelectorAll('.mermaid') });
+      } else {
+        // Diagram library unavailable — degrade gracefully to the raw source
+        contentEl.innerHTML = `<div class="banner banner-warning">圖表元件無法載入，以下為原始碼</div>`
+          + `<pre>${escHtml(safeSrc)}</pre>`;
+      }
     } else {
       contentEl.innerHTML = `<pre>${escHtml(content)}</pre>`;
     }

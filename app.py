@@ -32,7 +32,7 @@ class _JsonFormatter(logging.Formatter):
         for key, val in vars(record).items():
             if key not in logging.LogRecord.__dict__ and not key.startswith("_"):
                 entry[key] = val
-        return _json.dumps(entry, ensure_ascii=False)
+        return _json.dumps(entry, ensure_ascii=False, default=str)
 
 
 def _setup_logging() -> None:
@@ -61,6 +61,7 @@ from web.session_store import (
     GENERATION_FILES,
 )
 from web.generation_worker import run_generation, run_review, run_single_file, EXTRA_FILES
+from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
@@ -209,6 +210,16 @@ def api_get_settings():
     })
 
 
+@app.get("/api/activity")
+def api_activity():
+    """Recent platform usage records from the configured database (empty in JSON mode)."""
+    try:
+        limit = min(int(request.args.get("limit", 100)), 500)
+    except (TypeError, ValueError):
+        limit = 100
+    return jsonify(activity_log.recent(limit=limit))
+
+
 @app.post("/api/settings")
 def api_set_settings():
     """Set (or clear) the database used as the platform's memory.
@@ -243,6 +254,7 @@ def api_set_settings():
         return jsonify({"error": f"連線失敗：{_sanitize_db_error(str(e))}"}), 400
 
     logger.info("settings: database configured as memory backend")
+    activity_log.record("settings_db_configured", None, {"masked_url": _mask_db_url(url)})
     return jsonify({"configured": True, "backend": "postgresql", "masked_url": _mask_db_url(url)})
 
 
@@ -281,6 +293,8 @@ def api_create_session():
         run_review(session["id"])
 
     logger.info("session created", extra={"session_id": session["id"], "mode": mode, "phase": session["phase"]})
+    activity_log.record("session_created", session["id"],
+                        {"mode": mode, "title": title, "db_imported": len(context_tables_json)})
     return jsonify(resp), 201
 
 
@@ -306,6 +320,7 @@ def api_ddl_import():
     session = create_session(title, mode="design")
     set_tables(session["id"], tables, [f"從 DDL 匯入 {len(tables)} 個資料表，可在此調整後產出文件"])
     logger.info("ddl-import", extra={"session_id": session["id"], "table_count": len(tables)})
+    activity_log.record("ddl_imported", session["id"], {"table_count": len(tables)})
     return jsonify({"id": session["id"], "table_count": len(tables)}), 201
 
 
@@ -391,6 +406,7 @@ def api_delete_session(session_id):
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
     logger.info("session deleted", extra={"session_id": session_id})
+    activity_log.record("session_deleted", session_id)
     return "", 204
 
 
@@ -425,6 +441,7 @@ def api_send_message(session_id):
     if tables_ready:
         key_points = summary
         set_tables(session_id, tables, key_points)
+        activity_log.record("requirements_completed", session_id, {"table_count": len(tables)})
 
         tables_json = [
             {
@@ -531,6 +548,7 @@ def api_confirm(session_id):
         return jsonify({"error": "session not in confirming phase"}), 400
 
     logger.info("generation started", extra={"session_id": session_id})
+    activity_log.record("design_confirmed", session_id, {"table_count": len(session.get("tables") or [])})
     run_generation(session_id)
     return jsonify({"status": "generating"})
 
@@ -688,6 +706,7 @@ def api_query(session_id):
         result["error"] = _sanitize_db_error(result["error"])
         return jsonify(result), 400
     logger.info("SQL query executed", extra={"session_id": session_id, "sql_len": len(sql)})
+    activity_log.record("query_executed", session_id, {"rows": len(result.get("rows", []))})
     return jsonify(result)
 
 
