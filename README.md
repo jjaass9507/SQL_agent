@@ -92,18 +92,23 @@ PENSIEVE_VERIFY=false
 
 ## 儲存後端
 
-平台支援兩種 Session 儲存模式，由 `DATABASE_URL` 環境變數切換：
+平台支援兩種 Session 儲存模式：
 
-- **PostgreSQL 模式**（設定 `DATABASE_URL`）：使用 SQLAlchemy Core，
-  Session 存於 `sessions` / `messages` 資料表，支援連線池與多 worker 部署。
-  首次部署需執行 migration 建表：
+- **PostgreSQL 模式**：使用 SQLAlchemy Core，Session 存於 `sessions` / `messages`
+  資料表，支援連線池與多 worker 部署。連線來源有兩種（設定頁優先於環境變數）：
 
-  ```bash
-  export DATABASE_URL=postgresql://user:pass@host:5432/sql_agent
-  alembic upgrade head
-  ```
+  - **設定頁（建議）**：開啟側欄「⚙ 設定」，填入 PostgreSQL 連線字串並儲存。
+    系統會測試連線、自動建立所需資料表，之後平台的所有專案與對話即存入該資料庫作為記憶。
+    連線字串存於本機 `data/app_settings.json`（git ignored），回傳前端時密碼一律遮罩。
 
-- **JSON 檔案模式**（未設定 `DATABASE_URL`，預設）：Session 存於 `data/*.json`，
+  - **環境變數**：部署時可設 `DATABASE_URL`，首次需執行 migration 建表：
+
+    ```bash
+    export DATABASE_URL=postgresql://user:pass@host:5432/sql_agent
+    alembic upgrade head
+    ```
+
+- **JSON 檔案模式**（未設定上述任一者，預設）：Session 存於 `data/*.json`，
   零外部相依，適合本地開發與測試。
 
 兩種模式的 `web/session_store.py` 對外介面完全相同，切換不需改動其他程式碼。
@@ -137,6 +142,8 @@ python app.py
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
+| `GET` | `/api/settings` | 取得目前記憶後端狀態（密碼遮罩） |
+| `POST` | `/api/settings` | 設定／清除作為記憶的資料庫連線（測試連線並建表） |
 | `POST` | `/api/ddl-import` | 由貼上的 CREATE TABLE DDL 建立設計 Session |
 | `GET` | `/api/sessions/<id>/schema-tree` | 結構瀏覽器資料（實際 DB 或設計 Schema） |
 | `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |
@@ -187,6 +194,7 @@ SQL_agent/
 │
 ├── web/                         # 網頁平台後端邏輯
 │   ├── session_store.py         # Session 持久化（PostgreSQL / JSON 雙模式）+ 版本管理
+│   ├── app_settings.py          # 平台設定（記憶用 DB 連線字串）持久化
 │   ├── db_engine.py             # SQLAlchemy engine 單例 + is_pg_mode() 切換
 │   ├── db_schema.py             # SQLAlchemy Core 資料表定義（sessions / messages）
 │   ├── db_manager.py            # 資料庫管理 Agent：execute_query / explain / schema_tree（唯讀）
@@ -206,7 +214,8 @@ SQL_agent/
 │   ├── chat.html                # 對話頁
 │   ├── confirm.html             # 需求確認頁（含 Diff + 版本歷史）
 │   ├── docs.html                # 文件查閱頁
-│   └── review.html              # 審查報告頁
+│   ├── review.html              # 審查報告頁
+│   └── settings.html            # 設定頁（記憶用 DB 連線）
 │
 ├── static/
 │   ├── css/main.css             # 設計系統（色板、排版、組件）
@@ -215,7 +224,8 @@ SQL_agent/
 │       ├── chat.js
 │       ├── confirm.js
 │       ├── docs.js
-│       └── review.js
+│       ├── review.js
+│       └── settings.js
 │
 ├── agents/
 │   ├── orchestrator.py          # CLI 狀態機

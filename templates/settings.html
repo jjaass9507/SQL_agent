@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}設定 — SQL Agent{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-title"><span>SQL</span> Agent</div>
+      <div class="sidebar-logo-sub">資料庫設計助手</div>
+    </div>
+    <div class="sidebar-new-btn">
+      <a href="/">＋ 新建設計</a>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/"><span class="nav-icon">⊞</span> 工作台</a>
+      <a href="/"><span class="nav-icon">◷</span> 所有專案</a>
+      <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">◱</span> 範本庫</a>
+      <a href="/settings" class="active"><span class="nav-icon">⚙</span> 設定</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-avatar">PM</div>
+      <div>
+        <div class="sidebar-user-name">SQL Agent</div>
+        <div class="sidebar-user-email">內部工具</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main-content">
+    <div class="topbar">
+      <span class="topbar-title">設定</span>
+    </div>
+
+    <div style="flex:1;padding:24px;overflow-y:auto;">
+      <div style="max-width:640px;">
+
+        <!-- Current backend status -->
+        <div class="settings-card">
+          <div class="settings-card-title">記憶儲存後端</div>
+          <p class="settings-hint">
+            平台會把所有專案與對話紀錄存在這裡。連接 PostgreSQL 後，記憶將寫入資料庫
+            （支援多人／多 worker、可長期保存）；未設定則存在本機 <code>data/*.json</code>。
+          </p>
+          <div id="backend-status" class="settings-status">載入中…</div>
+        </div>
+
+        <!-- DB connection form -->
+        <div class="settings-card">
+          <div class="settings-card-title">資料庫連線字串</div>
+          <p class="settings-hint">
+            填入要作為記憶使用的 PostgreSQL 連線字串。儲存時會測試連線並自動建立所需資料表。
+          </p>
+          <input class="modal-input" id="db-url-input" type="password"
+                 placeholder="postgresql://user:password@host:5432/dbname"
+                 autocomplete="new-password" style="font-family:var(--mono);font-size:13px;">
+          <div id="settings-msg" class="settings-msg hidden"></div>
+          <div style="display:flex;gap:10px;margin-top:14px;">
+            <button class="btn btn-primary" id="settings-save">儲存並連線</button>
+            <button class="btn btn-ghost" id="settings-clear">清除（改用本機儲存）</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+{% endblock %}

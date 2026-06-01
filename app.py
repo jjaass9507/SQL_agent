@@ -73,6 +73,13 @@ def _sanitize_db_error(msg: str) -> str:
     return msg[:300]
 
 
+def _mask_db_url(url: str) -> str:
+    """Hide the password in a connection string before sending it to the frontend."""
+    if not url:
+        return ""
+    return re.sub(r'://([^:/@]+):([^@]+)@', r'://\1:****@', url)
+
+
 @app.errorhandler(404)
 def _not_found(e):
     return jsonify({"error": "not found"}), 404
@@ -184,7 +191,60 @@ def review_page(session_id):
     return render_template("review.html", session=session)
 
 
+@app.get("/settings")
+def settings_page():
+    return render_template("settings.html")
+
+
 # ── API routes ──────────────────────────────────────────
+
+@app.get("/api/settings")
+def api_get_settings():
+    from web.app_settings import get_database_url
+    url = get_database_url()
+    return jsonify({
+        "configured": bool(url),
+        "backend": "postgresql" if url else "json",
+        "masked_url": _mask_db_url(url),
+    })
+
+
+@app.post("/api/settings")
+def api_set_settings():
+    """Set (or clear) the database used as the platform's memory.
+
+    Saving a URL tests the connection and creates the session tables if needed;
+    sending an empty URL reverts to local JSON storage."""
+    from sqlalchemy import text
+    from web.app_settings import set_database_url
+    from web.db_engine import get_engine
+    from web.db_schema import metadata
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get("database_url") or "").strip()
+
+    if not url:
+        set_database_url("")
+        logger.info("settings: database cleared, reverting to JSON memory")
+        return jsonify({"configured": False, "backend": "json", "masked_url": ""})
+
+    if not url.startswith(("postgresql://", "postgres://")):
+        return jsonify({"error": "僅支援 PostgreSQL 連線字串（postgresql://...）"}), 400
+
+    try:
+        set_database_url(url)
+        engine = get_engine()
+        metadata.create_all(engine)  # idempotent: creates sessions/messages if absent
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        set_database_url("")  # roll back so the platform isn't stuck in a broken mode
+        logger.warning("settings: db connection failed", extra={"err": str(e)[:200]})
+        return jsonify({"error": f"連線失敗：{_sanitize_db_error(str(e))}"}), 400
+
+    logger.info("settings: database configured as memory backend")
+    return jsonify({"configured": True, "backend": "postgresql", "masked_url": _mask_db_url(url)})
+
 
 @app.post("/api/sessions")
 def api_create_session():
