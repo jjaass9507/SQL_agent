@@ -4,18 +4,67 @@ const topbarBadge = document.getElementById('topbar-badge');
 const downloadBtn = document.getElementById('download-btn');
 const restartBtn = document.getElementById('restart-btn');
 const reviewContent = document.getElementById('review-content');
+const reviewWarnings = document.getElementById('review-warnings');
+const reviewFix = document.getElementById('review-fix');
 
 let pollTimer = null;
 let pollFailCount = 0;
 
-function showReport(reportText) {
+function showReport(session) {
+  const outputs = session.outputs || {};
   topbarBadge.textContent = '✓ 審查完成';
   topbarBadge.className = 'badge badge-done';
   downloadBtn.style.display = '';
   if (restartBtn) restartBtn.style.display = '';
-  reviewContent.innerHTML = renderMarkdown(reportText);
+  renderWarnings(session.review_warnings || []);
+  reviewContent.innerHTML = renderMarkdown(outputs['05_review_report.md'] || '（無報告內容）');
+  renderFix(outputs['06_review_fix.sql'] || '');
   loadingView.classList.add('hidden');
   doneView.classList.remove('hidden');
+}
+
+function renderWarnings(warnings) {
+  if (!reviewWarnings) return;
+  if (!warnings.length) { reviewWarnings.innerHTML = ''; return; }
+  const warnCount = warnings.filter(w => w.level === 'warn').length;
+  const infoCount = warnings.length - warnCount;
+  const items = warnings.map(w => {
+    const icon = w.level === 'warn' ? '🔴' : '🔵';
+    const loc = w.column ? `${escHtml(w.table)}.${escHtml(w.column)}` : escHtml(w.table);
+    return `<li><span>${icon}</span> <code>${loc}</code> — ${escHtml(w.message)}</li>`;
+  }).join('');
+  reviewWarnings.innerHTML = `
+    <div class="review-flags">
+      <div class="review-flags-head">⚑ 規則式紅旗：${warnCount} 項警告 · ${infoCount} 項建議</div>
+      <ul class="review-flags-list">${items}</ul>
+    </div>`;
+}
+
+function renderFix(sql) {
+  if (!reviewFix) return;
+  if (!sql) { reviewFix.innerHTML = ''; return; }
+  reviewFix.innerHTML = `
+    <div class="review-fix-block">
+      <div class="review-fix-head">
+        <span>🛠 修復腳本（規則式自動產生，套用前請逐項確認）</span>
+        <span class="review-fix-actions">
+          <button id="fix-copy-btn" class="btn btn-ghost btn-sm">📋 複製</button>
+          <button id="fix-dl-btn" class="btn btn-ghost btn-sm">⬇ 下載 .sql</button>
+        </span>
+      </div>
+      <pre class="code-block" id="fix-pre">${escHtml(sql)}</pre>
+    </div>`;
+  document.getElementById('fix-copy-btn').addEventListener('click', () => {
+    navigator.clipboard && navigator.clipboard.writeText(sql);
+  });
+  document.getElementById('fix-dl-btn').addEventListener('click', () => {
+    const blob = new Blob([sql], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '06_review_fix.sql';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
 }
 
 async function poll() {
@@ -35,8 +84,7 @@ async function poll() {
 
     if (session.phase === 'review_done') {
       clearInterval(pollTimer);
-      const report = (session.outputs || {})['05_review_report.md'] || '（無報告內容）';
-      showReport(report);
+      showReport(session);
     } else if (session.phase === 'review_failed') {
       clearInterval(pollTimer);
       showReviewFailed();

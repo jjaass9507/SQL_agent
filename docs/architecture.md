@@ -231,6 +231,10 @@ Phase.GENERATING
 - 每段 3–5 條建議，格式 `- **資料表名**（欄位名）：問題 → 建議`
 - 報告末尾含 `**整體評分：X/10**` 與 2–3 句總評
 
+審查模式除 AI 報告外，`_review` 另以**純規則**（不耗 API）產出兩項：
+- `web/schema_advisor.py:analyze()` 的紅旗清單（每條含 `code`），存入 `session["review_warnings"]`，審查頁分「警告/建議」渲染。
+- `web/schema_remediation.py:build_remediation_sql()` 依紅旗 `code` 產生修復 `06_review_fix.sql`：可直接套用者（FK 索引、UNIQUE、timestamptz、稽核欄位）給出 SQL，需人工判斷者（缺 PK、varchar 長度、enum CHECK、敏感欄位）以 `-- TODO` 註解列出。
+
 ### Writers（`agents/writers/`）
 
 統一介面：`generate(tables: list[TableSpec]) -> str`

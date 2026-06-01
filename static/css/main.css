@@ -951,6 +951,26 @@ html, body {
 .review-report code { font-family: var(--mono); font-size: 12px; background: var(--sidebar); padding: 1px 5px; border-radius: 3px; }
 .review-meta { font-size: 12px; color: var(--muted); }
 
+/* ── Review: rule-based red flags + remediation SQL ── */
+.review-flags {
+  border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px;
+  margin-bottom: 16px; background: var(--bg);
+}
+.review-flags-head { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.review-flags-list { list-style: none; padding: 0; margin: 0; }
+.review-flags-list li { font-size: 13px; margin-bottom: 5px; line-height: 1.5; }
+.review-flags-list code {
+  font-family: var(--mono); font-size: 12px; background: var(--sidebar);
+  padding: 1px 5px; border-radius: 3px;
+}
+.review-fix-block { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.review-fix-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; background: var(--sidebar); font-size: 13px; font-weight: 600;
+}
+.review-fix-actions { display: flex; gap: 6px; }
+.review-fix-block pre { margin: 0; padding: 12px 16px; }
+
 /* ── Modal mode selector ── */
 .mode-selector { display: flex; gap: 8px; margin-bottom: 14px; }
 .mode-btn {

@@ -40,9 +40,11 @@
           <div class="review-meta">{{ session.context_tables | length }} 張資料表 · {{ session.title }}</div>
         </div>
       </div>
+      <div id="review-warnings"><!-- rule-based red flags, filled by JS --></div>
       <div class="review-report docs-markdown" id="review-content">
         <!-- Filled by JS -->
       </div>
+      <div id="review-fix"><!-- remediation SQL, filled by JS --></div>
     </div>
   </div>
 </div>

@@ -37,6 +37,7 @@ AI 整合雙方對話產出需求摘要 + Schema 確認頁（含與現有 DB 的
 AI 分析現有 DB 結構（設計一致性 / 資料完整性 / 效能 / 安全）
      ↓
 輸出 05_review_report.md 審查報告（含整體評分）
+     + 規則式紅旗（警告/建議）與 06_review_fix.sql 修復腳本
 ```
 
 ### 其他功能
@@ -123,6 +124,7 @@ python main.py
 | `03_ddl.sql` | 設計 | PostgreSQL DDL + 索引 + Migration + Seed Data |
 | `04_security_plan.md` | 設計 | 索引策略、存取控制、敏感欄位加密建議 |
 | `05_review_report.md` | 審查 | AI 審查報告（設計一致性 / 資料完整性 / 效能 / 安全）|
+| `06_review_fix.sql` | 審查 | 規則式紅旗自動產生的修復腳本（可套用 ALTER + 需人工判斷的 TODO）|
 
 網頁平台：在文件頁直接預覽（Mermaid 渲染、SQL 語法高亮），或下載單檔 / 全部打包為 `.zip`。
 CLI 工具：輸出至 `output/{YYYYMMDD_HHMMSS}/`。

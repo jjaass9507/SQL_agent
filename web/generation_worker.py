@@ -124,6 +124,8 @@ def run_review(session_id: str) -> None:
 def _review(session_id: str) -> None:
     from agents.reviewer import Reviewer
     from web.session_store import tables_from_json
+    from web.schema_advisor import analyze
+    from web.schema_remediation import build_remediation_sql
 
     session = get_session(session_id)
     if not session:
@@ -144,7 +146,15 @@ def _review(session_id: str) -> None:
         update_session(session_id, {"phase": "review_failed"})
         return
 
+    # Rule-based red flags + deterministic remediation SQL (no LLM, always available)
+    warnings = analyze(tables)
+    outputs = {"05_review_report.md": report}
+    fix_sql = build_remediation_sql(warnings)
+    if fix_sql:
+        outputs["06_review_fix.sql"] = fix_sql
+
     update_session(session_id, {
         "phase": "review_done",
-        "outputs": {"05_review_report.md": report},
+        "outputs": outputs,
+        "review_warnings": warnings,
     })
