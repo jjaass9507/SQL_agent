@@ -145,6 +145,68 @@ def get_table_ddl(db_url: str, table_name: str, schema: str = "public") -> dict:
         return {"error": str(exc)[:300]}
 
 
+def schema_tree(db_url: str, schema: str = "public") -> dict:
+    """
+    Return tables + columns (with PK/FK flags and row-count estimate) for the
+    workbench schema browser. Returns {"tables": [...]} or {"error": "..."}.
+    """
+    sql = """
+        SELECT c.table_name, c.column_name, c.data_type,
+               c.character_maximum_length, c.is_nullable,
+               (pk.column_name IS NOT NULL) AS is_pk,
+               (fk.column_name IS NOT NULL) AS is_fk,
+               fk.foreign_table_name
+        FROM information_schema.columns c
+        JOIN information_schema.tables t
+             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+            AND t.table_type = 'BASE TABLE'
+        LEFT JOIN (
+            SELECT kcu.table_name, kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                 ON kcu.constraint_name = tc.constraint_name
+                AND kcu.table_schema = tc.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = %(schema)s
+        ) pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
+        LEFT JOIN (
+            SELECT kcu.table_name, kcu.column_name,
+                   ccu.table_name AS foreign_table_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                 ON kcu.constraint_name = tc.constraint_name
+                AND kcu.table_schema = tc.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+                 ON ccu.constraint_name = tc.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = %(schema)s
+        ) fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
+        WHERE c.table_schema = %(schema)s
+        ORDER BY c.table_name, c.ordinal_position
+    """
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        with conn.cursor() as cur:
+            cur.execute(sql, {"schema": schema})
+            rows = cur.fetchall()
+        conn.close()
+    except Exception as exc:
+        return {"error": str(exc)[:300]}
+
+    tables: dict = {}
+    for tname, cname, dtype, maxlen, nullable, is_pk, is_fk, fk_table in rows:
+        t = tables.setdefault(tname, {"name": tname, "columns": []})
+        type_str = f"{dtype}({maxlen})" if maxlen else dtype
+        t["columns"].append({
+            "name": cname,
+            "type": type_str,
+            "nullable": nullable == "YES",
+            "is_pk": bool(is_pk),
+            "is_fk": bool(is_fk),
+            "fk_table": fk_table,
+        })
+    return {"tables": list(tables.values())}
+
+
 def explain_query(db_url: str, sql: str) -> dict:
     """Returns {"plan": "..."} or {"error": "..."}."""
     err = _check_sql(sql)

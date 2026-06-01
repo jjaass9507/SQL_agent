@@ -554,6 +554,36 @@ def test_db_url_not_exposed_in_get_session(client, _isolate_data):
     assert "db_url" not in resp2.get_json()
 
 
+def test_db_url_not_exposed_in_create(client, _isolate_data):
+    """POST /api/sessions must not echo db_url back in the response."""
+    resp = client.post("/api/sessions", json={"title": "c-test", "db_url": ""})
+    assert resp.status_code == 201
+    assert "db_url" not in resp.get_json()
+
+
+def test_schema_tree_design_fallback(client, _isolate_data):
+    """schema-tree returns designed tables when no db_url is set."""
+    import web.session_store as ss
+    from models.schema import ColumnSpec, TableSpec
+    resp = client.post("/api/sessions", json={"title": "st-test"})
+    session_id = resp.get_json()["id"]
+    t = TableSpec(table_name="widgets", description="",
+                  columns=[ColumnSpec(name="id", data_type="uuid", nullable=False,
+                                      description="", is_primary_key=True)])
+    ss.set_tables(session_id, [t], ["kp"])
+    resp2 = client.get(f"/api/sessions/{session_id}/schema-tree")
+    assert resp2.status_code == 200
+    data = resp2.get_json()
+    assert data["source"] == "design"
+    assert data["tables"][0]["name"] == "widgets"
+    assert data["tables"][0]["columns"][0]["is_pk"] is True
+
+
+def test_schema_tree_404(client, _isolate_data):
+    resp = client.get("/api/sessions/nonexistent/schema-tree")
+    assert resp.status_code == 404
+
+
 def test_explain_no_db_url(client, _isolate_data):
     """POST /explain returns 400 when session has no db_url."""
     resp = client.post("/api/sessions", json={"title": "e-test"})

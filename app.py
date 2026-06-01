@@ -608,6 +608,46 @@ def api_query(session_id):
     return jsonify(result)
 
 
+@app.get("/api/sessions/<session_id>/schema-tree")
+def api_schema_tree(session_id):
+    """Schema browser data for the SQL workbench.
+
+    Uses the live target DB when the session has a db_url; otherwise falls back
+    to the designed tables so the browser is useful even before any DB is wired.
+    """
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if db_url:
+        from web.db_manager import schema_tree
+        result = schema_tree(db_url)
+        if "error" not in result and result.get("tables"):
+            result["source"] = "db"
+            return jsonify(result)
+        # fall through to designed tables on introspection failure
+
+    designed = []
+    for t in (session.get("tables") or []):
+        cols = []
+        for col in t.get("columns", []):
+            ref = col.get("references")
+            if isinstance(ref, dict):
+                ref = ref.get("table")
+            length = col.get("length")
+            dtype = col.get("data_type", "")
+            cols.append({
+                "name": col.get("name", ""),
+                "type": f"{dtype}({length})" if length else dtype,
+                "nullable": col.get("nullable", True),
+                "is_pk": col.get("is_primary_key", False),
+                "is_fk": col.get("is_foreign_key", False),
+                "fk_table": ref,
+            })
+        designed.append({"name": t.get("table_name", ""), "columns": cols})
+    return jsonify({"source": "design", "tables": designed})
+
+
 @app.post("/api/sessions/<session_id>/explain")
 def api_explain(session_id):
     """Run EXPLAIN on a SQL query against the session's target database."""
