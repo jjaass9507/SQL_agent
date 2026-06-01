@@ -176,3 +176,5 @@ def _review(session_id: str) -> None:
         "outputs": outputs,
         "review_warnings": warnings,
     })
+    from web import activity_log
+    activity_log.record("review_completed", session_id, {"table_count": len(tables)})

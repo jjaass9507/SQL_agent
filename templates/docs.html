@@ -120,6 +120,9 @@
           <div class="docs-toc-divider"></div>
           <div class="docs-toc-section-label">額外產出（選配）</div>
           <div id="extras-toc"><!-- injected by docs.js --></div>
+          <div id="workbench-toc-item" class="docs-toc-item" data-doc="__workbench__" style="display:none;">
+            <span>⚙</span><span>SQL 工作台</span>
+          </div>
           <div class="docs-toc-divider"></div>
           <a href="/api/sessions/{{ session.id }}/outputs/zip" class="docs-toc-action">
             <span>⬇</span><span>全部下載 .zip</span>
@@ -144,6 +147,42 @@
             <!-- Content injected by JS -->
           </div>
         </div>
+      <!-- SQL Workbench Panel -->
+      <div id="workbench-panel" class="docs-body" style="display:none;">
+        <div class="workbench-layout">
+          <!-- Schema browser sidebar -->
+          <div class="workbench-sidebar">
+            <div class="workbench-sidebar-header">
+              <span>結構</span>
+              <button class="workbench-refresh-btn" id="wb-refresh-schema" title="重新載入">↻</button>
+            </div>
+            <div id="workbench-schema-tree" class="workbench-schema-tree">
+              <div class="workbench-sidebar-loading">載入中…</div>
+            </div>
+          </div>
+          <!-- Main editor + results -->
+          <div class="workbench-main">
+            <div class="workbench-toolbar">
+              <button class="btn btn-ghost btn-sm" id="wb-list-tables-btn">列出資料表</button>
+              <button class="btn btn-ghost btn-sm" id="wb-explain-btn">EXPLAIN</button>
+              <div style="flex:1;"></div>
+              <button class="btn btn-ghost btn-sm" id="wb-history-btn" title="查詢記錄">⏱ 記錄</button>
+            </div>
+            <div id="wb-history-panel" class="wb-history-panel" style="display:none;">
+              <div class="wb-history-header"><span>查詢記錄</span>
+                <button class="btn btn-ghost btn-sm" id="wb-clear-history-btn">清除</button></div>
+              <div id="wb-history-list" class="wb-history-list"></div>
+            </div>
+            <textarea id="workbench-sql" class="workbench-textarea"
+                      placeholder="輸入 SELECT 查詢…　（Ctrl+Enter 執行、Ctrl+Shift+E 說明計畫）&#10;點左側欄位插入名稱，雙擊資料表帶入 SELECT 範本"></textarea>
+            <div class="workbench-actions">
+              <button class="btn btn-primary btn-sm" id="wb-run-btn">▶ 執行</button>
+              <span class="workbench-shortcut-hint">Ctrl+Enter</span>
+            </div>
+            <div id="workbench-output"></div>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -159,6 +198,7 @@
   const INITIAL_OUTPUTS = {{ (session.outputs or {}) | tojson }};
   const INITIAL_GEN_ERRORS = {{ (session.generation_errors or {}) | tojson }};
   const HAS_EXISTING_DB = {{ ((session.context_tables | default([])) | length > 0) | tojson }};
+  const HAS_DB = {{ 'true' if session.get('db_url') else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/docs.js') }}"></script>
 {% endblock %}

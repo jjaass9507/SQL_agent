@@ -4,8 +4,6 @@ Covers trigger detection ("touched an existing table"), upload-once, and the
 system-prompt fallback when the memory API hasn't synced yet. No real API."""
 import json
 
-import pytest
-
 from agents.interviewer import Interviewer
 from models.schema import ColumnSpec, TableSpec
 

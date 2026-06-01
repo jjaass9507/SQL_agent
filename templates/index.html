@@ -16,7 +16,7 @@
       <a href="/" class="active"><span class="nav-icon">⊞</span> 工作台</a>
       <a href="/"><span class="nav-icon">◷</span> 所有專案</a>
       <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">◱</span> 範本庫</a>
-      <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">⚙</span> 設定</a>
+      <a href="/settings"><span class="nav-icon">⚙</span> 設定</a>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-avatar">PM</div>
@@ -79,11 +79,23 @@
         <button class="mode-btn" data-mode="review">
           🔍 審查模式<br><span style="font-size:11px;font-weight:400;">AI 分析現有 DB 結構</span>
         </button>
+        <button class="mode-btn" data-mode="ddl">
+          📋 DDL 匯入<br><span style="font-size:11px;font-weight:400;">貼上 CREATE TABLE 開始</span>
+        </button>
       </div>
     </div>
 
     <div class="modal-label">專案名稱</div>
     <input class="modal-input" id="new-session-title" placeholder="例如：訂單系統設計" type="text">
+
+    <!-- DDL paste section -->
+    <div id="ddl-import-section" style="display:none;margin-bottom:12px;">
+      <div class="modal-label">貼上 CREATE TABLE 語句</div>
+      <textarea class="modal-input" id="ddl-textarea" rows="9"
+                style="font-family:var(--mono);font-size:12.5px;resize:vertical;min-height:160px;"
+                placeholder="CREATE TABLE members (&#10;  id serial PRIMARY KEY,&#10;  email varchar(255) NOT NULL UNIQUE&#10;);"></textarea>
+      <div id="ddl-import-status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
+    </div>
 
     <!-- DB import section -->
     <div id="db-import-toggle-row" style="margin-bottom:12px;">

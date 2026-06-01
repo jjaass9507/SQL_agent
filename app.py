@@ -32,7 +32,7 @@ class _JsonFormatter(logging.Formatter):
         for key, val in vars(record).items():
             if key not in logging.LogRecord.__dict__ and not key.startswith("_"):
                 entry[key] = val
-        return _json.dumps(entry, ensure_ascii=False)
+        return _json.dumps(entry, ensure_ascii=False, default=str)
 
 
 def _setup_logging() -> None:
@@ -52,17 +52,16 @@ from web.session_store import (
     create_session,
     delete_session,
     get_session,
-    get_tables,
     list_sessions,
     restore_version,
     set_tables,
     tables_from_json,
     update_session,
-    update_generation_status,
     try_start_generation,
     GENERATION_FILES,
 )
 from web.generation_worker import run_generation, run_incremental, run_review, run_single_file, EXTRA_FILES
+from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
@@ -73,6 +72,13 @@ def _sanitize_db_error(msg: str) -> str:
     msg = re.sub(r'postgresql://[^\s]+', 'postgresql://...', msg)
     msg = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b', '...', msg)
     return msg[:300]
+
+
+def _mask_db_url(url: str) -> str:
+    """Hide the password in a connection string before sending it to the frontend."""
+    if not url:
+        return ""
+    return re.sub(r'://([^:/@]+):([^@]+)@', r'://\1:****@', url)
 
 
 @app.errorhandler(404)
@@ -194,7 +200,71 @@ def review_page(session_id):
     return render_template("review.html", session=session)
 
 
+@app.get("/settings")
+def settings_page():
+    return render_template("settings.html")
+
+
 # ── API routes ──────────────────────────────────────────
+
+@app.get("/api/settings")
+def api_get_settings():
+    from web.app_settings import get_database_url
+    url = get_database_url()
+    return jsonify({
+        "configured": bool(url),
+        "backend": "postgresql" if url else "json",
+        "masked_url": _mask_db_url(url),
+    })
+
+
+@app.get("/api/activity")
+def api_activity():
+    """Recent platform usage records from the configured database (empty in JSON mode)."""
+    try:
+        limit = min(int(request.args.get("limit", 100)), 500)
+    except (TypeError, ValueError):
+        limit = 100
+    return jsonify(activity_log.recent(limit=limit))
+
+
+@app.post("/api/settings")
+def api_set_settings():
+    """Set (or clear) the database used as the platform's memory.
+
+    Saving a URL tests the connection and creates the session tables if needed;
+    sending an empty URL reverts to local JSON storage."""
+    from sqlalchemy import text
+    from web.app_settings import set_database_url
+    from web.db_engine import get_engine
+    from web.db_schema import metadata
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get("database_url") or "").strip()
+
+    if not url:
+        set_database_url("")
+        logger.info("settings: database cleared, reverting to JSON memory")
+        return jsonify({"configured": False, "backend": "json", "masked_url": ""})
+
+    if not url.startswith(("postgresql://", "postgres://")):
+        return jsonify({"error": "僅支援 PostgreSQL 連線字串（postgresql://...）"}), 400
+
+    try:
+        set_database_url(url)
+        engine = get_engine()
+        metadata.create_all(engine)  # idempotent: creates sessions/messages if absent
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        set_database_url("")  # roll back so the platform isn't stuck in a broken mode
+        logger.warning("settings: db connection failed", extra={"err": str(e)[:200]})
+        return jsonify({"error": f"連線失敗：{_sanitize_db_error(str(e))}"}), 400
+
+    logger.info("settings: database configured as memory backend")
+    activity_log.record("settings_db_configured", None, {"masked_url": _mask_db_url(url)})
+    return jsonify({"configured": True, "backend": "postgresql", "masked_url": _mask_db_url(url)})
+
 
 @app.post("/api/sessions")
 def api_create_session():
@@ -218,8 +288,8 @@ def api_create_session():
             context_tables_json = [dataclasses.asdict(t) for t in tables]
             context_text = format_context(tables)
 
-    session = create_session(title, context_tables_json, context_text, mode=mode)
-    resp = dict(session)
+    session = create_session(title, context_tables_json, context_text, mode=mode, db_url=db_url if db_url else "")
+    resp = {k: v for k, v in session.items() if k != "db_url"}
 
     if db_error:
         resp["db_error"] = _sanitize_db_error(db_error)
@@ -231,7 +301,35 @@ def api_create_session():
         run_review(session["id"])
 
     logger.info("session created", extra={"session_id": session["id"], "mode": mode, "phase": session["phase"]})
+    activity_log.record("session_created", session["id"],
+                        {"mode": mode, "title": title, "db_imported": len(context_tables_json)})
     return jsonify(resp), 201
+
+
+@app.post("/api/ddl-import")
+def api_ddl_import():
+    """Create a new design session from pasted CREATE TABLE DDL.
+
+    Skips the interview phase and lands directly on the confirm page so the
+    user can review/refine the parsed schema.
+    """
+    from web.ddl_parser import parse_ddl
+    from web.session_store import set_tables
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "DDL 匯入設計").strip()[:120]
+    ddl_text = (data.get("ddl") or "").strip()
+    if not ddl_text:
+        return jsonify({"error": "ddl required"}), 400
+    if len(ddl_text) > 100_000:
+        return jsonify({"error": "DDL 內容過長"}), 400
+    tables = parse_ddl(ddl_text)
+    if not tables:
+        return jsonify({"error": "未能解析出任何 CREATE TABLE 語句，請確認 DDL 格式"}), 400
+    session = create_session(title, mode="design")
+    set_tables(session["id"], tables, [f"從 DDL 匯入 {len(tables)} 個資料表，可在此調整後產出文件"])
+    logger.info("ddl-import", extra={"session_id": session["id"], "table_count": len(tables)})
+    activity_log.record("ddl_imported", session["id"], {"table_count": len(tables)})
+    return jsonify({"id": session["id"], "table_count": len(tables)}), 201
 
 
 @app.post("/api/sessions/<session_id>/import-db")
@@ -264,6 +362,7 @@ def api_import_db(session_id):
         "context_text": context_text,
         "memory_synced": False,  # new structure must be re-pushed to LLM memory
         "last_db_import": {"imported_at": imported_at, "table_count": len(tables), "error": None},
+        "db_url": db_url,
     }
     # If the user re-imports while the schema is confirmed, reset to collecting
     # so they can review the new context before re-confirming
@@ -291,7 +390,8 @@ def api_get_session(session_id):
     session = get_session(session_id)
     if not session:
         abort(404)
-    return jsonify(session)
+    safe = {k: v for k, v in session.items() if k != "db_url"}
+    return jsonify(safe)
 
 
 @app.patch("/api/sessions/<session_id>")
@@ -315,6 +415,7 @@ def api_delete_session(session_id):
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
     logger.info("session deleted", extra={"session_id": session_id})
+    activity_log.record("session_deleted", session_id)
     return "", 204
 
 
@@ -353,6 +454,7 @@ def api_send_message(session_id):
     if tables_ready:
         key_points = summary
         set_tables(session_id, tables, key_points)
+        activity_log.record("requirements_completed", session_id, {"table_count": len(tables)})
 
         tables_json = [
             {
@@ -459,6 +561,7 @@ def api_confirm(session_id):
         return jsonify({"error": "session not in confirming phase"}), 400
 
     logger.info("generation started", extra={"session_id": session_id})
+    activity_log.record("design_confirmed", session_id, {"table_count": len(session.get("tables") or [])})
     run_generation(session_id)
     return jsonify({"status": "generating"})
 
@@ -601,6 +704,90 @@ def api_download_zip(session_id):
         as_attachment=True,
         download_name=f"{title}.zip",
     )
+
+
+@app.post("/api/sessions/<session_id>/query")
+def api_query(session_id):
+    """Execute a read-only SQL query against the session's target database."""
+    from web.db_manager import execute_query
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "no database URL configured for this session"}), 400
+    data = request.get_json(silent=True) or {}
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "sql required"}), 400
+    result = execute_query(db_url, sql)
+    if "error" in result:
+        result["error"] = _sanitize_db_error(result["error"])
+        return jsonify(result), 400
+    logger.info("SQL query executed", extra={"session_id": session_id, "sql_len": len(sql)})
+    activity_log.record("query_executed", session_id, {"rows": len(result.get("rows", []))})
+    return jsonify(result)
+
+
+@app.get("/api/sessions/<session_id>/schema-tree")
+def api_schema_tree(session_id):
+    """Schema browser data for the SQL workbench.
+
+    Uses the live target DB when the session has a db_url; otherwise falls back
+    to the designed tables so the browser is useful even before any DB is wired.
+    """
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if db_url:
+        from web.db_manager import schema_tree
+        result = schema_tree(db_url)
+        if "error" not in result and result.get("tables"):
+            result["source"] = "db"
+            return jsonify(result)
+        # fall through to designed tables on introspection failure
+
+    designed = []
+    for t in (session.get("tables") or []):
+        cols = []
+        for col in t.get("columns", []):
+            ref = col.get("references")
+            if isinstance(ref, dict):
+                ref = ref.get("table")
+            length = col.get("length")
+            dtype = col.get("data_type", "")
+            cols.append({
+                "name": col.get("name", ""),
+                "type": f"{dtype}({length})" if length else dtype,
+                "nullable": col.get("nullable", True),
+                "is_pk": col.get("is_primary_key", False),
+                "is_fk": col.get("is_foreign_key", False),
+                "fk_table": ref,
+            })
+        designed.append({"name": t.get("table_name", ""), "columns": cols})
+    return jsonify({"source": "design", "tables": designed})
+
+
+@app.post("/api/sessions/<session_id>/explain")
+def api_explain(session_id):
+    """Run EXPLAIN on a SQL query against the session's target database."""
+    from web.db_manager import explain_query
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "no database URL configured for this session"}), 400
+    data = request.get_json(silent=True) or {}
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "sql required"}), 400
+    result = explain_query(db_url, sql)
+    if "error" in result:
+        result["error"] = _sanitize_db_error(result["error"])
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 if __name__ == "__main__":
