@@ -226,6 +226,31 @@ def api_create_session():
     return jsonify(resp), 201
 
 
+@app.post("/api/ddl-import")
+def api_ddl_import():
+    """Create a new design session from pasted CREATE TABLE DDL.
+
+    Skips the interview phase and lands directly on the confirm page so the
+    user can review/refine the parsed schema.
+    """
+    from web.ddl_parser import parse_ddl
+    from web.session_store import set_tables
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "DDL 匯入設計").strip()[:120]
+    ddl_text = (data.get("ddl") or "").strip()
+    if not ddl_text:
+        return jsonify({"error": "ddl required"}), 400
+    if len(ddl_text) > 100_000:
+        return jsonify({"error": "DDL 內容過長"}), 400
+    tables = parse_ddl(ddl_text)
+    if not tables:
+        return jsonify({"error": "未能解析出任何 CREATE TABLE 語句，請確認 DDL 格式"}), 400
+    session = create_session(title, mode="design")
+    set_tables(session["id"], tables, [f"從 DDL 匯入 {len(tables)} 個資料表，可在此調整後產出文件"])
+    logger.info("ddl-import", extra={"session_id": session["id"], "table_count": len(tables)})
+    return jsonify({"id": session["id"], "table_count": len(tables)}), 201
+
+
 @app.post("/api/sessions/<session_id>/import-db")
 def api_import_db(session_id):
     from web.db_introspect import extract_schema, format_context

@@ -250,11 +250,17 @@ function openModal() {
   titleInput.focus();
 }
 
+const ddlSection = document.getElementById('ddl-import-section');
+const ddlTextarea = document.getElementById('ddl-textarea');
+const ddlStatus = document.getElementById('ddl-import-status');
+
 function setMode(mode) {
   currentMode = mode;
   document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
+  // reset all conditional sections
+  if (ddlSection) ddlSection.style.display = 'none';
   if (mode === 'review') {
     dbToggle.checked = true;
     dbSection.style.display = 'block';
@@ -262,6 +268,13 @@ function setMode(mode) {
     dbRequiredMark.style.display = '';
     confirmBtn.textContent = '開始審查 →';
     titleInput.placeholder = '例如：現有訂單系統審查';
+  } else if (mode === 'ddl') {
+    dbToggle.checked = false;
+    dbSection.style.display = 'none';
+    dbToggleRow.style.display = 'none';
+    if (ddlSection) ddlSection.style.display = 'block';
+    confirmBtn.textContent = '解析並確認 →';
+    titleInput.placeholder = '例如：既有訂單系統 DDL';
   } else {
     dbToggle.checked = false;
     dbSection.style.display = 'none';
@@ -290,6 +303,34 @@ confirmBtn.addEventListener('click', createSession);
 titleInput.addEventListener('keydown', e => { if (e.key === 'Enter') createSession(); });
 
 async function createSession() {
+  // DDL import takes a separate path: parse DDL → land on confirm page
+  if (currentMode === 'ddl') {
+    const ddl = ddlTextarea ? ddlTextarea.value.trim() : '';
+    if (!ddl) {
+      if (ddlStatus) ddlStatus.innerHTML = '<span style="color:var(--error);">⚠ 請貼上 CREATE TABLE 語句</span>';
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '解析中...';
+    if (ddlStatus) ddlStatus.textContent = '';
+    try {
+      const res = await fetch('/api/ddl-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: titleInput.value.trim() || 'DDL 匯入設計', ddl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'import failed');
+      if (ddlStatus) ddlStatus.innerHTML = `<span style="color:var(--success);">✓ 解析出 ${data.table_count} 個資料表</span>`;
+      window.location.href = `/sessions/${data.id}/confirm`;
+    } catch (e) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '解析並確認 →';
+      if (ddlStatus) ddlStatus.innerHTML = `<span style="color:var(--error);">⚠ ${escHtml(e.message)}</span>`;
+    }
+    return;
+  }
+
   const title = titleInput.value.trim() || (currentMode === 'review' ? '未命名審查' : '未命名設計');
   const useDb = dbToggle.checked;
   const dbUrl = dbUrlInput ? dbUrlInput.value.trim() : '';

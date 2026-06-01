@@ -584,6 +584,28 @@ def test_schema_tree_404(client, _isolate_data):
     assert resp.status_code == 404
 
 
+def test_ddl_import_valid(client, _isolate_data):
+    ddl = ("CREATE TABLE users (id serial PRIMARY KEY, email varchar(255) NOT NULL);\n"
+           "CREATE TABLE posts (id serial PRIMARY KEY, user_id integer REFERENCES users(id), title text);")
+    resp = client.post("/api/ddl-import", json={"title": "DDL", "ddl": ddl})
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["table_count"] == 2
+    sess = client.get(f"/api/sessions/{data['id']}").get_json()
+    assert sess["phase"] == "confirming"
+    assert len(sess["tables"]) == 2
+
+
+def test_ddl_import_invalid(client, _isolate_data):
+    resp = client.post("/api/ddl-import", json={"ddl": "this is not ddl"})
+    assert resp.status_code == 400
+
+
+def test_ddl_import_empty(client, _isolate_data):
+    resp = client.post("/api/ddl-import", json={"ddl": ""})
+    assert resp.status_code == 400
+
+
 def test_explain_no_db_url(client, _isolate_data):
     """POST /explain returns 400 when session has no db_url."""
     resp = client.post("/api/sessions", json={"title": "e-test"})
