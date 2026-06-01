@@ -52,13 +52,11 @@ from web.session_store import (
     create_session,
     delete_session,
     get_session,
-    get_tables,
     list_sessions,
     restore_version,
     set_tables,
     tables_from_json,
     update_session,
-    update_generation_status,
     try_start_generation,
     GENERATION_FILES,
 )

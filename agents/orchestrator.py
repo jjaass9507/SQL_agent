@@ -133,7 +133,7 @@ class Orchestrator:
             console.print(f"\n[yellow]警告：{', '.join(failed)} 未能產出，請檢查 API 連線後重試。[/yellow]")
 
         console.print(Panel(
-            f"[bold green]文件產生完成！[/bold green]\n\n"
+            "[bold green]文件產生完成！[/bold green]\n\n"
             + "\n".join(f"  • {session_dir}/{f}" for f in outputs),
             border_style="green",
         ))
