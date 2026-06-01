@@ -85,6 +85,8 @@ PENSIEVE_VERIFY=false
 | `PENSIEVE_URL` | | API 端點（預設官方網址） |
 | `PENSIEVE_BUILDING` | | 使用的 flow 名稱（預設 `question`） |
 | `PENSIEVE_VERIFY` | | SSL 憑證驗證（預設 `false`） |
+| `PENSIEVE_VECTOR_URL` | | 記憶上傳（uploadVector）端點 |
+| `PENSIEVE_VECTOR_ID` | | 現有 DB 結構記憶要寫入的 vector id；未設定則退回 system-prompt 注入 |
 
 ---
 

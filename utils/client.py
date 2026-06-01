@@ -16,12 +16,16 @@ class PensieveAPI:
     """與 Pensieve 系統互動，呼叫 AI 進行對話。"""
 
     def __init__(self, token: str, empno: str, url: str,
-                 building: str = "question", verify: bool = False):
+                 building: str = "question", verify: bool = False,
+                 vector_url: str = "https://pensieve.kh.asegroup.com/api/uploadVector/",
+                 vector_id: str = ""):
         self.token = token
         self.empno = empno
         self.url = url
         self.building = building
         self.verify = verify
+        self.vector_url = vector_url
+        self.vector_id = vector_id  # vector store the chat flow is bound to
 
     def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
         """送出 system_prompt + human_prompt，回傳 AI 純文字回應。
@@ -92,14 +96,37 @@ class PensieveAPI:
                      len(_RETRY_DELAYS) + 1, last_error)
         return None
 
-    def update_memory(self, content: str) -> bool:
-        """將 txt 內容上傳為 LLM 的持久記憶，成功回傳 True。
+    def update_memory(self, content: str, filename: str = "existing_schema.txt") -> bool:
+        """以 coverage 方式把 txt 內容上傳到 self.vector_id 作為 LLM 記憶。
 
-        TODO: 接上實際的 Pensieve 記憶更新 API（使用者後續提供呼叫方式）。
-        目前為 stub：僅記錄 log 並回傳 False，讓呼叫端走 system-prompt 注入 fallback。
+        透過 /uploadVector 上傳；採固定 filename，讓重複上傳取代同一份文件
+        （coverage 語意，避免舊結構殘留）。vector_id 未設定時直接回 False（走 fallback）。
+        成功（isSuccess 且 filename 出現在 SuccessFile）回傳 True，否則 False。
         """
-        logger.info("update_memory stub called (not yet wired): %d chars", len(content or ""))
-        return False
+        if not (content and content.strip() and self.vector_id):
+            return False
+        try:
+            response = requests.post(
+                self.vector_url,
+                data={"vector_id": self.vector_id},
+                files={"file": (filename, content.encode("utf-8"), "text/plain")},
+                verify=self.verify,
+                proxies={"http": None, "https": None},
+                timeout=300,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.error("update_memory upload failed: %s", e)
+            return False
+
+        if not data.get("isSuccess"):
+            logger.error("update_memory rejected: %s", str(data.get("Result"))[:200])
+            return False
+        if filename not in (data.get("SuccessFile") or []):
+            logger.warning("update_memory embedding incomplete, FailFile=%s", data.get("FailFile"))
+            return False
+        return True
 
     def _extract_text(self, res_data: Any) -> Optional[str]:
         if isinstance(res_data, dict):
@@ -124,5 +151,8 @@ def get_api() -> PensieveAPI:
             url=os.environ.get("PENSIEVE_URL", "https://pensieve.kh.asegroup.com/api/flow_chat/"),
             building=os.environ.get("PENSIEVE_BUILDING", "question"),
             verify=os.environ.get("PENSIEVE_VERIFY", "false").lower() == "true",
+            vector_url=os.environ.get("PENSIEVE_VECTOR_URL",
+                                      "https://pensieve.kh.asegroup.com/api/uploadVector/"),
+            vector_id=os.environ.get("PENSIEVE_VECTOR_ID", ""),
         )
     return _api

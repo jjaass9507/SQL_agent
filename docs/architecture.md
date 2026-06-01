@@ -293,6 +293,8 @@ payload = {
 
 `get_api()` 提供 singleton，避免重複讀取環境變數。
 
+另提供 `update_memory(content)`：以 multipart 上傳 txt 至 `PENSIEVE_VECTOR_URL`（uploadVector），寫入 `PENSIEVE_VECTOR_ID` 指定的 vector store 作為 LLM 記憶。採固定 filename 達成 coverage（重複上傳取代同一份文件）；解析回傳的 `isSuccess` 與 `SuccessFile` 判定成功。`vector_id` 未設定時回傳 False，呼叫端（Interviewer）退回 system-prompt 注入 fallback。
+
 ---
 
 ## 輸出格式說明
