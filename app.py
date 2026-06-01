@@ -98,17 +98,25 @@ def _schema_summary(tables: list) -> str:
 def _get_interviewer(session_id: str) -> Interviewer:
     with _interviewer_lock:
         if session_id not in _interviewer_store:
-            session = get_session(session_id)
-            context = session.get("context_text", "") if session else ""
+            session = get_session(session_id) or {}
+            # Existing DB structure is supplied as LLM memory (injected only when
+            # the conversation touches an existing table) — not unconditionally.
+            memory_text = session.get("context_text", "")
+            existing_tables = [t.get("table_name", "") for t in session.get("context_tables", [])]
             # If a design already exists (user is iterating on it), bake the
             # current schema into the context so a freshly-built interviewer
             # still knows what's been designed — even after a server restart.
-            if session and session.get("tables"):
+            context = ""
+            if session.get("tables"):
                 summary = _schema_summary(session["tables"])
                 if summary:
-                    context = (context + "\n\n" if context else "") + \
-                        "使用者已完成以下資料表設計，正在繼續調整，請在此基礎上修改：\n" + summary
-            _interviewer_store[session_id] = Interviewer(context=context)
+                    context = "使用者已完成以下資料表設計，正在繼續調整，請在此基礎上修改：\n" + summary
+            _interviewer_store[session_id] = Interviewer(
+                context=context,
+                existing_tables=existing_tables,
+                memory_text=memory_text,
+                memory_synced=session.get("memory_synced", False),
+            )
         return _interviewer_store[session_id]
 
 
@@ -254,6 +262,7 @@ def api_import_db(session_id):
     import_updates: dict = {
         "context_tables": context_tables_json,
         "context_text": context_text,
+        "memory_synced": False,  # new structure must be re-pushed to LLM memory
         "last_db_import": {"imported_at": imported_at, "table_count": len(tables), "error": None},
     }
     # If the user re-imports while the schema is confirmed, reset to collecting
@@ -331,6 +340,10 @@ def api_send_message(session_id):
 
     interviewer = _get_interviewer(session_id)
     reply_text, tables, summary = interviewer.chat(content)
+
+    # Persist the memory-synced flag so we don't re-upload after a restart
+    if interviewer.memory_synced and not session.get("memory_synced"):
+        update_session(session_id, {"memory_synced": True})
 
     add_message(session_id, "ai", reply_text)
 

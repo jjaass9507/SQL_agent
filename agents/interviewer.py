@@ -53,10 +53,39 @@ def _parse_tables(json_str: str) -> list[TableSpec] | None:
 
 
 class Interviewer:
-    def __init__(self, context: str = ""):
+    def __init__(self, context: str = "", existing_tables: list[str] | None = None,
+                 memory_text: str = "", memory_synced: bool = False):
         self._api = get_api()
         self._history: list[dict] = []  # {"role": "user"|"assistant", "content": str}
-        self._context = context  # existing DB schema injected before SYSTEM_PROMPT
+        self._context = context  # designed-schema continuity, injected before SYSTEM_PROMPT
+        self._existing_lower = {n.lower() for n in (existing_tables or [])}
+        self._memory_text = memory_text  # existing DB structure (txt) for LLM memory
+        # True once the existing-DB structure is uploaded to persistent LLM memory.
+        self.memory_synced = memory_synced
+        # Once the conversation touches an existing table, keep injecting the
+        # existing-DB structure every turn (sticky) until it lands in API memory.
+        self._fallback_active = False
+
+    def _mentions_existing(self, text: str) -> bool:
+        """True if the text references any existing table name (word-boundary, case-insensitive)."""
+        if not self._existing_lower or not text:
+            return False
+        lowered = text.lower()
+        return any(re.search(rf"\b{re.escape(name)}\b", lowered) for name in self._existing_lower)
+
+    def _specs_reference_existing(self, tables: list[TableSpec] | None) -> bool:
+        """True if newly designed tables reuse an existing table name or FK-reference one."""
+        if not self._existing_lower or not tables:
+            return False
+        for t in tables:
+            if t.table_name.lower() in self._existing_lower:
+                return True
+            for c in t.columns:
+                if c.is_foreign_key and c.references:
+                    target = c.references.split(".")[0].strip().lower()
+                    if target in self._existing_lower:
+                        return True
+        return False
 
     def chat(self, user_message: str) -> tuple[str, list[TableSpec] | None, list[str]]:
         """Send a message. Returns (response_text, tables, summary_points).
@@ -64,15 +93,23 @@ class Interviewer:
         self._history.append({"role": "user", "content": user_message})
         is_first_turn = len(self._history) == 1
 
+        # Existing DB is relevant once the user names an existing table, or it
+        # already became relevant on a previous turn (sticky).
+        if self._mentions_existing(user_message):
+            self._fallback_active = True
+
         # other_system_prompt = role instructions + conversation history (context)
         history_lines = "\n".join(
             f"[{'使用者' if h['role'] == 'user' else 'AI架構師'}]: {h['content']}"
             for h in self._history[:-1]
         )
         system_prompt = SYSTEM_PROMPT
-        # Inject DB schema context only on the first turn; history carries it implicitly after that
+        # Designed-schema continuity context: first turn only
         if self._context and is_first_turn:
             system_prompt = self._context + "\n\n" + system_prompt
+        # Existing-DB memory fallback: inject only while relevant and not yet in API memory
+        if self._memory_text and self._fallback_active and not self.memory_synced:
+            system_prompt = self._memory_text + "\n\n" + system_prompt
         if history_lines:
             system_prompt += f"\n\n--- 對話歷史 ---\n{history_lines}"
 
@@ -93,4 +130,15 @@ class Interviewer:
         clean_text = _SUMMARY_RE.sub("", _SPEC_RE.sub("", response_text)).strip()
 
         self._history.append({"role": "assistant", "content": clean_text})
+
+        # The designed schema may reveal a link to an existing table too.
+        if self._specs_reference_existing(tables):
+            self._fallback_active = True
+
+        # Once relevant, push the existing-DB structure into persistent LLM memory
+        # (once). Until that succeeds, the sticky fallback above keeps it in context.
+        if self._fallback_active and self._memory_text and not self.memory_synced:
+            if self._api.update_memory(self._memory_text):
+                self.memory_synced = True
+
         return clean_text, tables, summary

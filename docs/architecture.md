@@ -113,7 +113,8 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
   "generation_status": {"01_specification.md": "waiting|loading|done|failed", ...},
   "generation_errors": {"03_ddl.sql": "錯誤訊息（失敗時才有）"},
   "context_tables": [ ...從現有 DB 匯入的 TableSpec JSON... ],
-  "context_text":   "格式化後的現有 DB 結構文字（注入 Interviewer system prompt）"
+  "context_text":   "格式化後的現有 DB 結構文字（作為 LLM 記憶/fallback 注入）",
+  "memory_synced":  false
 }
 ```
 
@@ -216,7 +217,10 @@ Phase.GENERATING
 ### Interviewer（`agents/interviewer.py`）
 
 - 維護本地 `_history`（`list[dict]`），記錄每輪對話
-- context_text（現有 DB 結構）只在第一輪對話時注入 system prompt，後續省略以節省 token
+- **現有 DB 結構作為 LLM 記憶參考**：context_text（現有 DB 結構）不再無條件於第一輪注入，而是**只在對話「動到現有表」時**才提供。判定條件（命中其一即觸發，且具黏性）：
+  1. 使用者訊息提及任一現有表名（詞界、不分大小寫）；或
+  2. AI 解析出的 `TABLE_SPECS` 有表與現有表同名、或欄位 `references` 指向現有表。
+  觸發後呼叫 `PensieveAPI.update_memory(txt)` 將結構寫入 LLM 持久記憶（只上傳一次，由 session `memory_synced` 旗標控管）。在記憶 API 尚未同步成功前，以 system prompt 注入現有結構作為 **fallback**（每個相關回合都注入，直到同步成功）。現有 DB 重新匯入時 `memory_synced` 重置。
 - 當需求完整時，LLM 在回覆前附加 `<REQUIREMENTS_SUMMARY>`（3–6 條整合摘要），再附加 `<TABLE_SPECS>` JSON
 - 回傳 `(reply_text, list[TableSpec] | None, list[str] summary)`
 

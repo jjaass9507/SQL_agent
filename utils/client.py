@@ -92,6 +92,15 @@ class PensieveAPI:
                      len(_RETRY_DELAYS) + 1, last_error)
         return None
 
+    def update_memory(self, content: str) -> bool:
+        """將 txt 內容上傳為 LLM 的持久記憶，成功回傳 True。
+
+        TODO: 接上實際的 Pensieve 記憶更新 API（使用者後續提供呼叫方式）。
+        目前為 stub：僅記錄 log 並回傳 False，讓呼叫端走 system-prompt 注入 fallback。
+        """
+        logger.info("update_memory stub called (not yet wired): %d chars", len(content or ""))
+        return False
+
     def _extract_text(self, res_data: Any) -> Optional[str]:
         if isinstance(res_data, dict):
             if "Result" in res_data and isinstance(res_data["Result"], str):

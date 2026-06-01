@@ -74,6 +74,7 @@ def create_session(title: str, context_tables: list[dict] | None = None,
         "table_versions": [],                                 # list of design snapshots
         "context_tables": context_tables or [],
         "context_text": context_text,
+        "memory_synced": False,        # existing-DB structure pushed to LLM memory yet?
     }
     _write(session_id, session)
     return session
