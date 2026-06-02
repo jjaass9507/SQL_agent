@@ -375,6 +375,42 @@ function initWorkbench() {
     if (sql) postQuery(sql, 'explain');
   });
 
+  // ── Natural language → SQL ────────────────────────────────────────────
+  const nlInput = document.getElementById('wb-nl-input');
+  const nlBtn = document.getElementById('wb-nl-btn');
+  const nlAutorun = document.getElementById('wb-nl-autorun');
+  async function generateFromNL() {
+    const question = (nlInput.value || '').trim();
+    if (!question) return;
+    nlBtn.disabled = true;
+    const original = nlBtn.textContent;
+    nlBtn.textContent = '⟳ 產生中…';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/nl2sql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        outEl.innerHTML = `<div style="color:var(--error);padding:8px;">${escHtml(data.error)}</div>`;
+        return;
+      }
+      sqlEl.value = data.sql;
+      sqlEl.focus();
+      if (nlAutorun && nlAutorun.checked) postQuery(data.sql, 'query');
+    } catch (e) {
+      outEl.innerHTML = '<div style="color:var(--error);">連線失敗，請重新整理頁面</div>';
+    } finally {
+      nlBtn.disabled = false;
+      nlBtn.textContent = original;
+    }
+  }
+  if (nlBtn) nlBtn.addEventListener('click', generateFromNL);
+  if (nlInput) nlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); generateFromNL(); }
+  });
+
   if (listBtn) listBtn.addEventListener('click', () => {
     postQuery(
       "SELECT table_name, pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS size FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name",

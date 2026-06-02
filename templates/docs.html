@@ -173,6 +173,14 @@
                 <button class="btn btn-ghost btn-sm" id="wb-clear-history-btn">清除</button></div>
               <div id="wb-history-list" class="wb-history-list"></div>
             </div>
+            <div class="workbench-nl">
+              <input id="wb-nl-input" class="workbench-nl-input" type="text"
+                     placeholder="用自然語言描述你想查的資料… 例如：列出每位使用者的訂單數量" />
+              <button class="btn btn-primary btn-sm" id="wb-nl-btn">✨ 產生 SQL</button>
+              <label class="workbench-nl-toggle" title="產生後立即執行查詢">
+                <input type="checkbox" id="wb-nl-autorun" /> 自動執行
+              </label>
+            </div>
             <textarea id="workbench-sql" class="workbench-textarea"
                       placeholder="輸入 SELECT 查詢…　（Ctrl+Enter 執行、Ctrl+Shift+E 說明計畫）&#10;點左側欄位插入名稱，雙擊資料表帶入 SELECT 範本"></textarea>
             <div class="workbench-actions">

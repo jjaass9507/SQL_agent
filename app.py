@@ -795,5 +795,33 @@ def api_explain(session_id):
     return jsonify(result)
 
 
+@app.post("/api/sessions/<session_id>/nl2sql")
+def api_nl2sql(session_id):
+    """Generate a read-only SELECT from a natural-language question (workbench)."""
+    from web.db_manager import schema_tree
+    from web.nl2sql import generate_sql, format_schema
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "此 session 未設定資料庫連線"}), 400
+    data = request.get_json(silent=True) or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "question required"}), 400
+    if len(question) > 2000:
+        return jsonify({"error": "問題過長（上限 2000 字）"}), 400
+    tree = schema_tree(db_url)
+    if "error" in tree:
+        return jsonify({"error": _sanitize_db_error(tree["error"])}), 400
+    result = generate_sql(question, format_schema(tree.get("tables", [])))
+    if "error" in result:
+        return jsonify(result), 400
+    logger.info("nl2sql generated", extra={"session_id": session_id})
+    activity_log.record("nl2sql_generated", session_id, {"q_len": len(question)})
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)

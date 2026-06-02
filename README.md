@@ -149,6 +149,8 @@ python app.py
 **SQL 工作台**：建立 Session 時填入資料庫連線字串後，文件頁會出現「⚙ SQL 工作台」分頁：
 左側為結構瀏覽器（資料表／欄位樹，標示 PK/FK，點欄位插入名稱、雙擊資料表帶入 SELECT 範本），
 右側可執行唯讀查詢與 `EXPLAIN`、查看查詢記錄、匯出 CSV，並支援 `Ctrl+Enter` 執行 / `Ctrl+Shift+E` 說明計畫。
+也可用**自然語言產生 SQL**（✨ 產生 SQL）：依目標 DB 結構由 AI 產生單一 `SELECT` 填入編輯區，
+可勾選「自動執行」於產生後立即執行；產生的 SQL 一律經同一道唯讀護欄把關。
 基於安全考量僅允許 `SELECT`／`EXPLAIN`（拒絕 DDL／DML／DCL，包含註解繞過與 CTE-DML；連線以 read-only
 開啟，statement timeout 30 秒），連線字串僅存於後端、不回傳前端。
 
@@ -161,6 +163,7 @@ python app.py
 | `GET` | `/api/sessions/<id>/schema-tree` | 結構瀏覽器資料（實際 DB 或設計 Schema） |
 | `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |
 | `POST` | `/api/sessions/<id>/explain` | 回傳查詢的 `EXPLAIN` 計畫 |
+| `POST` | `/api/sessions/<id>/nl2sql` | 由自然語言問題產生唯讀 `SELECT`（不執行）|
 
 ### CLI 工具
 
