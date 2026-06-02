@@ -187,15 +187,53 @@ function renderDoc(filename) {
       contentEl.innerHTML = `<pre>${escHtml(content)}</pre>`;
     }
   } else if (filename.endsWith('.sql')) {
+    const validateBar = filename === '03_ddl.sql'
+      ? `<div class="ddl-validate-bar">
+           <button class="btn btn-ghost btn-sm" id="ddl-validate-btn">✓ 驗證 DDL（dry-run）</button>
+           <span id="ddl-validate-result" class="ddl-validate-result"></span>
+         </div>`
+      : '';
     contentEl.innerHTML = `
       <div class="copy-btn-wrap">
+        ${validateBar}
         <pre id="ddl-pre">${highlightSQL(content)}</pre>
       </div>`;
+    if (filename === '03_ddl.sql') wireDdlValidate();
   } else if (/\.(py|dbml|puml|json|csv)$/.test(filename)) {
     contentEl.innerHTML = `<pre class="code-block">${escHtml(content)}</pre>`;
   } else {
     contentEl.innerHTML = `<div class="docs-markdown">${renderMarkdown(content)}</div>`;
   }
+}
+
+function wireDdlValidate() {
+  const btn = document.getElementById('ddl-validate-btn');
+  const out = document.getElementById('ddl-validate-result');
+  if (!btn || !out) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '⟳ 驗證中…';
+    out.textContent = '';
+    out.className = 'ddl-validate-result';
+    try {
+      const res = await fetch(`/api/sessions/${SESSION_ID}/validate-ddl`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        out.textContent = '✓ 通過：DDL 可在 PostgreSQL 執行';
+        out.classList.add('ok');
+      } else {
+        out.textContent = '✗ ' + (data.error || '驗證失敗');
+        out.classList.add('err');
+      }
+    } catch (e) {
+      out.textContent = '✗ 連線失敗，請重新整理頁面';
+      out.classList.add('err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  });
 }
 
 // ── On-demand extras (ORM / migration / queries) ──

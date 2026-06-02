@@ -1065,6 +1065,11 @@ html, body {
 .workbench-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .workbench-actions { display: flex; align-items: center; gap: 10px; }
 .workbench-shortcut-hint { font-size: 11px; color: var(--muted); }
+.ddl-validate-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ddl-validate-result { font-size: 12px; }
+.ddl-validate-result.ok { color: var(--success); }
+.ddl-validate-result.err { color: var(--error); }
+
 .workbench-nl { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .workbench-nl-input {
   flex: 1; font-size: 13px; border: 1.5px solid var(--line); border-radius: 4px;

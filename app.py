@@ -823,5 +823,28 @@ def api_nl2sql(session_id):
     return jsonify(result)
 
 
+@app.post("/api/sessions/<session_id>/validate-ddl")
+def api_validate_ddl(session_id):
+    """Dry-run the generated DDL against a real PostgreSQL (rolled back)."""
+    from web.ddl_validator import validate_ddl
+    from web.app_settings import get_database_url
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    ddl = (session.get("outputs", {}) or {}).get("03_ddl.sql", "")
+    if not ddl.strip():
+        return jsonify({"ok": False, "error": "尚未產生 DDL，請先完成文件產出"}), 400
+    # Prefer the session's own DB; fall back to the platform's configured PostgreSQL
+    conn_url = session.get("db_url") or get_database_url()
+    if not conn_url:
+        return jsonify({"ok": False,
+                        "error": "需要一個 PostgreSQL 連線（session 的資料庫或設定頁的平台資料庫）才能驗證 DDL"}), 400
+    result = validate_ddl(ddl, conn_url)
+    if not result.get("ok"):
+        result["error"] = _sanitize_db_error(result.get("error", ""))
+    logger.info("ddl validated", extra={"session_id": session_id, "ok": result.get("ok")})
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
