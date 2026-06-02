@@ -133,6 +133,30 @@ def _incremental(session_id: str) -> None:
         update_generation_status(session_id, INCREMENTAL_FILE, "failed", error=str(e))
 
 
+def run_memory_sync(session_id: str) -> None:
+    """Upload the session's existing-DB structure to the shared LLM knowledge (background).
+
+    Eager: runs whenever the existing schema is imported/refreshed, so knowledge
+    is updated without waiting for a chat that happens to touch an existing table."""
+    thread = threading.Thread(target=_memory_sync, args=(session_id,), daemon=True)
+    thread.start()
+
+
+def _memory_sync(session_id: str) -> None:
+    from utils.client import get_api
+    session = get_session(session_id)
+    if not session:
+        return
+    context_text = (session.get("context_text") or "").strip()
+    if not context_text:
+        return
+    try:
+        if get_api().update_memory(context_text):
+            update_session(session_id, {"memory_synced": True})
+    except Exception as e:
+        logger.error("memory sync failed: %s", e, extra={"session_id": session_id})
+
+
 def run_review(session_id: str) -> None:
     """Start background schema review for a 'review' mode session."""
     thread = threading.Thread(target=_review, args=(session_id,), daemon=True)

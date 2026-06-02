@@ -217,10 +217,10 @@ Phase.GENERATING
 ### Interviewer（`agents/interviewer.py`）
 
 - 維護本地 `_history`（`list[dict]`），記錄每輪對話
-- **現有 DB 結構作為 LLM 記憶參考**：context_text（現有 DB 結構）不再無條件於第一輪注入，而是**只在對話「動到現有表」時**才提供。判定條件（命中其一即觸發，且具黏性）：
-  1. 使用者訊息提及任一現有表名（詞界、不分大小寫）；或
-  2. AI 解析出的 `TABLE_SPECS` 有表與現有表同名、或欄位 `references` 指向現有表。
-  觸發後呼叫 `PensieveAPI.update_memory(txt)` 將結構寫入 LLM 持久記憶（只上傳一次，由 session `memory_synced` 旗標控管）。在記憶 API 尚未同步成功前，以 system prompt 注入現有結構作為 **fallback**（每個相關回合都注入，直到同步成功）。現有 DB 重新匯入時 `memory_synced` 重置。
+- **現有 DB 結構作為 LLM 記憶（knowledge）**：採全域固定 `PENSIEVE_VECTOR_ID` + coverage，結構持久共享。
+  - **主要時機（eager）**：凡是「取得/匯入現有 DB 結構」的動作就上傳——建立 session 帶 `db_url`（設計或審查）、或對既有 session `import-db`。由 `web/generation_worker.py:run_memory_sync()` 背景上傳 `context_text`，成功後設 `session["memory_synced"]=True`。
+  - **次要時機（lazy，安全網）**：若 eager 上傳尚未完成或 `vector_id` 未設定，`Interviewer.chat()` 在對話「動到現有表」時（使用者提及現有表名，或 `TABLE_SPECS` 同名/外鍵指向現有表）會補上傳，未同步前以 system-prompt 注入現有結構作 fallback。
+  - 重新匯入時 `memory_synced` 重置，eager 上傳以 coverage 覆蓋最新結構。
 - 當需求完整時，LLM 在回覆前附加 `<REQUIREMENTS_SUMMARY>`（3–6 條整合摘要），再附加 `<TABLE_SPECS>` JSON
 - 回傳 `(reply_text, list[TableSpec] | None, list[str] summary)`
 

@@ -60,7 +60,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_incremental, run_review, run_single_file, EXTRA_FILES
+from web.generation_worker import run_generation, run_incremental, run_memory_sync, run_review, run_single_file, EXTRA_FILES
 from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
@@ -300,6 +300,10 @@ def api_create_session():
     if mode == "review" and context_tables_json and not db_error:
         run_review(session["id"])
 
+    # Any session that imported an existing DB pushes its structure to shared knowledge
+    if context_text and not db_error:
+        run_memory_sync(session["id"])
+
     logger.info("session created", extra={"session_id": session["id"], "mode": mode, "phase": session["phase"]})
     activity_log.record("session_created", session["id"],
                         {"mode": mode, "title": title, "db_imported": len(context_tables_json)})
@@ -371,6 +375,7 @@ def api_import_db(session_id):
     update_session(session_id, import_updates)
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
+    run_memory_sync(session_id)  # push refreshed structure to shared knowledge
     logger.info("import-db succeeded", extra={"session_id": session_id, "table_count": len(tables)})
     return jsonify({"imported": len(tables), "tables": [t.table_name for t in tables]})
 
