@@ -1,6 +1,6 @@
 from sqlalchemy import (
     MetaData, Table, Column, Text, String,
-    Integer, DateTime, JSON, ForeignKey,
+    Integer, DateTime, JSON, ForeignKey, Boolean, text,
 )
 
 metadata = MetaData()
@@ -18,6 +18,7 @@ sessions_table = Table("sessions", metadata,
     Column("generation_errors", JSON, nullable=False, server_default="{}"),
     Column("context_tables", JSON, nullable=False, server_default="[]"),
     Column("context_text", Text, nullable=False, server_default=""),
+    Column("memory_synced", Boolean, nullable=False, server_default=text("false")),
     Column("last_db_import", JSON, nullable=True),
     Column("db_url", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),

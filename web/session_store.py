@@ -276,6 +276,7 @@ def _pg_create_session(title, context_tables=None, context_text="", mode="design
         "table_versions": [],
         "context_tables": context_tables or [],
         "context_text": context_text or "",
+        "memory_synced": False,
         "db_url": db_url or "",
     }
     engine = get_engine()
@@ -293,6 +294,7 @@ def _pg_create_session(title, context_tables=None, context_text="", mode="design
             generation_errors={},
             context_tables=context_tables or [],
             context_text=context_text or "",
+            memory_synced=False,
             last_db_import=None,
             db_url=db_url or None,
             created_at=now,
@@ -369,7 +371,7 @@ def _pg_update_session(session_id, updates):
     ALLOWED = {
         "title", "mode", "phase", "key_points", "tables", "table_versions",
         "outputs", "generation_status", "generation_errors",
-        "context_tables", "context_text", "last_db_import", "db_url",
+        "context_tables", "context_text", "memory_synced", "last_db_import", "db_url",
     }
     db_updates = {k: v for k, v in updates.items() if k in ALLOWED}
     if not db_updates:

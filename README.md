@@ -219,7 +219,8 @@ SQL_agent/
 │   ├── env.py
 │   └── versions/
 │       ├── 0001_initial.py      # sessions / messages
-│       └── 0002_activity_log.py # 平台使用紀錄表
+│       ├── 0002_activity_log.py # 平台使用紀錄表
+│       └── 0003_memory_synced.py # sessions.memory_synced 旗標
 │
 ├── templates/                   # Jinja2 HTML 模板
 │   ├── base.html
