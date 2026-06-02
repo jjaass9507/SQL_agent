@@ -242,7 +242,7 @@ Phase.GENERATING
 | Writer | API 呼叫 | 說明 |
 |---|---|---|
 | SpecWriter | **無** | 直接模板渲染，固定格式 Markdown 表格 |
-| DiagramWriter | 1 次 | `question`=任務說明，`answer`=TableSpec JSON |
+| DiagramWriter | 1 次 | Mermaid `erDiagram` 由 `build_mermaid_er(tables)` **確定性產生**（保證合法語法、型態去括號）；LLM 僅生成關聯說明文字 |
 | DDLWriter | 1 次 | `question`=任務說明，`answer`=TableSpec JSON |
 | SecurityWriter | 1 次 | `question`=任務說明（含敏感欄位偵測結果），`answer`=TableSpec JSON |
 
