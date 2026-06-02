@@ -106,12 +106,16 @@ PENSIEVE_VERIFY=false
     系統會測試連線、自動建立所需資料表，之後平台的所有專案與對話即存入該資料庫作為記憶。
     連線字串存於本機 `data/app_settings.json`（git ignored），回傳前端時密碼一律遮罩。
 
-  - **環境變數**：部署時可設 `DATABASE_URL`，首次需執行 migration 建表：
+  - **環境變數**：部署時可設 `DATABASE_URL`：
 
     ```bash
     export DATABASE_URL=postgresql://user:pass@host:5432/sql_agent
-    alembic upgrade head
+    alembic upgrade head   # 用 Alembic 管理 schema 的團隊；非必要（見下）
     ```
+
+  > **Schema 自我修復**：取得連線時 `web/db_schema.py:ensure_schema()` 會自動建立缺少的
+  > 資料表，並以 `ALTER TABLE ... ADD COLUMN` 補上既有表缺少的新增欄位（idempotent）。
+  > 因此升級版本後**不需手動跑 Alembic**也能自動補欄位；Alembic migration 仍保留供需要者使用。
 
   連接資料庫後，平台會把使用紀錄（建立／確認設計、完成審查、執行查詢、設定變更等）
   寫入 `activity_log` 資料表，作為操作軌跡，可由 `GET /api/activity` 查詢。
@@ -178,6 +182,19 @@ python main.py
 | `04_security_plan.md` | 設計 | 索引策略、存取控制、敏感欄位加密建議 |
 | `05_review_report.md` | 審查 | AI 審查報告（設計一致性 / 資料完整性 / 效能 / 安全）|
 | `06_review_fix.sql` | 審查 | 規則式紅旗自動產生的修復腳本（可套用 ALTER + 需人工判斷的 TODO）|
+
+設計模式另可在文件頁**按需產生**以下延伸檔案（核心 4 份以外）：
+
+| 檔案 | 說明 | 成本 |
+|---|---|---|
+| `05_orm_models.py` | SQLAlchemy 2.0 ORM 模型 | 1 次 API |
+| `06_migration.py` | 全量 Alembic migration | 1 次 API |
+| `07_queries.sql` | 常用查詢範例 | 1 次 API |
+| `08_incremental_migration.sql` | 現有 DB → 設計的增量 ALTER（需已匯入現有 DB）| 1 次 API |
+| `09_schema.dbml` | dbdiagram.io DBML | 純模板 |
+| `10_schema.puml` | PlantUML ER 圖 | 純模板 |
+| `11_json_schema.json` | JSON Schema（draft-07）| 純模板 |
+| `12_data_dictionary.csv` | 資料字典 CSV | 純模板 |
 
 網頁平台：在文件頁直接預覽（Mermaid 渲染、SQL 語法高亮），或下載單檔 / 全部打包為 `.zip`。
 CLI 工具：輸出至 `output/{YYYYMMDD_HHMMSS}/`。
