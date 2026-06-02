@@ -154,6 +154,8 @@ python app.py
 可勾選「自動執行」於產生後立即執行；產生的 SQL 一律經同一道唯讀護欄把關。
 基於安全考量僅允許 `SELECT`／`EXPLAIN`（拒絕 DDL／DML／DCL，包含註解繞過與 CTE-DML；連線以 read-only
 開啟，statement timeout 30 秒），連線字串僅存於後端、不回傳前端。
+若 session 的目標資料庫與平台儲存資料庫（設定頁）為同一個，結構瀏覽器與 NL2SQL 會自動隱藏平台自身的
+記帳表（`sessions`／`messages`／`activity_log`／`alembic_version`），避免污染。
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|

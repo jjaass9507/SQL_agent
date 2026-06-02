@@ -45,6 +45,12 @@ activity_log_table = Table("activity_log", metadata,
 )
 
 
+def platform_table_names() -> set[str]:
+    """Tables the platform owns on its storage DB — hidden from the workbench
+    when the session's target DB is the same database."""
+    return set(metadata.tables.keys()) | {"alembic_version"}
+
+
 # Columns added to existing tables after the initial schema. create_all() only
 # creates missing *tables*, never adds *columns* to an existing one — and the
 # Settings-page flow uses create_all (not Alembic) — so additive columns must be

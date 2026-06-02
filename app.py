@@ -67,6 +67,18 @@ _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
 
 
+def _hide_platform_tables(tables: list, db_url: str) -> list:
+    """Drop the platform's own bookkeeping tables from workbench schema views,
+    but only when the session's target DB is the same as the platform storage DB
+    (otherwise a user's legitimately-named tables would be hidden)."""
+    from web.app_settings import get_database_url
+    from web.db_schema import platform_table_names
+    if db_url and db_url.strip() == (get_database_url() or "").strip():
+        hidden = platform_table_names()
+        return [t for t in tables if t.get("name") not in hidden]
+    return tables
+
+
 def _sanitize_db_error(msg: str) -> str:
     """Strip credentials and host details from DB error messages."""
     msg = re.sub(r'postgresql://[^\s]+', 'postgresql://...', msg)
@@ -749,6 +761,7 @@ def api_schema_tree(session_id):
         from web.db_manager import schema_tree
         result = schema_tree(db_url)
         if "error" not in result and result.get("tables"):
+            result["tables"] = _hide_platform_tables(result["tables"], db_url)
             result["source"] = "db"
             return jsonify(result)
         # fall through to designed tables on introspection failure
@@ -815,7 +828,8 @@ def api_nl2sql(session_id):
     tree = schema_tree(db_url)
     if "error" in tree:
         return jsonify({"error": _sanitize_db_error(tree["error"])}), 400
-    result = generate_sql(question, format_schema(tree.get("tables", [])))
+    tables = _hide_platform_tables(tree.get("tables", []), db_url)
+    result = generate_sql(question, format_schema(tables))
     if "error" in result:
         return jsonify(result), 400
     logger.info("nl2sql generated", extra={"session_id": session_id})
