@@ -237,7 +237,7 @@ def api_set_settings():
     from sqlalchemy import text
     from web.app_settings import set_database_url
     from web.db_engine import get_engine
-    from web.db_schema import metadata
+    from web.db_schema import ensure_schema
 
     data = request.get_json(silent=True) or {}
     url = (data.get("database_url") or "").strip()
@@ -253,7 +253,7 @@ def api_set_settings():
     try:
         set_database_url(url)
         engine = get_engine()
-        metadata.create_all(engine)  # idempotent: creates sessions/messages if absent
+        ensure_schema(engine)  # idempotent: create missing tables + add missing columns
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except Exception as e:
