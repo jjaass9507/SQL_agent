@@ -31,6 +31,7 @@
               style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">✏ 繼續修改設計</button>
       <a id="download-zip-btn" href="/api/sessions/{{ session.id }}/outputs/zip" class="btn btn-ghost btn-sm"
          style="{% if session.phase == 'done' %}{% else %}display:none;{% endif %}">⬇ 全部下載 .zip</a>
+      <button id="schema-chat-toggle" class="btn btn-ghost btn-sm" style="display:none;" title="開啟 Schema Chat 助手">💬 Schema Chat</button>
     </div>
 
     <!-- V2: Generating state (shown while generating) -->
@@ -195,6 +196,31 @@
     </div>
 
   </div>
+
+  <!-- Schema Chat Panel (right drawer, outside workbench) -->
+  <div id="schema-chat-panel" class="schema-chat-panel" aria-hidden="true">
+    <div class="schema-chat-header">
+      <span class="schema-chat-title">💬 Schema Chat</span>
+      <button id="schema-chat-close" class="schema-chat-close-btn" title="關閉">✕</button>
+    </div>
+    <div id="schema-chat-messages" class="schema-chat-messages">
+      <div class="sc-bubble sc-bubble-ai">你好！我是 Schema Chat 助手。你可以問我關於資料表的問題，或告訴我你想新增或修改哪些結構，我會幫你產生 DDL。</div>
+    </div>
+    <div id="schema-chat-ddl-confirm" class="schema-chat-ddl-confirm" style="display:none;">
+      <div class="schema-chat-ddl-label">AI 建議的 DDL：</div>
+      <pre id="schema-chat-ddl-code" class="schema-chat-ddl-pre"></pre>
+      <div class="schema-chat-ddl-actions">
+        <button id="schema-chat-ddl-run" class="btn btn-primary btn-sm">執行 DDL</button>
+        <button id="schema-chat-ddl-dismiss" class="btn btn-ghost btn-sm">取消</button>
+      </div>
+      <div id="schema-chat-ddl-result" class="schema-chat-ddl-result"></div>
+    </div>
+    <div class="schema-chat-input-row">
+      <textarea id="schema-chat-input" class="schema-chat-input"
+                placeholder="詢問資料表結構，或描述你想建立/修改的資料表…" rows="2"></textarea>
+      <button id="schema-chat-send" class="btn btn-primary btn-sm">送出</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -209,4 +235,5 @@
   const HAS_DB = {{ 'true' if session.get('db_url') else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/docs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/schema_chat.js') }}"></script>
 {% endblock %}

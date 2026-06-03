@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 from agents.interviewer import Interviewer
+from agents.schema_chat import SchemaChatAgent
 from web.session_store import (
     add_message,
     create_session,
@@ -65,6 +66,9 @@ from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
+
+_schema_chat_store: dict[str, SchemaChatAgent] = {}
+_schema_chat_lock = threading.Lock()
 
 
 def _hide_platform_tables(tables: list, db_url: str) -> list:
@@ -858,6 +862,79 @@ def api_validate_ddl(session_id):
         result["error"] = _sanitize_db_error(result.get("error", ""))
     logger.info("ddl validated", extra={"session_id": session_id, "ok": result.get("ok")})
     return jsonify(result)
+
+
+@app.post("/api/sessions/<session_id>/schema-chat")
+def api_schema_chat(session_id):
+    """Multi-turn conversational assistant for schema exploration and DDL suggestions."""
+    from web.db_manager import schema_tree
+    from web.nl2sql import format_schema
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "此 session 未設定資料庫連線"}), 400
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "message required"}), 400
+    if len(message) > 2000:
+        return jsonify({"error": "訊息過長（上限 2000 字）"}), 400
+
+    tree = schema_tree(db_url)
+    if "error" in tree:
+        return jsonify({"error": _sanitize_db_error(tree["error"])}), 400
+    tables = _hide_platform_tables(tree.get("tables", []), db_url)
+    schema_text = format_schema(tables)
+
+    with _schema_chat_lock:
+        if session_id not in _schema_chat_store:
+            _schema_chat_store[session_id] = SchemaChatAgent()
+        agent = _schema_chat_store[session_id]
+
+    reply, ddl = agent.chat(message, schema_text)
+    logger.info("schema_chat replied", extra={"session_id": session_id, "has_ddl": bool(ddl)})
+    activity_log.record("schema_chat_message", session_id, {"has_ddl": bool(ddl)})
+    return jsonify({"reply": reply, "ddl_suggestion": ddl})
+
+
+@app.post("/api/sessions/<session_id>/execute-schema-ddl")
+def api_execute_schema_ddl(session_id):
+    """Validate and execute a DDL suggestion from Schema Chat."""
+    from web.ddl_guard import check_ddl_safety
+    from web.ddl_executor import execute_ddl
+    session = get_session(session_id)
+    if not session:
+        abort(404)
+    db_url = session.get("db_url") or ""
+    if not db_url:
+        return jsonify({"error": "此 session 未設定資料庫連線"}), 400
+    data = request.get_json(silent=True) or {}
+    ddl = (data.get("ddl") or "").strip()
+    if not ddl:
+        return jsonify({"error": "ddl required"}), 400
+
+    safety_err = check_ddl_safety(ddl)
+    if safety_err:
+        return jsonify({"error": safety_err}), 400
+
+    result = execute_ddl(db_url, ddl)
+    if not result.get("ok"):
+        result["error"] = _sanitize_db_error(result.get("error", "執行失敗"))
+        return jsonify(result), 400
+
+    logger.info("schema_ddl executed", extra={"session_id": session_id, "stmts": result.get("statements_run")})
+    activity_log.record("schema_ddl_executed", session_id, {"statements_run": result.get("statements_run")})
+    return jsonify(result)
+
+
+@app.delete("/api/sessions/<session_id>/schema-chat")
+def api_clear_schema_chat(session_id):
+    """Clear the in-memory schema chat history for a session."""
+    with _schema_chat_lock:
+        _schema_chat_store.pop(session_id, None)
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
