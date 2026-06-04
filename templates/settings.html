@@ -69,27 +69,29 @@
           </div>
         </div>
 
-        <!-- Business DB -->
+        <!-- Business DBs -->
         <div class="settings-card">
           <div class="settings-card-title">業務資料庫（DB Agent 互動目標）</div>
           <p class="settings-hint">
-            這是「資料庫助手」要對話的資料庫，與上方平台儲存庫分開管理。
-            儲存後助手會自動讀取此資料庫的結構作為記憶基礎。
+            「資料庫助手」要對話的資料庫，可設定多個並用名稱區分。
+            助手會自動讀取所有已設定資料庫的完整結構（所有 schema）作為記憶基礎。
           </p>
-          <input class="modal-input" id="biz-url-input" type="password"
-                 placeholder="postgresql://user:password@host:5432/your_db"
-                 autocomplete="new-password" style="font-family:var(--mono);font-size:13px;">
-          <div style="display:flex;gap:10px;margin-top:10px;align-items:center;">
-            <label style="font-size:12px;color:var(--muted);white-space:nowrap;">Schema：</label>
-            <input class="modal-input" id="biz-schema-input" type="text"
-                   placeholder="public" style="max-width:160px;font-family:var(--mono);font-size:13px;">
-            <span style="font-size:11px;color:var(--muted);">要瀏覽的 schema（預設 public）</span>
-          </div>
-          <div id="biz-msg" class="settings-msg hidden"></div>
-          <div id="biz-status" class="settings-status" style="margin-bottom:10px;"></div>
-          <div style="display:flex;gap:10px;margin-top:4px;">
-            <button class="btn btn-primary" id="biz-save">儲存業務資料庫</button>
-            <button class="btn btn-ghost" id="biz-clear">清除</button>
+
+          <!-- Existing DBs list -->
+          <div id="biz-db-list" style="margin-bottom:14px;"></div>
+
+          <!-- Add new DB form -->
+          <div style="border:1.5px dashed var(--line);border-radius:4px;padding:12px;background:var(--bg);">
+            <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;">新增資料庫</div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+              <input class="modal-input" id="biz-name-input" type="text"
+                     placeholder="名稱（例如：訂單庫）" style="max-width:200px;">
+              <input class="modal-input" id="biz-url-input" type="password"
+                     placeholder="postgresql://user:password@host:5432/dbname"
+                     autocomplete="new-password" style="font-family:var(--mono);font-size:13px;flex:1;">
+            </div>
+            <div id="biz-msg" class="settings-msg hidden"></div>
+            <button class="btn btn-primary btn-sm" id="biz-add">＋ 新增</button>
           </div>
         </div>
 

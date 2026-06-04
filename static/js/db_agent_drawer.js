@@ -12,20 +12,43 @@
   const ddlRunBtn = document.getElementById('gda-ddl-run');
   const ddlDismissBtn = document.getElementById('gda-ddl-dismiss');
   const ddlResult = document.getElementById('gda-ddl-result');
+  const dbSelect = document.getElementById('gda-db-select');
 
   if (!fab) return;
+
+  function currentDb() {
+    return dbSelect ? dbSelect.value : '__all__';
+  }
 
   // ── Panel toggle ──────────────────────────────────────────────────────────
 
   fab.addEventListener('click', () => {
     panel.classList.add('open');
     panel.setAttribute('aria-hidden', 'false');
+    loadDatabases();
     inputEl.focus();
   });
   closeBtn.addEventListener('click', () => {
     panel.classList.remove('open');
     panel.setAttribute('aria-hidden', 'true');
   });
+
+  // ── DB selector ──────────────────────────────────────────────────────────
+
+  let _dbsLoaded = false;
+  function loadDatabases() {
+    if (_dbsLoaded || !dbSelect) return;
+    fetch('/api/db-agent/databases')
+      .then(r => r.json())
+      .then(dbs => {
+        if (!Array.isArray(dbs) || !dbs.length) return;
+        _dbsLoaded = true;
+        dbSelect.innerHTML = '<option value="__all__">全部</option>' +
+          dbs.map(d => `<option value="${escHtml(d.name)}">${escHtml(d.name)}</option>`).join('');
+        dbSelect.style.display = dbs.length > 1 ? '' : 'none';
+      })
+      .catch(() => {});
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -78,7 +101,7 @@
       const res = await fetch('/api/db-agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, db_name: currentDb() }),
       });
       const data = await res.json();
       removeById(thinkingId);
@@ -98,7 +121,7 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
       if (data.query_error) appendBubble('查詢錯誤：' + data.query_error, 'error');
-      if (data.ddl_suggestion) showDdlConfirm(data.ddl_suggestion);
+      if (data.ddl_suggestion) showDdlConfirm(data.ddl_suggestion, data.ddl_db);
 
     } catch (e) {
       removeById(thinkingId);
@@ -111,7 +134,7 @@
 
   // ── DDL confirm ───────────────────────────────────────────────────────────
 
-  function showDdlConfirm(ddl) {
+  function showDdlConfirm(ddl, ddlDb) {
     ddlCode.textContent = ddl;
     ddlResult.textContent = '';
     ddlResult.className = 'schema-chat-ddl-result';
@@ -119,13 +142,13 @@
     ddlRunBtn.textContent = '執行 DDL';
     ddlConfirm.style.display = '';
     ddlConfirm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    ddlRunBtn.onclick = () => executeDdl(ddl);
+    ddlRunBtn.onclick = () => executeDdl(ddl, ddlDb);
   }
 
   function hideDdlConfirm() { ddlConfirm.style.display = 'none'; }
   ddlDismissBtn.addEventListener('click', hideDdlConfirm);
 
-  async function executeDdl(ddl) {
+  async function executeDdl(ddl, ddlDb) {
     ddlRunBtn.disabled = true;
     ddlRunBtn.textContent = '⟳ 執行中…';
     ddlResult.textContent = '';
@@ -134,7 +157,7 @@
       const res = await fetch('/api/db-agent/execute-ddl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ddl }),
+        body: JSON.stringify({ ddl, db_name: ddlDb || currentDb() }),
       });
       const data = await res.json();
       if (data.ok) {

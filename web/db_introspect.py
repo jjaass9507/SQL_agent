@@ -64,11 +64,29 @@ ORDER BY c.table_name, c.ordinal_position
 """
 
 
-def extract_schema(db_url: str, schema: str = "public") -> tuple[list[TableSpec], str]:
-    """
-    Connect to PostgreSQL, read all tables in the given schema.
-    Returns (tables, error_message). On success error_message is "".
-    """
+_LIST_SCHEMAS_QUERY = """
+SELECT schema_name FROM information_schema.schemata
+WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND schema_name NOT LIKE 'pg\_%'
+ORDER BY schema_name
+"""
+
+
+def _list_user_schemas(db_url: str) -> list[str]:
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        with conn.cursor() as cur:
+            cur.execute(_LIST_SCHEMAS_QUERY)
+            schemas = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return schemas
+    except Exception:
+        return ["public"]
+
+
+def _extract_one(db_url: str, schema: str) -> tuple[list[TableSpec], str]:
+    """Extract all tables from a single schema. Returns (tables, error_msg)."""
     try:
         import psycopg2
         import psycopg2.extras
@@ -91,21 +109,22 @@ def extract_schema(db_url: str, schema: str = "public") -> tuple[list[TableSpec]
         conn.close()
 
     if not rows:
-        return [], f"schema '{schema}' 中未找到任何資料表"
+        return [], ""
 
-    # Group rows by table
     tables_dict: dict[str, dict] = {}
     for row in rows:
         tname = row["table_name"]
-        if tname not in tables_dict:
-            tables_dict[tname] = {
+        # Prefix non-public schema tables as "schema.table"
+        display_name = f"{schema}.{tname}" if schema != "public" else tname
+        if display_name not in tables_dict:
+            tables_dict[display_name] = {
                 "description": row["table_comment"] or "",
                 "columns": [],
             }
         ref = None
         if row["is_foreign_key"] and row["foreign_table_name"]:
             ref = f"{row['foreign_table_name']}.{row['foreign_column_name']}"
-        tables_dict[tname]["columns"].append(ColumnSpec(
+        tables_dict[display_name]["columns"].append(ColumnSpec(
             name=row["column_name"],
             data_type=row["data_type"],
             length=row["character_maximum_length"],
@@ -119,7 +138,7 @@ def extract_schema(db_url: str, schema: str = "public") -> tuple[list[TableSpec]
             is_indexed=bool(row["is_indexed"]),
         ))
 
-    tables = [
+    return [
         TableSpec(
             table_name=name,
             description=info["description"],
@@ -128,8 +147,36 @@ def extract_schema(db_url: str, schema: str = "public") -> tuple[list[TableSpec]
             related_tables=[],
         )
         for name, info in tables_dict.items()
-    ]
-    return tables, ""
+    ], ""
+
+
+def extract_schema(db_url: str, schema: str | None = "public") -> tuple[list[TableSpec], str]:
+    """
+    Connect to PostgreSQL and read tables.
+    schema=None → all non-system schemas; non-public tables prefixed as "schema.table".
+    schema="public" (or any value) → original single-schema behaviour.
+    Returns (tables, error_message). On success error_message is "".
+    """
+    if schema is not None:
+        tables, err = _extract_one(db_url, schema)
+        if err and not tables:
+            return [], err
+        if not tables:
+            return [], f"schema '{schema}' 中未找到任何資料表"
+        return tables, ""
+
+    # All-schemas mode
+    schemas = _list_user_schemas(db_url)
+    all_tables: list[TableSpec] = []
+    last_err = ""
+    for s in schemas:
+        tbls, err = _extract_one(db_url, s)
+        if err:
+            last_err = err
+        all_tables.extend(tbls)
+    if not all_tables:
+        return [], last_err or "資料庫中未找到任何資料表"
+    return all_tables, ""
 
 
 def format_context(tables: list[TableSpec]) -> str:

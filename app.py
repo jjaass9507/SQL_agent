@@ -61,7 +61,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_incremental, run_memory_sync, run_review, run_single_file, EXTRA_FILES
+from web.generation_worker import run_generation, run_incremental, run_memory_sync, run_review, run_single_file, run_business_db_memory_sync, EXTRA_FILES
 from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
@@ -223,8 +223,8 @@ def settings_page():
 
 @app.get("/db-agent")
 def db_agent_page():
-    from web.app_settings import get_business_database_url
-    has_biz_db = bool(get_business_database_url())
+    from web.app_settings import get_business_databases
+    has_biz_db = bool(get_business_databases())
     return render_template("db_agent.html", has_biz_db=has_biz_db)
 
 
@@ -234,18 +234,19 @@ def db_agent_page():
 def api_get_settings():
     from web.app_settings import (
         get_database_url, get_platform_schema,
-        get_business_database_url, get_business_schema,
+        get_business_databases,
     )
     url = get_database_url()
-    biz_url = get_business_database_url()
+    dbs = get_business_databases()
     return jsonify({
         "configured": bool(url),
         "backend": "postgresql" if url else "json",
         "masked_url": _mask_db_url(url),
         "platform_schema": get_platform_schema(),
-        "biz_configured": bool(biz_url),
-        "biz_masked_url": _mask_db_url(biz_url),
-        "biz_schema": get_business_schema(),
+        "business_databases": [
+            {"name": d["name"], "masked_url": _mask_db_url(d["url"])}
+            for d in dbs
+        ],
     })
 
 
@@ -300,25 +301,17 @@ def api_set_settings():
 
 
 @app.post("/api/settings/business-db")
-def api_set_business_db():
-    """Set (or clear) the business database for the global DB Agent."""
-    from web.app_settings import (
-        set_business_database_url, set_business_schema,
-        get_business_database_url, get_business_schema,
-    )
+def api_add_business_db():
+    """Add or replace a named business database for the global DB Agent."""
+    from web.app_settings import add_business_database, get_business_databases
     data = request.get_json(silent=True) or {}
-    url = (data.get("database_url") or "").strip()
-    schema = (data.get("schema") or "public").strip() or "public"
+    name = (data.get("name") or "").strip()
+    url = (data.get("url") or "").strip()
 
+    if not name:
+        return jsonify({"error": "請填入資料庫名稱"}), 400
     if not url:
-        set_business_database_url("")
-        set_business_schema(schema)
-        # Reset in-memory agent so next chat picks fresh schema
-        global _db_agent
-        with _db_agent_lock:
-            _db_agent = None
-        return jsonify({"biz_configured": False, "biz_masked_url": "", "biz_schema": schema})
-
+        return jsonify({"error": "請填入連線字串"}), 400
     if not url.startswith(("postgresql://", "postgres://")):
         return jsonify({"error": "僅支援 PostgreSQL 連線字串（postgresql://...）"}), 400
 
@@ -329,19 +322,46 @@ def api_set_business_db():
     except Exception as e:
         return jsonify({"error": f"連線失敗：{_sanitize_db_error(str(e))}"}), 400
 
-    set_business_database_url(url)
-    set_business_schema(schema)
-    # Reset agent so next chat loads fresh schema from new DB
+    add_business_database(name, url)
+    global _db_agent
     with _db_agent_lock:
         _db_agent = None
 
-    # Trigger background memory sync for the new business DB
-    from web.generation_worker import run_business_db_memory_sync
-    run_business_db_memory_sync()
+    run_business_db_memory_sync(name)
 
-    logger.info("settings: business DB configured", extra={"masked": _mask_db_url(url)})
-    activity_log.record("business_db_configured", None, {"masked_url": _mask_db_url(url)})
-    return jsonify({"biz_configured": True, "biz_masked_url": _mask_db_url(url), "biz_schema": schema})
+    logger.info("settings: business DB added", extra={"name": name, "masked": _mask_db_url(url)})
+    activity_log.record("business_db_configured", None, {"name": name, "masked_url": _mask_db_url(url)})
+    dbs = get_business_databases()
+    return jsonify({
+        "business_databases": [
+            {"name": d["name"], "masked_url": _mask_db_url(d["url"])}
+            for d in dbs
+        ]
+    })
+
+
+@app.delete("/api/settings/business-db")
+def api_remove_business_db():
+    """Remove a named business database."""
+    from web.app_settings import remove_business_database, get_business_databases
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    remove_business_database(name)
+    global _db_agent
+    with _db_agent_lock:
+        _db_agent = None
+
+    logger.info("settings: business DB removed", extra={"name": name})
+    dbs = get_business_databases()
+    return jsonify({
+        "business_databases": [
+            {"name": d["name"], "masked_url": _mask_db_url(d["url"])}
+            for d in dbs
+        ]
+    })
 
 
 @app.post("/api/sessions")
@@ -931,107 +951,157 @@ def api_validate_ddl(session_id):
 # ── Global DB Agent routes ───────────────────────────────────────────────────
 
 
-def _get_biz_db_url() -> str:
-    from web.app_settings import get_business_database_url
-    return get_business_database_url()
+def _resolve_biz_url(name: str | None) -> str | None:
+    """Return the URL for a named DB, or the first available DB if name is None."""
+    from web.app_settings import get_business_databases, get_business_database
+    if name and name != "__all__":
+        db = get_business_database(name)
+        return db["url"] if db else None
+    dbs = get_business_databases()
+    return dbs[0]["url"] if dbs else None
 
 
-def _get_biz_schema_text() -> tuple[list, str]:
-    """Return (tables, schema_text) from the business DB, or ([], error_msg)."""
-    from web.app_settings import get_business_schema
-    from web.db_manager import schema_tree
-    from web.db_introspect import format_context, extract_schema
-    biz_url = _get_biz_db_url()
-    if not biz_url:
-        return [], ""
-    biz_schema = get_business_schema()
-    tree = schema_tree(biz_url, biz_schema)
-    if "error" in tree:
-        return [], ""
-    tables = tree.get("tables", [])
-    # Use richer format_context for memory-quality schema text
-    specs, _ = extract_schema(biz_url, biz_schema)
-    if specs:
-        import dataclasses
-        schema_text = format_context(specs)
-    else:
-        from web.nl2sql import format_schema
-        schema_text = format_schema(tables)
-    return tables, schema_text
+def _biz_schema_text(db_name: str | None) -> str:
+    """Build schema context text for the agent.
+
+    db_name=None or '__all__' → concat all DBs with section headers.
+    db_name=<name> → single DB, all schemas.
+    """
+    from web.app_settings import get_business_databases, get_business_database
+    from web.db_introspect import extract_schema, format_context
+
+    if db_name and db_name != "__all__":
+        db = get_business_database(db_name)
+        if not db:
+            return ""
+        tables, _ = extract_schema(db["url"], None)
+        return format_context(tables)
+
+    dbs = get_business_databases()
+    if not dbs:
+        return ""
+    if len(dbs) == 1:
+        tables, _ = extract_schema(dbs[0]["url"], None)
+        return format_context(tables)
+
+    parts = []
+    for db in dbs:
+        tables, _ = extract_schema(db["url"], None)
+        if tables:
+            parts.append(f"=== 資料庫：{db['name']} ===\n{format_context(tables)}")
+    return "\n\n".join(parts)
+
+
+@app.get("/api/db-agent/databases")
+def api_db_agent_databases():
+    """List configured business databases for the DB selector."""
+    from web.app_settings import get_business_databases
+    dbs = get_business_databases()
+    return jsonify([{"name": d["name"], "masked_url": _mask_db_url(d["url"])} for d in dbs])
 
 
 @app.get("/api/db-agent/schema-tree")
 def api_db_agent_schema_tree():
-    """Schema browser data for the global DB Agent page."""
-    biz_url = _get_biz_db_url()
-    if not biz_url:
-        return jsonify({"error": "尚未設定業務資料庫，請先至設定頁填入連線字串。"}), 400
-    from web.app_settings import get_business_schema
+    """Schema browser data for the global DB Agent page.
+
+    ?db=<name> → single DB flat list; omit or __all__ → grouped by DB.
+    """
+    from web.app_settings import get_business_databases, get_business_database
     from web.db_manager import schema_tree
-    biz_schema = get_business_schema()
-    result = schema_tree(biz_url, biz_schema)
-    if "error" in result:
-        return jsonify({"error": _sanitize_db_error(result["error"])}), 400
-    # Hide platform tables if business DB == platform DB
-    result["tables"] = _hide_platform_tables(result["tables"], biz_url)
-    return jsonify(result)
+    db_name = (request.args.get("db") or "").strip() or None
+
+    if db_name and db_name != "__all__":
+        db = get_business_database(db_name)
+        if not db:
+            return jsonify({"error": f"找不到資料庫：{db_name}"}), 400
+        result = schema_tree(db["url"], None)
+        if "error" in result:
+            return jsonify({"error": _sanitize_db_error(result["error"])}), 400
+        result["tables"] = _hide_platform_tables(result["tables"], db["url"])
+        return jsonify(result)
+
+    # All DBs grouped
+    dbs = get_business_databases()
+    if not dbs:
+        return jsonify({"error": "尚未設定業務資料庫，請先至設定頁填入連線字串。"}), 400
+    databases = []
+    for db in dbs:
+        r = schema_tree(db["url"], None)
+        tables = r.get("tables", [])
+        tables = _hide_platform_tables(tables, db["url"])
+        databases.append({"name": db["name"], "tables": tables})
+    return jsonify({"databases": databases})
 
 
 @app.post("/api/db-agent/chat")
 def api_db_agent_chat():
     """Unified conversational endpoint: Q&A, data query, DDL suggestions."""
     global _db_agent
-    biz_url = _get_biz_db_url()
-    if not biz_url:
+    from web.app_settings import get_business_databases
+    if not get_business_databases():
         return jsonify({"error": "尚未設定業務資料庫，請先至設定頁填入連線字串。"}), 400
 
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
+    db_name = (data.get("db_name") or "").strip() or None
     if not message:
         return jsonify({"error": "message required"}), 400
     if len(message) > 2000:
         return jsonify({"error": "訊息過長（上限 2000 字）"}), 400
 
-    tables, schema_text = _get_biz_schema_text()
+    schema_text = _biz_schema_text(db_name)
 
     with _db_agent_lock:
         if _db_agent is None:
             _db_agent = DbAgent()
         agent = _db_agent
 
-    reply, query_sql, ddl = agent.chat(message, schema_text)
+    reply, query, ddl = agent.chat(message, schema_text)
 
-    result = {"reply": reply, "ddl_suggestion": ddl, "query_result": None}
+    result = {"reply": reply, "ddl_suggestion": None, "query_result": None}
 
-    if query_sql:
-        from web.db_manager import execute_query, _check_sql
-        safety_err = _check_sql(query_sql)
-        if safety_err:
-            result["query_error"] = f"產生的查詢不安全（{safety_err}）"
+    if query:
+        # Resolve DB: tag db attr > selected db_name > first DB
+        target_name = query["db"] or (db_name if db_name != "__all__" else None)
+        target_url = _resolve_biz_url(target_name)
+        if not target_url:
+            result["query_error"] = "無法確定查詢目標資料庫，請在選擇器中選擇特定資料庫後再試。"
         else:
-            qr = execute_query(biz_url, query_sql)
-            if "error" in qr:
-                result["query_error"] = _sanitize_db_error(qr["error"])
+            from web.db_manager import execute_query, _check_sql
+            safety_err = _check_sql(query["sql"])
+            if safety_err:
+                result["query_error"] = f"產生的查詢不安全（{safety_err}）"
             else:
-                result["query_result"] = qr
-                result["query_sql"] = query_sql
+                qr = execute_query(target_url, query["sql"])
+                if "error" in qr:
+                    result["query_error"] = _sanitize_db_error(qr["error"])
+                else:
+                    result["query_result"] = qr
+                    result["query_sql"] = query["sql"]
+                    if query["db"]:
+                        result["query_db"] = query["db"]
 
-    logger.info("db_agent chat", extra={"has_ddl": bool(ddl), "has_query": bool(query_sql)})
-    activity_log.record("db_agent_chat", None, {"has_ddl": bool(ddl), "has_query": bool(query_sql)})
+    if ddl:
+        result["ddl_suggestion"] = ddl["sql"]
+        result["ddl_db"] = ddl["db"] or (db_name if db_name and db_name != "__all__" else None)
+
+    logger.info("db_agent chat", extra={"has_ddl": bool(ddl), "has_query": bool(query)})
+    activity_log.record("db_agent_chat", None, {"has_ddl": bool(ddl), "has_query": bool(query)})
     return jsonify(result)
 
 
 @app.post("/api/db-agent/query")
 def api_db_agent_query():
-    """Execute a manual read-only SQL query against the business DB."""
+    """Execute a manual read-only SQL query against a named business DB."""
     from web.db_manager import execute_query
-    biz_url = _get_biz_db_url()
-    if not biz_url:
-        return jsonify({"error": "尚未設定業務資料庫"}), 400
     data = request.get_json(silent=True) or {}
+    db_name = (data.get("db_name") or "").strip() or None
     sql = (data.get("sql") or "").strip()
     if not sql:
         return jsonify({"error": "sql required"}), 400
+    biz_url = _resolve_biz_url(db_name)
+    if not biz_url:
+        return jsonify({"error": "尚未設定業務資料庫，或找不到指定的資料庫"}), 400
     result = execute_query(biz_url, sql)
     if "error" in result:
         result["error"] = _sanitize_db_error(result["error"])
@@ -1041,7 +1111,7 @@ def api_db_agent_query():
 
 @app.post("/api/db-agent/execute-ddl")
 def api_db_agent_execute_ddl():
-    """Validate and execute a confirmed DDL suggestion against the business DB.
+    """Validate and execute a confirmed DDL suggestion against a named business DB.
 
     # TODO(auth): When user roles are implemented, this route should create a
     # pending change request instead of executing immediately. The request goes
@@ -1049,13 +1119,14 @@ def api_db_agent_execute_ddl():
     """
     from web.ddl_guard import check_ddl_safety
     from web.ddl_executor import execute_ddl
-    biz_url = _get_biz_db_url()
-    if not biz_url:
-        return jsonify({"error": "尚未設定業務資料庫"}), 400
     data = request.get_json(silent=True) or {}
+    db_name = (data.get("db_name") or "").strip() or None
     ddl = (data.get("ddl") or "").strip()
     if not ddl:
         return jsonify({"error": "ddl required"}), 400
+    biz_url = _resolve_biz_url(db_name)
+    if not biz_url:
+        return jsonify({"error": "尚未設定業務資料庫，或找不到指定的資料庫"}), 400
 
     safety_err = check_ddl_safety(ddl)
     if safety_err:

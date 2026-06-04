@@ -8,6 +8,7 @@
   const clearBtn = document.getElementById('da-clear-chat');
   const refreshBtn = document.getElementById('da-refresh-schema');
   const sidebarRefreshBtn = document.getElementById('da-sidebar-refresh');
+  const dbSelect = document.getElementById('da-db-select');
 
   if (!messagesEl) return; // no-db state, page shows redirect
 
@@ -43,52 +44,101 @@
     return `${note}<div style="overflow-x:auto;"><table class="workbench-result-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  function currentDb() {
+    return dbSelect ? dbSelect.value : '__all__';
+  }
+
+  // ── DB selector ───────────────────────────────────────────────────────────
+
+  function loadDatabases() {
+    if (!dbSelect) return;
+    fetch('/api/db-agent/databases')
+      .then(r => r.json())
+      .then(dbs => {
+        if (!Array.isArray(dbs) || !dbs.length) return;
+        dbSelect.innerHTML = '<option value="__all__">全部資料庫</option>' +
+          dbs.map(d => `<option value="${escHtml(d.name)}">${escHtml(d.name)}</option>`).join('');
+        dbSelect.style.display = dbs.length > 1 ? '' : 'none';
+      })
+      .catch(() => {});
+  }
+
+  if (dbSelect) {
+    dbSelect.addEventListener('change', loadSchemaTree);
+  }
+
   // ── Schema tree ───────────────────────────────────────────────────────────
+
+  function renderTableList(tables) {
+    if (!tables || !tables.length) return '<div class="workbench-sidebar-loading">（無資料表）</div>';
+    return tables.map(t => `
+      <div class="wb-tree-table">
+        <div class="wb-tree-table-name" data-table="${escHtml(t.name)}">
+          <span class="wb-tree-icon">▶</span>${escHtml(t.name)}
+        </div>
+        <div class="wb-tree-cols" style="display:none;">
+          ${(t.columns || []).map(col => `
+            <div class="wb-tree-col" title="${escHtml(col.type)}${col.is_pk ? ' · PK' : ''}${col.is_fk ? ' · FK→' + (col.fk_table || '') : ''}">
+              <span class="wb-tree-col-key">${col.is_pk ? '🔑' : col.is_fk ? '🔗' : ''}</span>
+              <span class="wb-tree-col-name">${escHtml(col.name)}</span>
+              <span class="wb-tree-col-type">${escHtml(col.type)}</span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+  }
+
+  function attachTreeEvents(container) {
+    container.querySelectorAll('.wb-tree-table-name').forEach(el => {
+      el.addEventListener('click', function () {
+        const cols = this.nextElementSibling;
+        const icon = this.querySelector('.wb-tree-icon');
+        const open = cols.style.display !== 'none';
+        cols.style.display = open ? 'none' : '';
+        if (icon) icon.textContent = open ? '▶' : '▼';
+      });
+    });
+  }
 
   function loadSchemaTree() {
     schemaTree.innerHTML = '<div class="workbench-sidebar-loading">載入中…</div>';
-    fetch('/api/db-agent/schema-tree')
+    const db = currentDb();
+    const url = '/api/db-agent/schema-tree' + (db && db !== '__all__' ? `?db=${encodeURIComponent(db)}` : '');
+    fetch(url)
       .then(r => r.json())
       .then(data => {
         if (data.error) {
           schemaTree.innerHTML = `<div class="workbench-sidebar-loading" style="color:var(--error);">${escHtml(data.error)}</div>`;
           return;
         }
-        const tables = data.tables || [];
-        if (!tables.length) {
-          schemaTree.innerHTML = '<div class="workbench-sidebar-loading">（無資料表）</div>';
-          return;
-        }
-        schemaTree.innerHTML = tables.map(t => `
-          <div class="wb-tree-table">
-            <div class="wb-tree-table-name" data-table="${escHtml(t.name)}">
-              <span class="wb-tree-icon">▶</span>${escHtml(t.name)}
-            </div>
-            <div class="wb-tree-cols" style="display:none;">
-              ${(t.columns || []).map(col => `
-                <div class="wb-tree-col" title="${escHtml(col.type)}${col.is_pk ? ' · PK' : ''}${col.is_fk ? ' · FK→' + (col.fk_table || '') : ''}">
-                  <span class="wb-tree-col-key">${col.is_pk ? '🔑' : col.is_fk ? '🔗' : ''}</span>
-                  <span class="wb-tree-col-name">${escHtml(col.name)}</span>
-                  <span class="wb-tree-col-type">${escHtml(col.type)}</span>
-                </div>`).join('')}
-            </div>
-          </div>`).join('');
 
-        schemaTree.querySelectorAll('.wb-tree-table-name').forEach(el => {
-          el.addEventListener('click', function () {
-            const cols = this.nextElementSibling;
-            const icon = this.querySelector('.wb-tree-icon');
-            const open = cols.style.display !== 'none';
-            cols.style.display = open ? 'none' : '';
-            if (icon) icon.textContent = open ? '▶' : '▼';
-          });
-        });
+        if (data.databases) {
+          // Multi-DB grouped view
+          if (!data.databases.length) {
+            schemaTree.innerHTML = '<div class="workbench-sidebar-loading">（無資料庫）</div>';
+            return;
+          }
+          schemaTree.innerHTML = data.databases.map(db => `
+            <div class="wb-tree-db-group">
+              <div class="wb-tree-db-header">${escHtml(db.name)}</div>
+              ${renderTableList(db.tables)}
+            </div>`).join('');
+        } else {
+          // Single DB flat view
+          const tables = data.tables || [];
+          if (!tables.length) {
+            schemaTree.innerHTML = '<div class="workbench-sidebar-loading">（無資料表）</div>';
+            return;
+          }
+          schemaTree.innerHTML = renderTableList(tables);
+        }
+        attachTreeEvents(schemaTree);
       })
       .catch(() => {
         schemaTree.innerHTML = '<div class="workbench-sidebar-loading" style="color:var(--error);">載入失敗</div>';
       });
   }
 
+  loadDatabases();
   loadSchemaTree();
   if (sidebarRefreshBtn) sidebarRefreshBtn.addEventListener('click', loadSchemaTree);
   if (refreshBtn) refreshBtn.addEventListener('click', loadSchemaTree);
@@ -106,11 +156,12 @@
     const thinkingId = 'da-thinking-' + Date.now();
     appendBubble('⟳ 思考中…', 'thinking', thinkingId);
 
+    const db = currentDb();
     try {
       const res = await fetch('/api/db-agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, db_name: db }),
       });
       const data = await res.json();
       removeById(thinkingId);
@@ -127,10 +178,10 @@
       if (data.query_result) {
         const wrapper = document.createElement('div');
         wrapper.className = 'da-bubble da-bubble-ai';
-        if (data.query_sql) {
+        if (data.query_db || data.query_sql) {
           const sqlPre = document.createElement('div');
           sqlPre.className = 'da-query-sql';
-          sqlPre.textContent = data.query_sql;
+          sqlPre.textContent = (data.query_db ? `[${data.query_db}] ` : '') + (data.query_sql || '');
           wrapper.appendChild(sqlPre);
         }
         const resultDiv = document.createElement('div');
@@ -146,7 +197,7 @@
 
       // DDL suggestion
       if (data.ddl_suggestion) {
-        appendDdlBlock(data.ddl_suggestion);
+        appendDdlBlock(data.ddl_suggestion, data.ddl_db);
       }
     } catch (e) {
       removeById(thinkingId);
@@ -159,13 +210,13 @@
 
   // ── DDL block ─────────────────────────────────────────────────────────────
 
-  function appendDdlBlock(ddl) {
+  function appendDdlBlock(ddl, ddlDb) {
     const block = document.createElement('div');
     block.className = 'da-ddl-block';
 
     const label = document.createElement('div');
     label.className = 'da-ddl-label';
-    label.textContent = 'AI 建議的 DDL（請確認後執行）：';
+    label.textContent = 'AI 建議的 DDL（請確認後執行）：' + (ddlDb ? ` [目標：${ddlDb}]` : '');
     block.appendChild(label);
 
     const pre = document.createElement('pre');
@@ -200,7 +251,7 @@
         const res = await fetch('/api/db-agent/execute-ddl', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ddl }),
+          body: JSON.stringify({ ddl, db_name: ddlDb || currentDb() }),
         });
         const data = await res.json();
         if (data.ok) {

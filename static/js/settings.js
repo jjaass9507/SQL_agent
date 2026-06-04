@@ -40,8 +40,7 @@ async function loadStatus() {
     const data = await res.json();
     renderStatus(data);
     if (data.platform_schema) platformSchemaInput.value = data.platform_schema;
-    renderBizStatus(data);
-    if (data.biz_schema) bizSchemaInput.value = data.biz_schema;
+    renderBizList(data.business_databases || []);
   } catch (e) {
     statusEl.textContent = '無法載入狀態';
   }
@@ -86,65 +85,79 @@ clearBtn.addEventListener('click', () => {
   }
 });
 
-// ── Business DB ───────────────────────────────────────────────────────────────
+// ── Business DBs (multi-named) ────────────────────────────────────────────────
 
-const bizStatusEl = document.getElementById('biz-status');
+const bizListEl = document.getElementById('biz-db-list');
+const bizNameInput = document.getElementById('biz-name-input');
 const bizUrlInput = document.getElementById('biz-url-input');
-const bizSchemaInput = document.getElementById('biz-schema-input');
 const bizMsgEl = document.getElementById('biz-msg');
-const bizSaveBtn = document.getElementById('biz-save');
-const bizClearBtn = document.getElementById('biz-clear');
+const bizAddBtn = document.getElementById('biz-add');
 
-function renderBizStatus(data) {
-  if (data.biz_configured) {
-    bizStatusEl.innerHTML =
-      '<span class="settings-badge settings-badge-pg">● 已設定</span>' +
-      '<span class="settings-mono">' + escHtml(data.biz_masked_url) + '</span>' +
-      (data.biz_schema && data.biz_schema !== 'public'
-        ? '<span class="settings-mono" style="margin-left:8px;">schema: ' + escHtml(data.biz_schema) + '</span>'
-        : '');
-  } else {
-    bizStatusEl.innerHTML =
-      '<span class="settings-badge settings-badge-json">● 未設定</span>';
+function renderBizList(dbs) {
+  if (!dbs || !dbs.length) {
+    bizListEl.innerHTML = '<div style="font-size:13px;color:var(--muted);padding:4px 0;">尚未設定任何業務資料庫</div>';
+    return;
   }
+  bizListEl.innerHTML = dbs.map(db => `
+    <div class="settings-db-row" data-name="${escHtml(db.name)}">
+      <span class="settings-badge settings-badge-pg">●</span>
+      <span style="font-weight:600;min-width:100px;">${escHtml(db.name)}</span>
+      <span class="settings-mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;">${escHtml(db.masked_url)}</span>
+      <button class="btn btn-ghost btn-sm biz-remove-btn" data-name="${escHtml(db.name)}">移除</button>
+    </div>
+  `).join('');
+
+  bizListEl.querySelectorAll('.biz-remove-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.name;
+      if (!confirm(`移除資料庫「${name}」？助手將不再能互動此資料庫。`)) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/settings/business-db', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || '移除失敗');
+        } else {
+          renderBizList(data.business_databases || []);
+        }
+      } catch (e) {
+        alert('連線發生錯誤');
+      }
+    });
+  });
 }
 
-async function saveBiz(url) {
-  bizSaveBtn.disabled = true;
-  bizClearBtn.disabled = true;
+bizAddBtn.addEventListener('click', async () => {
+  const name = bizNameInput.value.trim();
+  const url = bizUrlInput.value.trim();
   bizMsgEl.className = 'settings-msg hidden';
-  const schema = (bizSchemaInput.value || '').trim() || 'public';
+  if (!name) { showMsg(bizMsgEl, '請填入資料庫名稱', false); return; }
+  if (!url) { showMsg(bizMsgEl, '請填入連線字串', false); return; }
+
+  bizAddBtn.disabled = true;
   try {
     const res = await fetch('/api/settings/business-db', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ database_url: url, schema }),
+      body: JSON.stringify({ name, url }),
     });
     const data = await res.json();
     if (!res.ok) {
-      showMsg(bizMsgEl, data.error || '儲存失敗', false);
+      showMsg(bizMsgEl, data.error || '新增失敗', false);
     } else {
-      renderBizStatus(data);
+      renderBizList(data.business_databases || []);
+      bizNameInput.value = '';
       bizUrlInput.value = '';
-      showMsg(bizMsgEl, url ? '業務資料庫已設定，助手將開始學習此資料庫。' : '已清除業務資料庫設定。', true);
+      showMsg(bizMsgEl, `已新增「${name}」，助手正在學習此資料庫的結構。`, true);
     }
   } catch (e) {
     showMsg(bizMsgEl, '連線發生錯誤', false);
   } finally {
-    bizSaveBtn.disabled = false;
-    bizClearBtn.disabled = false;
-  }
-}
-
-bizSaveBtn.addEventListener('click', () => {
-  const url = bizUrlInput.value.trim();
-  if (!url) { showMsg(bizMsgEl, '請先填入連線字串', false); return; }
-  saveBiz(url);
-});
-
-bizClearBtn.addEventListener('click', () => {
-  if (confirm('清除業務資料庫設定後，助手將無法互動。確定？')) {
-    saveBiz('');
+    bizAddBtn.disabled = false;
   }
 });
 

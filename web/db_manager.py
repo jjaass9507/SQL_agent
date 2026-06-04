@@ -145,11 +145,16 @@ def get_table_ddl(db_url: str, table_name: str, schema: str = "public") -> dict:
         return {"error": str(exc)[:300]}
 
 
-def schema_tree(db_url: str, schema: str = "public") -> dict:
+def schema_tree(db_url: str, schema: str | None = "public") -> dict:
     """
-    Return tables + columns (with PK/FK flags and row-count estimate) for the
-    workbench schema browser. Returns {"tables": [...]} or {"error": "..."}.
+    Return tables + columns (with PK/FK flags) for the schema browser.
+    schema=None → all non-system schemas; non-public tables shown as "schema.table".
+    Returns {"tables": [...]} or {"error": "..."}.
     """
+    from web.db_introspect import _list_user_schemas
+
+    schemas_to_query = [schema] if schema is not None else _list_user_schemas(db_url)
+
     sql = """
         SELECT c.table_name, c.column_name, c.data_type,
                c.character_maximum_length, c.is_nullable,
@@ -182,29 +187,32 @@ def schema_tree(db_url: str, schema: str = "public") -> dict:
         WHERE c.table_schema = %(schema)s
         ORDER BY c.table_name, c.ordinal_position
     """
+
+    all_tables: dict = {}
     try:
         import psycopg2
         conn = psycopg2.connect(db_url, connect_timeout=10)
         with conn.cursor() as cur:
-            cur.execute(sql, {"schema": schema})
-            rows = cur.fetchall()
+            for s in schemas_to_query:
+                cur.execute(sql, {"schema": s})
+                rows = cur.fetchall()
+                for tname, cname, dtype, maxlen, nullable, is_pk, is_fk, fk_table in rows:
+                    display_name = f"{s}.{tname}" if s != "public" else tname
+                    t = all_tables.setdefault(display_name, {"name": display_name, "columns": []})
+                    type_str = f"{dtype}({maxlen})" if maxlen else dtype
+                    t["columns"].append({
+                        "name": cname,
+                        "type": type_str,
+                        "nullable": nullable == "YES",
+                        "is_pk": bool(is_pk),
+                        "is_fk": bool(is_fk),
+                        "fk_table": fk_table,
+                    })
         conn.close()
     except Exception as exc:
         return {"error": str(exc)[:300]}
 
-    tables: dict = {}
-    for tname, cname, dtype, maxlen, nullable, is_pk, is_fk, fk_table in rows:
-        t = tables.setdefault(tname, {"name": tname, "columns": []})
-        type_str = f"{dtype}({maxlen})" if maxlen else dtype
-        t["columns"].append({
-            "name": cname,
-            "type": type_str,
-            "nullable": nullable == "YES",
-            "is_pk": bool(is_pk),
-            "is_fk": bool(is_fk),
-            "fk_table": fk_table,
-        })
-    return {"tables": list(tables.values())}
+    return {"tables": list(all_tables.values())}
 
 
 def explain_query(db_url: str, sql: str) -> dict:
