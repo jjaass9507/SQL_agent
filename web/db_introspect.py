@@ -200,7 +200,8 @@ def format_context(tables: list[TableSpec]) -> str:
                     flags.append("UNIQUE")
                 flag_str = f" ({', '.join(flags)})" if flags else ""
                 type_str = f"{c.data_type}({c.length})" if c.length else c.data_type
-                lines.append(f"  {c.name}: {type_str}{flag_str}")
+                desc_str = f" — {c.description}" if c.description else ""
+                lines.append(f"  {c.name}: {type_str}{flag_str}{desc_str}")
     elif n <= 30:
         # Compact: only PK/FK/UNIQUE columns; skip plain ones
         for t in tables:
@@ -216,7 +217,8 @@ def format_context(tables: list[TableSpec]) -> str:
                 if c.is_unique:
                     flags.append("UNIQUE")
                 type_str = f"{c.data_type}({c.length})" if c.length else c.data_type
-                lines.append(f"  {c.name}: {type_str} ({', '.join(flags)})")
+                desc_str = f" — {c.description}" if c.description else ""
+                lines.append(f"  {c.name}: {type_str} ({', '.join(flags)}){desc_str}")
     else:
         # Ultra-compact: table name + column count + FK targets only
         for t in tables:

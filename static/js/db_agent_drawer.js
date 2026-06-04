@@ -114,9 +114,10 @@
       if (data.reply) appendBubble(data.reply, 'ai');
 
       if (data.query_result) {
+        const rowCount = (data.query_result.rows || []).length;
         const wrapper = document.createElement('div');
         wrapper.className = 'sc-bubble sc-bubble-ai';
-        wrapper.innerHTML = renderResultTable(data.query_result);
+        wrapper.innerHTML = `查詢完成（${rowCount} 筆）— 前往 <a href="/db-agent" style="color:var(--accent);">完整頁面</a> 查看結果`;
         messagesEl.appendChild(wrapper);
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
@@ -140,6 +141,7 @@
     ddlResult.className = 'schema-chat-ddl-result';
     ddlRunBtn.disabled = false;
     ddlRunBtn.textContent = '執行 DDL';
+    ddlRunBtn.style.display = '';
     ddlConfirm.style.display = '';
     ddlConfirm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     ddlRunBtn.onclick = () => executeDdl(ddl, ddlDb);
@@ -163,15 +165,17 @@
       if (data.ok) {
         ddlResult.textContent = `✓ 已執行 ${data.statements_run} 條語句`;
         ddlResult.classList.add('ok');
+        ddlRunBtn.style.display = 'none';
         appendBubble(`✓ DDL 執行成功（${data.statements_run} 條語句）`, 'ai');
       } else {
         ddlResult.textContent = '✗ ' + (data.error || '執行失敗');
         ddlResult.classList.add('err');
+        ddlRunBtn.disabled = false;
+        ddlRunBtn.textContent = '執行 DDL';
       }
     } catch (e) {
       ddlResult.textContent = '✗ 連線失敗';
       ddlResult.classList.add('err');
-    } finally {
       ddlRunBtn.disabled = false;
       ddlRunBtn.textContent = '執行 DDL';
     }

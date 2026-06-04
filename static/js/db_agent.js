@@ -9,6 +9,10 @@
   const refreshBtn = document.getElementById('da-refresh-schema');
   const sidebarRefreshBtn = document.getElementById('da-sidebar-refresh');
   const dbSelect = document.getElementById('da-db-select');
+  const resultsPanel = document.getElementById('da-results-panel');
+  const resultsList = document.getElementById('da-results-list');
+  const resultsClearBtn = document.getElementById('da-results-clear');
+  const designPanel = document.getElementById('da-design-panel');
 
   if (!messagesEl) return; // no-db state, page shows redirect
 
@@ -112,7 +116,6 @@
         }
 
         if (data.databases) {
-          // Multi-DB grouped view
           if (!data.databases.length) {
             schemaTree.innerHTML = '<div class="workbench-sidebar-loading">（無資料庫）</div>';
             return;
@@ -123,7 +126,6 @@
               ${renderTableList(db.tables)}
             </div>`).join('');
         } else {
-          // Single DB flat view
           const tables = data.tables || [];
           if (!tables.length) {
             schemaTree.innerHTML = '<div class="workbench-sidebar-loading">（無資料表）</div>';
@@ -171,33 +173,28 @@
         return;
       }
 
-      // Plain reply bubble
       if (data.reply) appendBubble(data.reply, 'ai');
 
-      // Query result
+      // Query result → separate results panel
       if (data.query_result) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'da-bubble da-bubble-ai';
-        if (data.query_db || data.query_sql) {
-          const sqlPre = document.createElement('div');
-          sqlPre.className = 'da-query-sql';
-          sqlPre.textContent = (data.query_db ? `[${data.query_db}] ` : '') + (data.query_sql || '');
-          wrapper.appendChild(sqlPre);
-        }
-        const resultDiv = document.createElement('div');
-        resultDiv.className = 'da-query-result';
-        resultDiv.innerHTML = renderResultTable(data.query_result);
-        wrapper.appendChild(resultDiv);
-        messagesEl.appendChild(wrapper);
+        const cardId = appendResultCard(data.query_result, data.query_sql, data.query_db);
+        const rowCount = (data.query_result.rows || []).length;
+        const refBubble = document.createElement('div');
+        refBubble.className = 'da-bubble da-bubble-ai';
+        refBubble.innerHTML = `查詢完成（${rowCount} 筆）— <a href="#${cardId}" class="da-result-link">↓ 見下方結果</a>`;
+        messagesEl.appendChild(refBubble);
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
       if (data.query_error) {
         appendBubble('查詢錯誤：' + data.query_error, 'error');
       }
 
-      // DDL suggestion
       if (data.ddl_suggestion) {
         appendDdlBlock(data.ddl_suggestion, data.ddl_db);
+      }
+
+      if (data.design_session) {
+        openDesignPanel(data.design_session);
       }
     } catch (e) {
       removeById(thinkingId);
@@ -257,21 +254,131 @@
         if (data.ok) {
           resultEl.textContent = `✓ 已執行 ${data.statements_run} 條語句`;
           resultEl.classList.add('ok');
+          runBtn.style.display = 'none';
           loadSchemaTree();
         } else {
           resultEl.textContent = '✗ ' + (data.error || '執行失敗');
           resultEl.classList.add('err');
+          runBtn.disabled = false;
+          runBtn.textContent = '執行 DDL';
         }
       } catch (e) {
         resultEl.textContent = '✗ 連線失敗';
         resultEl.classList.add('err');
-      } finally {
         runBtn.disabled = false;
         runBtn.textContent = '執行 DDL';
       }
     });
 
     dismissBtn.addEventListener('click', () => { block.remove(); });
+  }
+
+  // ── Results panel ─────────────────────────────────────────────────────────
+
+  function appendResultCard(result, sql, dbName) {
+    if (!resultsPanel || !resultsList) return 'da-result-0';
+    resultsPanel.style.display = '';
+
+    const cardId = 'da-result-' + Date.now();
+    const card = document.createElement('div');
+    card.className = 'da-result-card';
+    card.id = cardId;
+
+    const rowCount = (result.rows || []).length;
+    const header = document.createElement('div');
+    header.className = 'da-result-card-header';
+    header.innerHTML = `
+      <span class="da-result-meta">${dbName ? `[${escHtml(dbName)}] ` : ''}${rowCount} 筆</span>
+      <button class="btn btn-ghost btn-sm da-result-csv-btn" title="匯出 CSV">↓ CSV</button>`;
+    card.appendChild(header);
+
+    if (sql) {
+      const sqlDiv = document.createElement('div');
+      sqlDiv.className = 'da-result-sql';
+      sqlDiv.textContent = sql;
+      card.appendChild(sqlDiv);
+    }
+
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'da-result-table-wrap';
+    tableWrap.innerHTML = renderResultTable(result);
+    card.appendChild(tableWrap);
+
+    resultsList.appendChild(card);
+
+    header.querySelector('.da-result-csv-btn').addEventListener('click', () => downloadCsv(result, dbName));
+    setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+    return cardId;
+  }
+
+  function downloadCsv(result, dbName) {
+    const cols = result.columns || [];
+    const rows = result.rows || [];
+    const escape = s => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+    const lines = [cols.map(escape).join(',')];
+    rows.forEach(row => lines.push(row.map(escape).join(',')));
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (dbName ? dbName + '_' : '') + 'result.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  if (resultsClearBtn) {
+    resultsClearBtn.addEventListener('click', () => {
+      if (resultsList) resultsList.innerHTML = '';
+      if (resultsPanel) resultsPanel.style.display = 'none';
+    });
+  }
+
+  // ── Design panel ──────────────────────────────────────────────────────────
+
+  function openDesignPanel(ds) {
+    if (!designPanel) return;
+    const titleEl = document.getElementById('da-design-title');
+    const replyEl = document.getElementById('da-design-reply');
+    const tablesEl = document.getElementById('da-design-tables');
+    const linkEl = document.getElementById('da-design-open-link');
+
+    if (titleEl) titleEl.textContent = ds.title || '資料表設計';
+    if (replyEl) replyEl.textContent = ds.reply || '';
+    if (linkEl) {
+      linkEl.href = ds.tables_ready
+        ? `/sessions/${ds.id}/confirm`
+        : `/sessions/${ds.id}/chat`;
+    }
+    if (tablesEl) {
+      if (ds.tables_ready && ds.tables && ds.tables.length) {
+        tablesEl.innerHTML = ds.tables.map(t => `
+          <div class="da-design-table-card">
+            <div class="da-design-table-name">${escHtml(t.table_name)}</div>
+            ${t.description ? `<div class="da-design-table-desc">${escHtml(t.description)}</div>` : ''}
+            <div class="da-design-table-cols">${(t.columns || []).slice(0, 6).map(c =>
+              `<span class="da-design-col">${escHtml(c.name)}: ${escHtml(c.data_type)}</span>`
+            ).join('')}${(t.columns || []).length > 6
+              ? `<span class="da-design-col" style="color:var(--muted)">+${t.columns.length - 6} 欄</span>` : ''}</div>
+          </div>`).join('');
+      } else {
+        tablesEl.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0;">正在整理需求中…</div>';
+      }
+    }
+
+    designPanel.style.display = '';
+    designPanel.setAttribute('aria-hidden', 'false');
+  }
+
+  const designCloseBtn = document.getElementById('da-design-close');
+  if (designCloseBtn) {
+    designCloseBtn.addEventListener('click', () => {
+      if (designPanel) {
+        designPanel.style.display = 'none';
+        designPanel.setAttribute('aria-hidden', 'true');
+      }
+    });
   }
 
   // ── Clear chat ────────────────────────────────────────────────────────────

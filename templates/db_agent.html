@@ -72,6 +72,29 @@
         </div>
       </div>
     </div>
+
+    <!-- Query results panel (appears below layout when queries run) -->
+    <div id="da-results-panel" class="da-results-panel" style="display:none;">
+      <div class="da-results-header">
+        <span class="da-results-title">查詢結果</span>
+        <button id="da-results-clear" class="btn btn-ghost btn-sm">✕ 清除</button>
+      </div>
+      <div id="da-results-list" class="da-results-list"></div>
+    </div>
+
+    <!-- Design panel (fixed right slide-in) -->
+    <div id="da-design-panel" class="da-design-panel" style="display:none;" aria-hidden="true">
+      <div class="da-design-panel-header">
+        <span>設計面板</span>
+        <button id="da-design-close" class="btn btn-ghost btn-sm" title="關閉">✕</button>
+      </div>
+      <div id="da-design-title" class="da-design-title"></div>
+      <div id="da-design-reply" class="da-design-reply"></div>
+      <div id="da-design-tables" class="da-design-tables"></div>
+      <div class="da-design-actions">
+        <a id="da-design-open-link" href="#" class="btn btn-primary btn-sm" target="_blank">開啟完整設計 →</a>
+      </div>
+    </div>
     {% endif %}
   </div>
 </div>

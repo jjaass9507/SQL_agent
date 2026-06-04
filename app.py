@@ -61,7 +61,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_incremental, run_memory_sync, run_review, run_single_file, run_business_db_memory_sync, EXTRA_FILES
+from web.generation_worker import run_generation, run_incremental, run_review, run_single_file, run_business_db_memory_sync, EXTRA_FILES
 from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
@@ -398,9 +398,8 @@ def api_create_session():
     if mode == "review" and context_tables_json and not db_error:
         run_review(session["id"])
 
-    # Any session that imported an existing DB pushes its structure to shared knowledge
-    if context_text and not db_error:
-        run_memory_sync(session["id"])
+    # Business DB memory is maintained separately via run_business_db_memory_sync;
+    # workbench sessions no longer push to shared knowledge to avoid overlap.
 
     logger.info("session created", extra={"session_id": session["id"], "mode": mode, "phase": session["phase"]})
     activity_log.record("session_created", session["id"],
@@ -473,7 +472,6 @@ def api_import_db(session_id):
     update_session(session_id, import_updates)
     with _interviewer_lock:
         _interviewer_store.pop(session_id, None)
-    run_memory_sync(session_id)  # push refreshed structure to shared knowledge
     logger.info("import-db succeeded", extra={"session_id": session_id, "table_count": len(tables)})
     return jsonify({"imported": len(tables), "tables": [t.table_name for t in tables]})
 
@@ -1056,7 +1054,7 @@ def api_db_agent_chat():
             _db_agent = DbAgent()
         agent = _db_agent
 
-    reply, query, ddl = agent.chat(message, schema_text)
+    reply, query, ddl, design_request = agent.chat(message, schema_text)
 
     result = {"reply": reply, "ddl_suggestion": None, "query_result": None}
 
@@ -1085,7 +1083,30 @@ def api_db_agent_chat():
         result["ddl_suggestion"] = ddl["sql"]
         result["ddl_db"] = ddl["db"] or (db_name if db_name and db_name != "__all__" else None)
 
-    logger.info("db_agent chat", extra={"has_ddl": bool(ddl), "has_query": bool(query)})
+    if design_request:
+        session = create_session(design_request[:80], mode="design")
+        sid = session["id"]
+        add_message(sid, "user", design_request)
+        interviewer = _get_interviewer(sid)
+        i_reply, tables, summary = interviewer.chat(design_request)
+        add_message(sid, "ai", i_reply)
+        tables_json = None
+        if tables:
+            set_tables(sid, tables, summary or [])
+            tables_json = [
+                {"table_name": t.table_name, "description": t.description,
+                 "columns": [{"name": c.name, "data_type": c.data_type} for c in t.columns]}
+                for t in tables
+            ]
+        result["design_session"] = {
+            "id": sid,
+            "title": design_request[:80],
+            "reply": i_reply,
+            "tables_ready": tables is not None,
+            "tables": tables_json,
+        }
+
+    logger.info("db_agent chat", extra={"has_ddl": bool(ddl), "has_query": bool(query), "has_design": bool(design_request)})
     activity_log.record("db_agent_chat", None, {"has_ddl": bool(ddl), "has_query": bool(query)})
     return jsonify(result)
 

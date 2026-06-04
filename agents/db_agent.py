@@ -6,6 +6,7 @@ _PROMPT_TEMPLATE = (Path(__file__).parent.parent / "prompts" / "db_agent.txt").r
 # Support optional db="name" attribute: <QUERY db="mydb">...</QUERY>
 _QUERY_TAG_RE = re.compile(r'<QUERY(?:\s+db="([^"]*)")?>(.*?)</QUERY>', re.DOTALL)
 _DDL_TAG_RE = re.compile(r'<DDL_SUGGESTION(?:\s+db="([^"]*)")?>(.*?)</DDL_SUGGESTION>', re.DOTALL)
+_DESIGN_TAG_RE = re.compile(r'<DESIGN_REQUEST>(.*?)</DESIGN_REQUEST>', re.DOTALL)
 _FENCE_RE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
@@ -25,11 +26,13 @@ class DbAgent:
         self._api = get_api()
         self._history: list[dict] = []
 
-    def chat(self, user_message: str, schema_text: str) -> tuple[str, dict | None, dict | None]:
+    def chat(self, user_message: str, schema_text: str) -> tuple[str, dict | None, dict | None, str | None]:
         """Send a message.
 
-        Returns (display_text, query_or_None, ddl_or_None).
+        Returns (display_text, query_or_None, ddl_or_None, design_request_or_None).
         query/ddl are {"db": name_or_None, "sql": sql_string} when present.
+        design_request is a plain-text description when the user wants to design
+        new tables — caller should create a design session for it.
         schema_text is passed fresh on every call so the agent always has
         the latest structure (e.g. after the user executes a DDL change).
         """
@@ -50,10 +53,11 @@ class DbAgent:
             human_prompt=user_message,
         )
         if not response_text:
-            return "抱歉，無法取得回應，請稍後再試。", None, None
+            return "抱歉，無法取得回應，請稍後再試。", None, None, None
 
         query_match = _QUERY_TAG_RE.search(response_text)
         ddl_match = _DDL_TAG_RE.search(response_text)
+        design_match = _DESIGN_TAG_RE.search(response_text)
 
         query = None
         if query_match:
@@ -69,7 +73,11 @@ class DbAgent:
                 "sql": ddl_match.group(2).strip(),
             }
 
-        clean_text = _DDL_TAG_RE.sub("", _QUERY_TAG_RE.sub("", response_text)).strip()
+        design_request = design_match.group(1).strip() if design_match else None
+
+        clean_text = _DESIGN_TAG_RE.sub(
+            "", _DDL_TAG_RE.sub("", _QUERY_TAG_RE.sub("", response_text))
+        ).strip()
 
         self._history.append({"role": "assistant", "content": clean_text})
-        return clean_text, query, ddl
+        return clean_text, query, ddl, design_request
