@@ -9,6 +9,41 @@
 </head>
 <body>
 {% block body %}{% endblock %}
+
+{% if not hide_global_agent_drawer %}
+<!-- Global DB Agent floating button + drawer (every page except /db-agent itself) -->
+<button class="db-agent-fab" id="gda-fab" title="資料庫助手">🤖</button>
+
+<div id="gda-panel" class="schema-chat-panel" aria-hidden="true">
+  <div class="schema-chat-header">
+    <span class="schema-chat-title">🤖 資料庫助手</span>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <a href="/db-agent" style="font-size:11px;color:var(--accent);text-decoration:none;">完整頁面 →</a>
+      <button id="gda-close" class="schema-chat-close-btn" title="關閉">✕</button>
+    </div>
+  </div>
+  <div id="gda-messages" class="schema-chat-messages">
+    <div class="sc-bubble sc-bubble-ai">你好！我是資料庫助手。可以問我資料表結構、查詢資料，或討論資料表的新增與修改。</div>
+  </div>
+  <div id="gda-ddl-confirm" class="schema-chat-ddl-confirm" style="display:none;">
+    <div class="schema-chat-ddl-label">AI 建議的 DDL：</div>
+    <pre id="gda-ddl-code" class="schema-chat-ddl-pre"></pre>
+    <div class="schema-chat-ddl-actions">
+      <button id="gda-ddl-run" class="btn btn-primary btn-sm">執行 DDL</button>
+      <button id="gda-ddl-dismiss" class="btn btn-ghost btn-sm">取消</button>
+    </div>
+    <div id="gda-ddl-result" class="schema-chat-ddl-result"></div>
+  </div>
+  <div class="schema-chat-input-row">
+    <textarea id="gda-input" class="schema-chat-input"
+              placeholder="詢問資料庫，或描述你想建立/修改的資料表…" rows="2"></textarea>
+    <button id="gda-send" class="btn btn-primary btn-sm">送出</button>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/db_agent_drawer.js') }}"></script>
+{% endif %}
+
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -15,6 +15,7 @@
     <nav class="sidebar-nav">
       <a href="/"><span class="nav-icon">⊞</span> 工作台</a>
       <a href="/"><span class="nav-icon">◷</span> 所有專案</a>
+      <a href="/db-agent"><span class="nav-icon">🤖</span> 資料庫助手</a>
       <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">◱</span> 範本庫</a>
       <a href="/settings" class="active"><span class="nav-icon">⚙</span> 設定</a>
     </nav>
@@ -46,19 +47,49 @@
           <div id="backend-status" class="settings-status">載入中…</div>
         </div>
 
-        <!-- DB connection form -->
+        <!-- Platform DB connection form -->
         <div class="settings-card">
-          <div class="settings-card-title">資料庫連線字串</div>
+          <div class="settings-card-title">平台儲存資料庫</div>
           <p class="settings-hint">
-            填入要作為記憶使用的 PostgreSQL 連線字串。儲存時會測試連線並自動建立所需資料表。
+            填入要作為平台記憶使用的 PostgreSQL 連線字串。儲存時會測試連線並自動建立所需資料表。
           </p>
           <input class="modal-input" id="db-url-input" type="password"
                  placeholder="postgresql://user:password@host:5432/dbname"
                  autocomplete="new-password" style="font-family:var(--mono);font-size:13px;">
+          <div style="display:flex;gap:10px;margin-top:10px;align-items:center;">
+            <label style="font-size:12px;color:var(--muted);white-space:nowrap;">Schema：</label>
+            <input class="modal-input" id="platform-schema-input" type="text"
+                   placeholder="public" style="max-width:160px;font-family:var(--mono);font-size:13px;">
+            <span style="font-size:11px;color:var(--muted);">平台自身表格所在的 schema（預設 public）</span>
+          </div>
           <div id="settings-msg" class="settings-msg hidden"></div>
           <div style="display:flex;gap:10px;margin-top:14px;">
             <button class="btn btn-primary" id="settings-save">儲存並連線</button>
             <button class="btn btn-ghost" id="settings-clear">清除（改用本機儲存）</button>
+          </div>
+        </div>
+
+        <!-- Business DB -->
+        <div class="settings-card">
+          <div class="settings-card-title">業務資料庫（DB Agent 互動目標）</div>
+          <p class="settings-hint">
+            這是「資料庫助手」要對話的資料庫，與上方平台儲存庫分開管理。
+            儲存後助手會自動讀取此資料庫的結構作為記憶基礎。
+          </p>
+          <input class="modal-input" id="biz-url-input" type="password"
+                 placeholder="postgresql://user:password@host:5432/your_db"
+                 autocomplete="new-password" style="font-family:var(--mono);font-size:13px;">
+          <div style="display:flex;gap:10px;margin-top:10px;align-items:center;">
+            <label style="font-size:12px;color:var(--muted);white-space:nowrap;">Schema：</label>
+            <input class="modal-input" id="biz-schema-input" type="text"
+                   placeholder="public" style="max-width:160px;font-family:var(--mono);font-size:13px;">
+            <span style="font-size:11px;color:var(--muted);">要瀏覽的 schema（預設 public）</span>
+          </div>
+          <div id="biz-msg" class="settings-msg hidden"></div>
+          <div id="biz-status" class="settings-status" style="margin-bottom:10px;"></div>
+          <div style="display:flex;gap:10px;margin-top:4px;">
+            <button class="btn btn-primary" id="biz-save">儲存業務資料庫</button>
+            <button class="btn btn-ghost" id="biz-clear">清除</button>
           </div>
         </div>
 

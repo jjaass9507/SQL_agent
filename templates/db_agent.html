@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}資料庫助手 — SQL Agent{% endblock %}
+
+{# Hide the global drawer on this page — the full interface is already here #}
+{% set hide_global_agent_drawer = true %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-title"><span>SQL</span> Agent</div>
+      <div class="sidebar-logo-sub">資料庫設計助手</div>
+    </div>
+    <div class="sidebar-new-btn">
+      <a href="/">＋ 新建設計</a>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/"><span class="nav-icon">⊞</span> 工作台</a>
+      <a href="/"><span class="nav-icon">◷</span> 所有專案</a>
+      <a href="/db-agent" class="active"><span class="nav-icon">🤖</span> 資料庫助手</a>
+      <a href="#" class="nav-coming-soon" title="即將推出"><span class="nav-icon">◱</span> 範本庫</a>
+      <a href="/settings"><span class="nav-icon">⚙</span> 設定</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-avatar">PM</div>
+      <div>
+        <div class="sidebar-user-name">SQL Agent</div>
+        <div class="sidebar-user-email">內部工具</div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <div class="topbar">
+      <span class="topbar-title">🤖 資料庫助手</span>
+      <div class="topbar-spacer"></div>
+      <button id="da-refresh-schema" class="btn btn-ghost btn-sm" title="重新載入結構">↻ 重新整理結構</button>
+      <button id="da-clear-chat" class="btn btn-ghost btn-sm">🗑 清除對話</button>
+    </div>
+
+    {% if not has_biz_db %}
+    <div class="db-agent-no-db">
+      <div style="font-size:40px;">🔌</div>
+      <div>尚未設定業務資料庫</div>
+      <a href="/settings" class="btn btn-primary">前往設定頁 →</a>
+    </div>
+    {% else %}
+    <div class="db-agent-layout">
+      <!-- Schema browser -->
+      <div class="db-agent-sidebar">
+        <div class="db-agent-sidebar-header">
+          <span>結構</span>
+          <button class="workbench-refresh-btn" id="da-sidebar-refresh" title="重新載入">↻</button>
+        </div>
+        <div id="da-schema-tree" class="db-agent-schema-tree">
+          <div class="workbench-sidebar-loading">載入中…</div>
+        </div>
+      </div>
+
+      <!-- Chat area -->
+      <div class="db-agent-main">
+        <div id="da-messages" class="db-agent-messages">
+          <div class="da-bubble da-bubble-ai">你好！我是資料庫助手。你可以問我任何關於這個資料庫的問題，或是請我查詢資料、建議新增資料表。</div>
+        </div>
+        <div class="db-agent-input-row">
+          <textarea id="da-input" class="db-agent-input"
+                    placeholder="詢問資料庫結構、查詢資料，或描述你想新增/修改的資料表…" rows="2"></textarea>
+          <button id="da-send" class="btn btn-primary">送出</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/db_agent.js') }}"></script>
+{% endblock %}

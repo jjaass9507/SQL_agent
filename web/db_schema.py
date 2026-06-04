@@ -62,11 +62,18 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
 }
 
 
-def ensure_schema(engine) -> None:
+def ensure_schema(engine, platform_schema: str = "public") -> None:
     """Create missing tables and add any missing additive columns (idempotent).
 
     Uses inspection + plain ``ALTER TABLE ADD COLUMN`` so it works on both
-    PostgreSQL (production) and SQLite (tests), avoiding PG-only syntax."""
+    PostgreSQL (production) and SQLite (tests), avoiding PG-only syntax.
+
+    When platform_schema is not "public", creates the schema first so that
+    the engine's search_path (set in db_engine.py) lands the tables there.
+    Existing deployments using the default "public" schema are unaffected."""
+    if platform_schema and platform_schema != "public":
+        with engine.begin() as conn:
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {platform_schema}"))
     metadata.create_all(engine)
     insp = inspect(engine)
     table_names = set(insp.get_table_names())

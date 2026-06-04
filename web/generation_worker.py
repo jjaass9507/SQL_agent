@@ -157,6 +157,31 @@ def _memory_sync(session_id: str) -> None:
         logger.error("memory sync failed: %s", e, extra={"session_id": session_id})
 
 
+def run_business_db_memory_sync() -> None:
+    """Upload the business database structure to LLM memory (background)."""
+    thread = threading.Thread(target=_business_db_memory_sync, daemon=True)
+    thread.start()
+
+
+def _business_db_memory_sync() -> None:
+    from web.app_settings import get_business_database_url, get_business_schema
+    from web.db_introspect import extract_schema, format_context
+    from utils.client import get_api
+    biz_url = get_business_database_url()
+    if not biz_url:
+        return
+    biz_schema = get_business_schema()
+    tables, err = extract_schema(biz_url, biz_schema)
+    if err or not tables:
+        logger.warning("business_db_memory_sync: extract failed: %s", err)
+        return
+    context_text = format_context(tables)
+    try:
+        get_api().update_memory(context_text, filename="business_schema.txt")
+    except Exception as e:
+        logger.error("business_db_memory_sync failed: %s", e)
+
+
 def run_review(session_id: str) -> None:
     """Start background schema review for a 'review' mode session."""
     thread = threading.Thread(target=_review, args=(session_id,), daemon=True)

@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 from agents.interviewer import Interviewer
-from agents.schema_chat import SchemaChatAgent
+from agents.db_agent import DbAgent
 from web.session_store import (
     add_message,
     create_session,
@@ -67,8 +67,8 @@ from web import activity_log
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
 
-_schema_chat_store: dict[str, SchemaChatAgent] = {}
-_schema_chat_lock = threading.Lock()
+_db_agent: DbAgent | None = None
+_db_agent_lock = threading.Lock()
 
 
 def _hide_platform_tables(tables: list, db_url: str) -> list:
@@ -221,16 +221,31 @@ def settings_page():
     return render_template("settings.html")
 
 
+@app.get("/db-agent")
+def db_agent_page():
+    from web.app_settings import get_business_database_url
+    has_biz_db = bool(get_business_database_url())
+    return render_template("db_agent.html", has_biz_db=has_biz_db)
+
+
 # ── API routes ──────────────────────────────────────────
 
 @app.get("/api/settings")
 def api_get_settings():
-    from web.app_settings import get_database_url
+    from web.app_settings import (
+        get_database_url, get_platform_schema,
+        get_business_database_url, get_business_schema,
+    )
     url = get_database_url()
+    biz_url = get_business_database_url()
     return jsonify({
         "configured": bool(url),
         "backend": "postgresql" if url else "json",
         "masked_url": _mask_db_url(url),
+        "platform_schema": get_platform_schema(),
+        "biz_configured": bool(biz_url),
+        "biz_masked_url": _mask_db_url(biz_url),
+        "biz_schema": get_business_schema(),
     })
 
 
@@ -246,40 +261,87 @@ def api_activity():
 
 @app.post("/api/settings")
 def api_set_settings():
-    """Set (or clear) the database used as the platform's memory.
-
-    Saving a URL tests the connection and creates the session tables if needed;
-    sending an empty URL reverts to local JSON storage."""
+    """Set (or clear) the database used as the platform's memory."""
     from sqlalchemy import text
-    from web.app_settings import set_database_url
+    from web.app_settings import set_database_url, set_platform_schema, get_platform_schema
     from web.db_engine import get_engine
     from web.db_schema import ensure_schema
 
     data = request.get_json(silent=True) or {}
     url = (data.get("database_url") or "").strip()
+    platform_schema = (data.get("platform_schema") or "public").strip() or "public"
 
     if not url:
         set_database_url("")
+        set_platform_schema(platform_schema)
         logger.info("settings: database cleared, reverting to JSON memory")
-        return jsonify({"configured": False, "backend": "json", "masked_url": ""})
+        return jsonify({"configured": False, "backend": "json", "masked_url": "",
+                        "platform_schema": platform_schema})
 
     if not url.startswith(("postgresql://", "postgres://")):
         return jsonify({"error": "僅支援 PostgreSQL 連線字串（postgresql://...）"}), 400
 
     try:
         set_database_url(url)
+        set_platform_schema(platform_schema)
         engine = get_engine()
-        ensure_schema(engine)  # idempotent: create missing tables + add missing columns
+        ensure_schema(engine, platform_schema)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except Exception as e:
-        set_database_url("")  # roll back so the platform isn't stuck in a broken mode
+        set_database_url("")
         logger.warning("settings: db connection failed", extra={"err": str(e)[:200]})
         return jsonify({"error": f"連線失敗：{_sanitize_db_error(str(e))}"}), 400
 
     logger.info("settings: database configured as memory backend")
     activity_log.record("settings_db_configured", None, {"masked_url": _mask_db_url(url)})
-    return jsonify({"configured": True, "backend": "postgresql", "masked_url": _mask_db_url(url)})
+    return jsonify({"configured": True, "backend": "postgresql", "masked_url": _mask_db_url(url),
+                    "platform_schema": platform_schema})
+
+
+@app.post("/api/settings/business-db")
+def api_set_business_db():
+    """Set (or clear) the business database for the global DB Agent."""
+    from web.app_settings import (
+        set_business_database_url, set_business_schema,
+        get_business_database_url, get_business_schema,
+    )
+    data = request.get_json(silent=True) or {}
+    url = (data.get("database_url") or "").strip()
+    schema = (data.get("schema") or "public").strip() or "public"
+
+    if not url:
+        set_business_database_url("")
+        set_business_schema(schema)
+        # Reset in-memory agent so next chat picks fresh schema
+        global _db_agent
+        with _db_agent_lock:
+            _db_agent = None
+        return jsonify({"biz_configured": False, "biz_masked_url": "", "biz_schema": schema})
+
+    if not url.startswith(("postgresql://", "postgres://")):
+        return jsonify({"error": "僅支援 PostgreSQL 連線字串（postgresql://...）"}), 400
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(url, connect_timeout=10)
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": f"連線失敗：{_sanitize_db_error(str(e))}"}), 400
+
+    set_business_database_url(url)
+    set_business_schema(schema)
+    # Reset agent so next chat loads fresh schema from new DB
+    with _db_agent_lock:
+        _db_agent = None
+
+    # Trigger background memory sync for the new business DB
+    from web.generation_worker import run_business_db_memory_sync
+    run_business_db_memory_sync()
+
+    logger.info("settings: business DB configured", extra={"masked": _mask_db_url(url)})
+    activity_log.record("business_db_configured", None, {"masked_url": _mask_db_url(url)})
+    return jsonify({"biz_configured": True, "biz_masked_url": _mask_db_url(url), "biz_schema": schema})
 
 
 @app.post("/api/sessions")
@@ -864,17 +926,65 @@ def api_validate_ddl(session_id):
     return jsonify(result)
 
 
-@app.post("/api/sessions/<session_id>/schema-chat")
-def api_schema_chat(session_id):
-    """Multi-turn conversational assistant for schema exploration and DDL suggestions."""
+
+
+# ── Global DB Agent routes ───────────────────────────────────────────────────
+
+
+def _get_biz_db_url() -> str:
+    from web.app_settings import get_business_database_url
+    return get_business_database_url()
+
+
+def _get_biz_schema_text() -> tuple[list, str]:
+    """Return (tables, schema_text) from the business DB, or ([], error_msg)."""
+    from web.app_settings import get_business_schema
     from web.db_manager import schema_tree
-    from web.nl2sql import format_schema
-    session = get_session(session_id)
-    if not session:
-        abort(404)
-    db_url = session.get("db_url") or ""
-    if not db_url:
-        return jsonify({"error": "此 session 未設定資料庫連線"}), 400
+    from web.db_introspect import format_context, extract_schema
+    biz_url = _get_biz_db_url()
+    if not biz_url:
+        return [], ""
+    biz_schema = get_business_schema()
+    tree = schema_tree(biz_url, biz_schema)
+    if "error" in tree:
+        return [], ""
+    tables = tree.get("tables", [])
+    # Use richer format_context for memory-quality schema text
+    specs, _ = extract_schema(biz_url, biz_schema)
+    if specs:
+        import dataclasses
+        schema_text = format_context(specs)
+    else:
+        from web.nl2sql import format_schema
+        schema_text = format_schema(tables)
+    return tables, schema_text
+
+
+@app.get("/api/db-agent/schema-tree")
+def api_db_agent_schema_tree():
+    """Schema browser data for the global DB Agent page."""
+    biz_url = _get_biz_db_url()
+    if not biz_url:
+        return jsonify({"error": "尚未設定業務資料庫，請先至設定頁填入連線字串。"}), 400
+    from web.app_settings import get_business_schema
+    from web.db_manager import schema_tree
+    biz_schema = get_business_schema()
+    result = schema_tree(biz_url, biz_schema)
+    if "error" in result:
+        return jsonify({"error": _sanitize_db_error(result["error"])}), 400
+    # Hide platform tables if business DB == platform DB
+    result["tables"] = _hide_platform_tables(result["tables"], biz_url)
+    return jsonify(result)
+
+
+@app.post("/api/db-agent/chat")
+def api_db_agent_chat():
+    """Unified conversational endpoint: Q&A, data query, DDL suggestions."""
+    global _db_agent
+    biz_url = _get_biz_db_url()
+    if not biz_url:
+        return jsonify({"error": "尚未設定業務資料庫，請先至設定頁填入連線字串。"}), 400
+
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     if not message:
@@ -882,34 +992,66 @@ def api_schema_chat(session_id):
     if len(message) > 2000:
         return jsonify({"error": "訊息過長（上限 2000 字）"}), 400
 
-    tree = schema_tree(db_url)
-    if "error" in tree:
-        return jsonify({"error": _sanitize_db_error(tree["error"])}), 400
-    tables = _hide_platform_tables(tree.get("tables", []), db_url)
-    schema_text = format_schema(tables)
+    tables, schema_text = _get_biz_schema_text()
 
-    with _schema_chat_lock:
-        if session_id not in _schema_chat_store:
-            _schema_chat_store[session_id] = SchemaChatAgent()
-        agent = _schema_chat_store[session_id]
+    with _db_agent_lock:
+        if _db_agent is None:
+            _db_agent = DbAgent()
+        agent = _db_agent
 
-    reply, ddl = agent.chat(message, schema_text)
-    logger.info("schema_chat replied", extra={"session_id": session_id, "has_ddl": bool(ddl)})
-    activity_log.record("schema_chat_message", session_id, {"has_ddl": bool(ddl)})
-    return jsonify({"reply": reply, "ddl_suggestion": ddl})
+    reply, query_sql, ddl = agent.chat(message, schema_text)
+
+    result = {"reply": reply, "ddl_suggestion": ddl, "query_result": None}
+
+    if query_sql:
+        from web.db_manager import execute_query, _check_sql
+        safety_err = _check_sql(query_sql)
+        if safety_err:
+            result["query_error"] = f"產生的查詢不安全（{safety_err}）"
+        else:
+            qr = execute_query(biz_url, query_sql)
+            if "error" in qr:
+                result["query_error"] = _sanitize_db_error(qr["error"])
+            else:
+                result["query_result"] = qr
+                result["query_sql"] = query_sql
+
+    logger.info("db_agent chat", extra={"has_ddl": bool(ddl), "has_query": bool(query_sql)})
+    activity_log.record("db_agent_chat", None, {"has_ddl": bool(ddl), "has_query": bool(query_sql)})
+    return jsonify(result)
 
 
-@app.post("/api/sessions/<session_id>/execute-schema-ddl")
-def api_execute_schema_ddl(session_id):
-    """Validate and execute a DDL suggestion from Schema Chat."""
+@app.post("/api/db-agent/query")
+def api_db_agent_query():
+    """Execute a manual read-only SQL query against the business DB."""
+    from web.db_manager import execute_query
+    biz_url = _get_biz_db_url()
+    if not biz_url:
+        return jsonify({"error": "尚未設定業務資料庫"}), 400
+    data = request.get_json(silent=True) or {}
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "sql required"}), 400
+    result = execute_query(biz_url, sql)
+    if "error" in result:
+        result["error"] = _sanitize_db_error(result["error"])
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.post("/api/db-agent/execute-ddl")
+def api_db_agent_execute_ddl():
+    """Validate and execute a confirmed DDL suggestion against the business DB.
+
+    # TODO(auth): When user roles are implemented, this route should create a
+    # pending change request instead of executing immediately. The request goes
+    # to admin for review, and only admin approval triggers execute_ddl().
+    """
     from web.ddl_guard import check_ddl_safety
     from web.ddl_executor import execute_ddl
-    session = get_session(session_id)
-    if not session:
-        abort(404)
-    db_url = session.get("db_url") or ""
-    if not db_url:
-        return jsonify({"error": "此 session 未設定資料庫連線"}), 400
+    biz_url = _get_biz_db_url()
+    if not biz_url:
+        return jsonify({"error": "尚未設定業務資料庫"}), 400
     data = request.get_json(silent=True) or {}
     ddl = (data.get("ddl") or "").strip()
     if not ddl:
@@ -919,21 +1061,22 @@ def api_execute_schema_ddl(session_id):
     if safety_err:
         return jsonify({"error": safety_err}), 400
 
-    result = execute_ddl(db_url, ddl)
+    result = execute_ddl(biz_url, ddl)
     if not result.get("ok"):
         result["error"] = _sanitize_db_error(result.get("error", "執行失敗"))
         return jsonify(result), 400
 
-    logger.info("schema_ddl executed", extra={"session_id": session_id, "stmts": result.get("statements_run")})
-    activity_log.record("schema_ddl_executed", session_id, {"statements_run": result.get("statements_run")})
+    logger.info("db_agent ddl executed", extra={"stmts": result.get("statements_run")})
+    activity_log.record("db_agent_ddl_executed", None, {"statements_run": result.get("statements_run")})
     return jsonify(result)
 
 
-@app.delete("/api/sessions/<session_id>/schema-chat")
-def api_clear_schema_chat(session_id):
-    """Clear the in-memory schema chat history for a session."""
-    with _schema_chat_lock:
-        _schema_chat_store.pop(session_id, None)
+@app.delete("/api/db-agent/chat")
+def api_db_agent_clear_chat():
+    """Clear the in-memory global DB Agent conversation history."""
+    global _db_agent
+    with _db_agent_lock:
+        _db_agent = None
     return jsonify({"ok": True})
 
 
