@@ -166,19 +166,16 @@ def run_business_db_memory_sync(name: str | None = None) -> None:
     thread.start()
 
 
-def _safe_filename(name: str) -> str:
-    import re
-    return re.sub(r"[^\w\-]", "_", name)
-
-
-def _business_db_memory_sync(only_name: str | None = None) -> None:
+def _business_db_memory_sync(_only_name: str | None = None) -> None:
     from web.app_settings import get_business_databases
     from web.db_introspect import extract_schema, format_context
     from utils.client import get_api
-    dbs = get_business_databases()
-    if only_name:
-        dbs = [d for d in dbs if d["name"] == only_name]
-    for db in dbs:
+
+    all_dbs = get_business_databases()
+    # When syncing a single DB, rebuild the full file with all DBs so the
+    # combined file always reflects the complete current state.
+    parts = []
+    for db in all_dbs:
         url = db.get("url", "")
         name = db.get("name", "unknown")
         if not url:
@@ -187,13 +184,16 @@ def _business_db_memory_sync(only_name: str | None = None) -> None:
         if err or not tables:
             logger.warning("business_db_memory_sync[%s]: extract failed: %s", name, err)
             continue
-        context_text = format_context(tables)
-        filename = f"db_{_safe_filename(name)}.txt"
-        try:
-            get_api().update_memory(context_text, filename=filename)
-            logger.info("business_db_memory_sync[%s]: uploaded %s", name, filename)
-        except Exception as e:
-            logger.error("business_db_memory_sync[%s] failed: %s", name, e)
+        parts.append(f"=== 資料庫：{name} ===\n{format_context(tables)}")
+
+    if not parts:
+        return
+    combined = "\n\n".join(parts)
+    try:
+        get_api().update_memory(combined, filename="business_databases.txt")
+        logger.info("business_db_memory_sync: uploaded business_databases.txt (%d db(s))", len(parts))
+    except Exception as e:
+        logger.error("business_db_memory_sync failed: %s", e)
 
 
 def run_review(session_id: str) -> None:
