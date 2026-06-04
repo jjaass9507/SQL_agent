@@ -6,7 +6,7 @@ before any connection to the database is made.
 import re
 
 _MAX_DDL_LEN = 8_000
-_MAX_STATEMENTS = 10
+_MAX_STATEMENTS = 20
 
 # Allowlist: each statement must start with one of these patterns
 _ALLOWED_RE = re.compile(

@@ -6,14 +6,21 @@ const COMMON_TYPES = ['uuid', 'serial', 'bigserial', 'integer', 'bigint', 'small
   'boolean', 'date', 'time', 'timestamp', 'timestamptz', 'json', 'jsonb', 'bytea'];
 
 let editTables = null;  // working copy while editing
+const _collapsed = new Set();  // indices of collapsed tables
 
 function escAttr(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function toggleCollapse(ti) {
+  if (_collapsed.has(ti)) { _collapsed.delete(ti); } else { _collapsed.add(ti); }
+  renderEditor();
+}
+
 function startEdit() {
   editTables = JSON.parse(JSON.stringify(INITIAL_TABLES || []));
+  _collapsed.clear();
   document.getElementById('schema-readonly').style.display = 'none';
   const advisor = document.getElementById('advisor-section');
   if (advisor) advisor.style.display = 'none';
@@ -37,15 +44,10 @@ function cancelEdit() {
 function renderEditor() {
   const el = document.getElementById('schema-editor');
   const dl = `<datalist id="type-options">${COMMON_TYPES.map(t => `<option value="${t}">`).join('')}</datalist>`;
-  const tablesHtml = editTables.map((t, ti) => `
-    <div class="edit-table">
-      <div class="edit-table-head">
-        <input class="edit-input edit-tname" value="${escAttr(t.table_name)}"
-               placeholder="資料表名稱" oninput="setTableField(${ti},'table_name',this.value)">
-        <input class="edit-input edit-tdesc" value="${escAttr(t.description)}"
-               placeholder="用途說明" oninput="setTableField(${ti},'description',this.value)">
-        <button class="btn btn-danger btn-sm" onclick="removeTable(${ti})" title="刪除此表">🗑</button>
-      </div>
+  const tablesHtml = editTables.map((t, ti) => {
+    const collapsed = _collapsed.has(ti);
+    const arrow = collapsed ? '▶' : '▼';
+    const bodyHtml = collapsed ? '' : `
       <div class="edit-col-grid edit-col-grid-head">
         <span>欄位名</span><span>型態</span><span>長度</span>
         <span title="允許 NULL">NULL</span><span title="主鍵">PK</span><span title="外鍵">FK</span>
@@ -53,9 +55,21 @@ function renderEditor() {
         <span>說明</span><span></span>
       </div>
       ${t.columns.map((c, ci) => colRow(ti, ci, c)).join('')}
-      <button class="btn btn-ghost btn-sm edit-add-col" onclick="addColumn(${ti})">＋ 新增欄位</button>
-    </div>
-  `).join('');
+      <button class="btn btn-ghost btn-sm edit-add-col" onclick="addColumn(${ti})">＋ 新增欄位</button>`;
+    return `
+    <div class="edit-table">
+      <div class="edit-table-head">
+        <button class="edit-collapse-btn" onclick="toggleCollapse(${ti})" title="${collapsed ? '展開' : '折疊'}">${arrow}</button>
+        <input class="edit-input edit-tname" value="${escAttr(t.table_name)}"
+               placeholder="資料表名稱" oninput="setTableField(${ti},'table_name',this.value)">
+        <input class="edit-input edit-tdesc" value="${escAttr(t.description)}"
+               placeholder="用途說明" oninput="setTableField(${ti},'description',this.value)">
+        <span class="edit-col-count" style="font-size:11px;color:var(--muted);white-space:nowrap;">${t.columns.length} 欄</span>
+        <button class="btn btn-danger btn-sm" onclick="removeTable(${ti})" title="刪除此表">🗑</button>
+      </div>
+      ${bodyHtml}
+    </div>`;
+  }).join('');
   el.innerHTML = dl + tablesHtml + `
     <div class="edit-actions-row">
       <button class="btn btn-ghost btn-sm" onclick="addTable()">＋ 新增資料表</button>
@@ -132,6 +146,7 @@ function removeTable(ti) {
     return;
   }
   editTables.splice(ti, 1);
+  _collapsed.clear();
   renderEditor();
 }
 

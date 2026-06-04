@@ -1006,9 +1006,14 @@ html, body {
 .edit-tdesc { flex: 1; }
 .edit-col-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1.2fr 52px 34px 28px 28px 1fr 28px 34px 1.6fr 24px;
+  grid-template-columns: 1.6fr 1.3fr 48px 32px 26px 26px 1.1fr 26px 32px 1.6fr 22px;
   gap: 4px; align-items: center; padding: 2px 0;
 }
+.edit-collapse-btn {
+  border: none; background: none; cursor: pointer; font-size: 11px;
+  color: var(--muted); padding: 0 2px; flex-shrink: 0; line-height: 1;
+}
+.edit-collapse-btn:hover { color: var(--text); }
 .edit-col-grid-head { font-size: 11px; color: var(--muted); font-weight: 600; text-align: center; }
 .edit-col-grid-head span:first-child, .edit-col-grid-head span:nth-child(2) { text-align: left; }
 .edit-chk { text-align: center; }
@@ -1331,7 +1336,7 @@ html, body {
 /* Query results panel (below db-agent-layout) */
 .da-results-panel {
   border-top: 2px solid var(--line); background: var(--bg);
-  max-height: 300px; display: flex; flex-direction: column; flex-shrink: 0;
+  max-height: 45vh; display: flex; flex-direction: column; flex-shrink: 0;
 }
 .da-results-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -1355,7 +1360,7 @@ html, body {
   font-family: var(--mono); font-size: 11px; background: #1e1e2e; color: #cdd6f4;
   padding: 5px 10px; white-space: pre-wrap; word-break: break-all;
 }
-.da-result-table-wrap { overflow-x: auto; max-height: 180px; overflow-y: auto; }
+.da-result-table-wrap { overflow-x: auto; max-height: calc(45vh - 90px); overflow-y: auto; }
 .da-result-link { color: var(--accent); text-decoration: none; font-weight: 600; }
 .da-result-link:hover { text-decoration: underline; }
 

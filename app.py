@@ -331,13 +331,17 @@ def api_add_business_db():
 
     logger.info("settings: business DB added", extra={"name": name, "masked": _mask_db_url(url)})
     activity_log.record("business_db_configured", None, {"name": name, "masked_url": _mask_db_url(url)})
-    dbs = get_business_databases()
-    return jsonify({
-        "business_databases": [
-            {"name": d["name"], "masked_url": _mask_db_url(d["url"])}
-            for d in dbs
-        ]
-    })
+    try:
+        dbs = get_business_databases()
+        return jsonify({
+            "business_databases": [
+                {"name": d.get("name", ""), "masked_url": _mask_db_url(d.get("url", ""))}
+                for d in dbs
+            ]
+        })
+    except Exception as e:
+        logger.error("api_add_business_db: response build failed: %s", e)
+        return jsonify({"error": "內部錯誤，請重新整理頁面"}), 500
 
 
 @app.delete("/api/settings/business-db")
@@ -355,13 +359,17 @@ def api_remove_business_db():
         _db_agent = None
 
     logger.info("settings: business DB removed", extra={"name": name})
-    dbs = get_business_databases()
-    return jsonify({
-        "business_databases": [
-            {"name": d["name"], "masked_url": _mask_db_url(d["url"])}
-            for d in dbs
-        ]
-    })
+    try:
+        dbs = get_business_databases()
+        return jsonify({
+            "business_databases": [
+                {"name": d.get("name", ""), "masked_url": _mask_db_url(d.get("url", ""))}
+                for d in dbs
+            ]
+        })
+    except Exception as e:
+        logger.error("api_remove_business_db: response build failed: %s", e)
+        return jsonify({"error": "內部錯誤，請重新整理頁面"}), 500
 
 
 @app.post("/api/sessions")
