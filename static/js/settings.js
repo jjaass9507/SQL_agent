@@ -121,11 +121,14 @@ function renderBizList(dbs) {
         const data = await res.json();
         if (!res.ok) {
           alert(data.error || '移除失敗');
+          btn.disabled = false;
         } else {
           renderBizList(data.business_databases || []);
         }
       } catch (e) {
+        console.error('[settings] remove business DB failed:', e);
         alert('連線發生錯誤');
+        btn.disabled = false;
       }
     });
   });
@@ -155,6 +158,7 @@ bizAddBtn.addEventListener('click', async () => {
       showMsg(bizMsgEl, `已新增「${name}」，助手正在學習此資料庫的結構。`, true);
     }
   } catch (e) {
+    console.error('[settings] add business DB failed:', e);
     showMsg(bizMsgEl, '連線發生錯誤', false);
   } finally {
     bizAddBtn.disabled = false;

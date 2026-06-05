@@ -51,7 +51,7 @@ LEFT JOIN (
     WHERE tc.constraint_type = 'UNIQUE' AND tc.table_schema = %(schema)s
 ) uq ON uq.table_name = c.table_name AND uq.column_name = c.column_name
 LEFT JOIN (
-    SELECT t2.relname AS table_name, a.attname AS column_name
+    SELECT DISTINCT t2.relname AS table_name, a.attname AS column_name
     FROM pg_index ix
     JOIN pg_class t2 ON t2.oid = ix.indrelid
     JOIN pg_attribute a ON a.attrelid = t2.oid AND a.attnum = ANY(ix.indkey)
@@ -121,6 +121,9 @@ def _extract_one(db_url: str, schema: str) -> tuple[list[TableSpec], str]:
                 "description": row["table_comment"] or "",
                 "columns": [],
             }
+        seen = {c.name for c in tables_dict[display_name]["columns"]}
+        if row["column_name"] in seen:
+            continue
         ref = None
         if row["is_foreign_key"] and row["foreign_table_name"]:
             ref = f"{row['foreign_table_name']}.{row['foreign_column_name']}"
