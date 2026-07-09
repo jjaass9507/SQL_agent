@@ -61,7 +61,7 @@ def _write(session_id: str, data: dict) -> None:
 
 # ── Serialisation helpers shared by both modes ────────────────────────────────
 
-def _tables_to_json(tables) -> list:
+def tables_to_json(tables) -> list:
     """Convert list of TableSpec or dict to JSON-safe list of dicts."""
     import dataclasses
     result = []
@@ -166,7 +166,7 @@ def _json_add_message(session_id, role, content):
 
 
 def _json_set_tables(session_id, tables, key_points):
-    tables_json = _tables_to_json(tables)
+    tables_json = tables_to_json(tables)
     with _lock_for(session_id):
         session = _read(session_id)
         if session is None:
@@ -413,7 +413,7 @@ def _pg_set_tables(session_id, tables, key_points):
     from web.db_engine import get_engine
     from web.db_schema import sessions_table
     from sqlalchemy import select
-    tables_json = _tables_to_json(tables)
+    tables_json = tables_to_json(tables)
     engine = get_engine()
     with _lock_for(session_id):
         with engine.begin() as conn:

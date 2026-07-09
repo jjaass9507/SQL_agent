@@ -38,6 +38,37 @@
     if (el) el.remove();
   }
 
+  // ── Step trail (collapsible tool-call trace) ────────────────────────────────
+
+  function appendStepTrail(steps) {
+    if (!steps || !steps.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'da-steps';
+
+    const toggle = document.createElement('button');
+    toggle.className = 'da-steps-toggle';
+    toggle.type = 'button';
+    toggle.innerHTML = `<span class="da-steps-arrow">▶</span> 已呼叫 ${steps.length} 個工具`;
+    wrap.appendChild(toggle);
+
+    const list = document.createElement('div');
+    list.className = 'da-steps-list';
+    list.innerHTML = steps.map(s => `
+      <div class="da-step">
+        <span class="da-step-tool">${escHtml(s.tool || '')}</span>
+        <span class="da-step-summary">${escHtml(s.result_summary || '')}</span>
+      </div>`).join('');
+    wrap.appendChild(list);
+
+    toggle.addEventListener('click', () => {
+      const open = list.classList.toggle('open');
+      toggle.querySelector('.da-steps-arrow').textContent = open ? '▼' : '▶';
+    });
+
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
   function renderResultTable(data) {
     if (!data || !data.columns) return '';
     const header = data.columns.map(c => `<th>${escHtml(c)}</th>`).join('');
@@ -174,6 +205,7 @@
       }
 
       if (data.reply) appendBubble(data.reply, 'ai');
+      appendStepTrail(data.steps);
 
       // Query result → separate results panel
       if (data.query_result) {

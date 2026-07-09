@@ -173,6 +173,72 @@ DB Agent 對業務資料庫下達的唯讀查詢（`db_manager`）與 DDL 變更
 
 ---
 
+## DB Agent — ReAct 工具迴圈（`agents/agent_loop.py` + `agents/tool_registry.py`）
+
+全域對話式助手（`/db-agent` 頁面 + 各頁面右下角的抽屜），取代早期一問一答、進程內單例、歷史無限增長的 `agents/db_agent.py`。核心是一個有界的「LLM ⇄ 工具」迴圈，狀態完全落在 `session_store`，不依賴任何進程內記憶體。
+
+### 資料流
+
+```
+POST /api/db-agent/chat {message, db_name}
+        │  web/routes/agent.py
+        ▼
+_get_or_create_agent_session()          單一全域對話，session id 存於 app_settings
+        │
+        ▼
+agents.agent_loop.run_agent_turn(conversation_id, message, db_name)
+        │
+        ├─ 1. session_store.add_message(role="user")
+        ├─ 2. 從 session["messages"] 重建 LLM messages（見下）
+        ├─ 3. 迴圈（最多 MAX_STEPS=8 次）：
+        │       呼叫 LLMClient.chat_messages(messages, system_prompt)
+        │       │
+        │       ├─ 回覆含 <TOOL name="...">{json}</TOOL>
+        │       │     → tool_registry.dispatch(name, args, ctx)
+        │       │     → 結果截斷（每則 ≤20 列 / ≤4,000 字）
+        │       │     → 以 assistant(<TOOL>) + user(<OBSERVATION>) 塞回 messages
+        │       │     → session_store.add_message(role="tool", content=JSON{tool,args,observation})
+        │       │     → 繼續下一輪
+        │       │
+        │       └─ 回覆含 <FINAL>...</FINAL> 或完全沒有 <TOOL> 標籤
+        │             → 從 <FINAL> 內容解析 <DDL_SUGGESTION> / <DESIGN_REQUEST>
+        │             → session_store.add_message(role="ai", content=乾淨文字)
+        │             → 迴圈結束
+        │
+        └─ 4. 回傳 {reply, steps:[{tool,args,result_summary,result}], ddl_suggestion, design_request}
+        ▼
+web/routes/agent.py 把上述結果整形為與舊版相容的 response：
+  reply / steps（新）/ ddl_suggestion / ddl_db / query_result / query_error / design_session
+```
+
+### 工具目錄（`agents/tool_registry.py`）
+
+`Tool(name, description, args_doc, handler, read_only)`，每個 handler 是既有 `web/` 模組的薄轉接層（~5 行）：
+
+| 工具 | 委派對象 |
+|---|---|
+| `list_databases` | `app_settings.get_business_databases` |
+| `get_schema` | `db_manager.schema_tree` |
+| `get_table_ddl` | `db_manager.get_table_ddl` |
+| `run_query` | `sql_safety.check_read_only` → `db_manager.execute_query` |
+| `explain_query` | `db_manager.explain_query` |
+| `analyze_schema` | `db_manager.schema_tree` → `schema_advisor.analyze`（零 API 成本） |
+
+`dispatch(name, args, ctx)` 對未知工具、缺參數、handler 內部例外一律回傳 `{"error": ...}` 而不 raise，讓錯誤能當作 observation 回饋給 LLM 自我修正。`ToolContext.resolve_db_url(name)` 依序解析：工具呼叫的 `db` 參數 → 本回合選擇的 `db_name` → 第一個已設定的業務資料庫。`nl2sql` 不在此登錄——agent 自己寫 SQL，`nl2sql` 保留給手動工作台。
+
+### Transcript 重建與截斷（`agents/agent_loop.py`）
+
+- 每回合開始都從 `session_store.get_session(conversation_id)["messages"]` 重新組出 LLM 要看到的完整 messages 陣列——`role="tool"` 的訊息（存成 JSON `{tool, args, observation}`）會展開回原本的 `<TOOL>`/`<OBSERVATION>` 文字配對，因此重啟或換一個 worker 處理下一回合時看到的上下文與原本連續對話完全一致
+- Observation 截斷兩層：先把 `rows` 陣列裁到 20 列（附 `truncated: true`），再把整個 JSON 字串裁到 4,000 字元
+- messages 總字數超過約 24,000 字時，從最舊的訊息開始丟棄，直到符合預算
+- 工具參數 JSON 解析失敗時，錯誤訊息本身當作 observation 回饋給 LLM 重試；連續 2 次解析失敗就中止本回合，避免無限重試迴圈
+
+### 系統提示（`prompts/agent_loop.txt`）
+
+角色/能力/限制與舊版 `db_agent.txt` 相同；額外注入 `tool_registry.render_catalog()` 產生的工具目錄，以及 `_compact_schema_summary()` 產生的精簡結構摘要（僅資料庫與資料表名稱，不含欄位——欄位細節由 `get_schema`/`get_table_ddl` 工具按需查詢，避免每回合都把完整 schema 塞進 prompt）。內含 3 個 few-shot 範例示範 `<TOOL>`→`<OBSERVATION>`→`<FINAL>` 連鎖。`<DDL_SUGGESTION>`/`<DESIGN_REQUEST>` 標籤語意與舊版相同：前者仍只是文字建議，需使用者按「執行 DDL」才會經 `ddl_guard` 驗證後執行；後者觸發 `web/routes/agent.py` 的 `_create_design_session()` 建立一個新的設計 session。
+
+---
+
 ## CLI 架構（`main.py` + `agents/orchestrator.py`）
 
 狀態機管理者，不直接呼叫 API。

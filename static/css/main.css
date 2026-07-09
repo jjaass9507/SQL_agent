@@ -1303,6 +1303,25 @@ html, body {
 .da-ddl-result.ok { color: var(--success); }
 .da-ddl-result.err { color: var(--error); }
 
+/* Agent step trail (collapsible tool-call trace below a reply) */
+.da-steps { align-self: flex-start; max-width: 88%; font-size: 12px; }
+.da-steps-toggle {
+  background: none; border: none; cursor: pointer; padding: 2px 0;
+  color: var(--muted); font-size: 11.5px; display: flex; align-items: center; gap: 4px;
+}
+.da-steps-toggle:hover { color: var(--accent); }
+.da-steps-list {
+  display: none; flex-direction: column; gap: 4px; margin-top: 4px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--sidebar);
+}
+.da-steps-list.open { display: flex; }
+.da-step { display: flex; gap: 6px; align-items: baseline; }
+.da-step-tool {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700; color: var(--accent);
+  background: var(--accent-light); border-radius: 3px; padding: 1px 5px; flex-shrink: 0;
+}
+.da-step-summary { color: var(--muted); }
+
 /* No DB configured notice */
 .db-agent-no-db {
   flex: 1; display: flex; flex-direction: column;
