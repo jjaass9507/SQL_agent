@@ -9,9 +9,10 @@
         │                               │
         ▼                               ▼
 ┌───────────────────┐        ┌─────────────────────┐
-│   Flask (app.py)  │        │  Orchestrator        │
-│   9 REST endpoints│        │  (CLI 狀態機)        │
-│   5 HTML pages    │        └──────────┬──────────┘
+│  Flask app factory │        │  Orchestrator        │
+│  (app.py) +        │        │  (CLI 狀態機)        │
+│  web/routes/* 六個  │        └──────────┬──────────┘
+│  blueprint         │                   │
 └────────┬──────────┘                   │
          │                              │
          ▼                              │
@@ -41,6 +42,22 @@
 ---
 
 ## 網頁平台架構（`app.py` + `web/`）
+
+`app.py` 是純粹的 app factory：JSON logging 設定、`SECRET_KEY`/`FLASK_DEBUG`/`HOST` 部署預設、
+六個 blueprint 的註冊，本身不含任何路由邏輯。所有路由依用途分在 `web/routes/` 下：
+
+| Blueprint | 檔案 | 涵蓋路由 |
+|---|---|---|
+| `pages` | `web/routes/pages.py` | 6 個 HTML 頁面（`/`、`/sessions/<id>/{chat,confirm,docs,review}`、`/settings`、`/db-agent`） |
+| `sessions`（無 url_prefix，`bp`） | `web/routes/sessions.py` | Session CRUD、對話訊息、confirm/continue、審查重跑、版本管理、outputs/zip |
+| `workbench`（無 url_prefix） | `web/routes/workbench.py` | DDL 匯入、SQL 工作台（query/explain/nl2sql/schema-tree/validate-ddl） |
+| `settings`（無 url_prefix） | `web/routes/settings.py` | `/api/settings`、`/api/settings/business-db`、`/api/activity` |
+| `db_agent`（`/api/db-agent`） | `web/routes/agent.py` | DB Agent 對話與手動查詢（Phase 2 起） |
+| `changes`（`/api/change-requests`） | `web/routes/changes.py` | 變更請求審批（Phase 4 起） |
+
+`web/routes/sessions.py` 呼叫 `run_generation`/`run_incremental`/`run_review`/`run_single_file`
+時透過 `import app as app_module` 動態存取（而非 `from app import run_x`）：一來避免與 `app.py`
+互相 import 的循環依賴，二來讓既有測試的 `unittest.mock.patch("app.run_x")` 不需更動即可繼續生效。
 
 ### Session 模式與生命週期
 
@@ -162,12 +179,12 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
 
 ### SQL 安全層（`web/sql_safety.py`）
 
-DB Agent 對業務資料庫下達的唯讀查詢（`db_manager`）與 DDL 變更（`ddl_guard` / `ddl_executor`）共用同一個 SQL 分析模組，避免兩條路徑各自維護語句切分邏輯而產生邊界不一致：
+DB Agent 對業務資料庫下達的唯讀查詢（`db_manager`）與 DDL 變更（`web/routes/changes.py` 審批流程 / `ddl_executor`）共用同一個 SQL 分析模組，避免兩條路徑各自維護語句切分邏輯而產生邊界不一致：
 
 - `skeleton(sql) -> str`：把註解與字串／識別字面值換成**等長空白**（保留 offset），讓關鍵字檢查不會被字面值中的關鍵字誤判，也不會被前導註解繞過；`len(skeleton(sql)) == len(sql)` 恆成立，skeleton 中找到的分號位置可直接用來切原文。
 - `split_statements(sql) -> list[str]`：以 `skeleton()` 找出的分號位置切分**原文**（字串/註解內的 `;` 不會被當成語句邊界），回傳去空白後的非空語句清單。
 - `check_read_only(sql) -> str | None`：唯讀護欄。先要求 `split_statements(sql)` 剛好一條語句（防止 `SELECT 1; DELETE FROM t` 這類 stacked-statement 繞過），再檢查 SELECT/EXPLAIN 開頭、CTE 內的 DML（`WITH ... DELETE/UPDATE/INSERT/MERGE`）、`SELECT ... INTO`。供 `db_manager._check_sql`（`execute_query`/`explain_query`）委派使用。
-- `check_ddl_allowlist(ddl) -> str | None`：DDL allowlist 護欄。檢查長度上限、禁用關鍵字（`DROP`/`TRUNCATE`/`DELETE`/`INSERT`/`UPDATE`/...）、禁止 `ALTER COLUMN`、語句數上限，並逐句比對 allowlist（僅接受 `CREATE TABLE`、`CREATE [UNIQUE] INDEX`、`ALTER TABLE ... ADD COLUMN/CONSTRAINT`）。供 `ddl_guard.check_ddl_safety` 委派使用。
+- `check_ddl_allowlist(ddl) -> str | None`：DDL allowlist 護欄。檢查長度上限、禁用關鍵字（`DROP`/`TRUNCATE`/`DELETE`/`INSERT`/`UPDATE`/...）、禁止 `ALTER COLUMN`、語句數上限，並逐句比對 allowlist（僅接受 `CREATE TABLE`、`CREATE [UNIQUE] INDEX`、`ALTER TABLE ... ADD COLUMN/CONSTRAINT`）。供 `web/routes/changes.py` 的 `propose_ddl` / `approve` 審批流程委派使用。
 
 `web/ddl_executor.execute_ddl()` 以 `split_statements()` 切出的語句在**單一交易**內逐句執行：全部成功才 `commit()`，任一語句失敗即 `rollback()` 並回傳錯誤（不再用 `autocommit`，避免中途失敗留下半套 DDL 變更）。
 

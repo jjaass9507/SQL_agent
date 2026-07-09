@@ -1,7 +1,9 @@
 """Execute pre-validated DDL against a target PostgreSQL database.
 
 This module is intentionally separate from db_manager.py (which is read-only).
-All callers must pass DDL that has already been checked by ddl_guard.check_ddl_safety().
+All callers must pass DDL that has already been checked by
+sql_safety.check_ddl_allowlist() and approved via web/routes/changes.py's
+human-in-the-loop review flow.
 """
 import logging
 
@@ -20,7 +22,7 @@ def execute_ddl(db_url: str, ddl: str) -> dict:
     Only on full success is the transaction committed.
 
     Returns {"ok": True, "statements_run": N} or {"ok": False, "error": "..."}.
-    Caller is responsible for calling ddl_guard.check_ddl_safety() first.
+    Caller is responsible for calling sql_safety.check_ddl_allowlist() first.
     """
     try:
         import psycopg2

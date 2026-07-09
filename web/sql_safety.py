@@ -7,7 +7,7 @@ Single source of truth for:
   string literal or comment must not be treated as a statement separator).
 - Read-only guard for ad-hoc queries (db_manager) — rejects anything but a
   single SELECT/EXPLAIN statement.
-- DDL allowlist guard (ddl_guard) — rejects anything outside a narrow set of
+- DDL allowlist guard (used by web/routes/changes.py's approval flow) — rejects anything outside a narrow set of
   additive DDL operations.
 
 Both guards are built on the same `skeleton`/`split_statements` primitives so

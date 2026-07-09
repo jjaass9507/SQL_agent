@@ -130,6 +130,9 @@ LLM_VERIFY=false
 | `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
 | `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
 | `ADMIN_TOKEN` | | 核准/駁回 DB Agent 變更請求所需的共享密鑰（`X-Admin-Token` header）。未設定時，`/api/change-requests/<id>/approve` 與 `.../reject` 一律回 403 |
+| `SECRET_KEY` | | Flask session 金鑰。**非 debug 模式**（`FLASK_DEBUG` 未開）下若仍是 `.env.example` 內的預設值，`python app.py` 啟動時會直接報錯退出 |
+| `FLASK_DEBUG` | | 設為 `1`/`true` 開啟 Flask debug 模式（含自動重載、debugger）。預設關閉 |
+| `HOST` | | `python app.py` 綁定的位址，預設 `127.0.0.1`（僅限本機）。對外服務時可設為 `0.0.0.0`，建議搭配反向代理 |
 
 ---
 
@@ -173,6 +176,10 @@ LLM_VERIFY=false
 python app.py
 # 開啟瀏覽器 http://localhost:5000
 ```
+
+預設綁定 `127.0.0.1`、關閉 debug 模式。本機開發需要自動重載時設 `FLASK_DEBUG=1`；
+**非 debug 模式**若 `SECRET_KEY` 仍是 `.env.example` 的預設值，啟動會直接報錯退出（見上方環境變數表）。
+對外服務／生產環境請用 Gunicorn（`gunicorn app:app`），不要直接跑 `python app.py`。
 
 **設計模式**（預設）：首頁（專案管理）→ 對話頁（需求收集）→ 確認頁（Schema 審閱 + Diff + 版本管理）→ 文件頁（即時進度 + 預覽/下載）。
 
@@ -258,7 +265,7 @@ pytest tests/ -v
 
 ```
 SQL_agent/
-├── app.py                       # 網頁平台入口（Flask）
+├── app.py                       # 網頁平台入口（Flask app factory + blueprint 註冊，本身不含路由）
 ├── main.py                      # CLI 入口
 ├── requirements.txt
 ├── .env.example
@@ -284,6 +291,10 @@ SQL_agent/
 │   ├── change_requests.py       # 變更請求持久化（PostgreSQL / JSON 雙模式，人工審批用）
 │   ├── response_utils.py        # 共用 response 處理（遮蔽連線字串、隱藏平台表、清理錯誤訊息）
 │   └── routes/
+│       ├── pages.py             # 6 個 HTML 頁面路由
+│       ├── sessions.py          # Session CRUD、訊息、confirm/continue、版本、outputs/zip
+│       ├── workbench.py         # DDL 匯入、SQL 工作台（query/explain/nl2sql/schema-tree/validate-ddl）
+│       ├── settings.py          # /api/settings、/api/settings/business-db、/api/activity
 │       ├── agent.py             # DB Agent blueprint：/api/db-agent/* 路由
 │       └── changes.py           # 變更請求審批 blueprint：/api/change-requests/*（ADMIN_TOKEN 保護 approve/reject）
 │

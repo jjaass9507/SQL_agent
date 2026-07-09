@@ -33,8 +33,9 @@ LLM_MODEL=your_model_here
 LLM_VERIFY=false
 
 # ── Flask ──────────────────────────────────────────────
-FLASK_ENV=production        # development | production
-SECRET_KEY=<random-32-char-string>
+SECRET_KEY=<random-32-char-string>   # 非 debug 模式下仍是預設值會啟動報錯
+FLASK_DEBUG=false                    # 1/true 開啟 debug 模式，預設關閉
+HOST=127.0.0.1                       # python app.py 綁定位址，對外可設 0.0.0.0
 
 # ── 資料目錄（預設為專案根目錄下的 data/）──────────────
 # DATA_DIR=/var/app/data
