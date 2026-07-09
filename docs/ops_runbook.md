@@ -73,14 +73,14 @@ lsof -i :5000
 # 查看 application log 中的 ERROR
 sudo journalctl -u sql-agent | grep '"level":"ERROR"'
 
-# 確認 Pensieve API 連線
-curl -H "Authorization: Bearer $PENSIEVE_API_TOKEN" \
-  $PENSIEVE_API_URL/health
+# 確認 LLM API 連線
+curl -H "Authorization: Bearer $LLM_API_KEY" \
+  $LLM_BASE_URL/chat/completions
 ```
 
 **常見原因**：
-- `PENSIEVE_API_TOKEN` 過期或錯誤
-- Pensieve API 服務中斷
+- `LLM_API_KEY` 過期或錯誤
+- LLM API 服務中斷
 - 網路防火牆封鎖出站連線
 
 ---

@@ -54,16 +54,14 @@ def _parse_tables(json_str: str) -> list[TableSpec] | None:
 
 class Interviewer:
     def __init__(self, context: str = "", existing_tables: list[str] | None = None,
-                 memory_text: str = "", memory_synced: bool = False):
+                 memory_text: str = ""):
         self._api = get_api()
         self._history: list[dict] = []  # {"role": "user"|"assistant", "content": str}
         self._context = context  # designed-schema continuity, injected before SYSTEM_PROMPT
         self._existing_lower = {n.lower() for n in (existing_tables or [])}
-        self._memory_text = memory_text  # existing DB structure (txt) for LLM memory
-        # True once the existing-DB structure is uploaded to persistent LLM memory.
-        self.memory_synced = memory_synced
+        self._memory_text = memory_text  # existing DB structure (txt) injected into system prompt
         # Once the conversation touches an existing table, keep injecting the
-        # existing-DB structure every turn (sticky) until it lands in API memory.
+        # existing-DB structure every turn (sticky).
         self._fallback_active = False
 
     def _mentions_existing(self, text: str) -> bool:
@@ -107,8 +105,8 @@ class Interviewer:
         # Designed-schema continuity context: first turn only
         if self._context and is_first_turn:
             system_prompt = self._context + "\n\n" + system_prompt
-        # Existing-DB memory fallback: inject only while relevant and not yet in API memory
-        if self._memory_text and self._fallback_active and not self.memory_synced:
+        # Existing-DB structure: inject while relevant (sticky once touched)
+        if self._memory_text and self._fallback_active:
             system_prompt = self._memory_text + "\n\n" + system_prompt
         if history_lines:
             system_prompt += f"\n\n--- 對話歷史 ---\n{history_lines}"
@@ -134,11 +132,5 @@ class Interviewer:
         # The designed schema may reveal a link to an existing table too.
         if self._specs_reference_existing(tables):
             self._fallback_active = True
-
-        # Once relevant, push the existing-DB structure into persistent LLM memory
-        # (once). Until that succeeds, the sticky fallback above keeps it in context.
-        if self._fallback_active and self._memory_text and not self.memory_synced:
-            if self._api.update_memory(self._memory_text):
-                self.memory_synced = True
 
         return clean_text, tables, summary

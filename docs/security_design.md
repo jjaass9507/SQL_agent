@@ -112,7 +112,7 @@ if session["user_id"] != current_user.id and current_user.role != "admin":
 
 ```
 # .env（不得 commit 至版控）
-PENSIEVE_API_KEY=...
+LLM_API_KEY=...
 SECRET_KEY=...            # Flask session secret / JWT signing key
 DB_ENCRYPTION_KEY=...     # 32-byte hex for AES-256
 DATABASE_URL=...          # App 自身的 PostgreSQL

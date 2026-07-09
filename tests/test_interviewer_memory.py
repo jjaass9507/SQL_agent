@@ -1,7 +1,7 @@
-"""Tests for the Interviewer's existing-DB memory reference behaviour.
+"""Tests for the Interviewer's existing-DB context injection behaviour.
 
-Covers trigger detection ("touched an existing table"), upload-once, and the
-system-prompt fallback when the memory API hasn't synced yet. No real API."""
+Covers trigger detection ("touched an existing table") and the system-prompt
+injection of the existing-DB structure once relevant. No real API."""
 import json
 
 from agents.interviewer import Interviewer
@@ -9,27 +9,20 @@ from models.schema import ColumnSpec, TableSpec
 
 
 class FakeAPI:
-    def __init__(self, response: str = "好的，請問主鍵如何設計？", memory_ok: bool = False):
+    def __init__(self, response: str = "好的，請問主鍵如何設計？"):
         self.response = response
-        self.memory_ok = memory_ok
         self.chat_prompts: list[str] = []
-        self.memory_calls: list[str] = []
 
     def chat(self, system_prompt: str, human_prompt: str):
         self.chat_prompts.append(system_prompt)
         return self.response
 
-    def update_memory(self, content: str) -> bool:
-        self.memory_calls.append(content)
-        return self.memory_ok
 
-
-def _make(monkeypatch, *, response="好的", memory_ok=False, memory_synced=False,
+def _make(monkeypatch, *, response="好的",
           existing=("users", "orders"), memory_text="現有DB結構XYZ") -> tuple[Interviewer, FakeAPI]:
-    fake = FakeAPI(response=response, memory_ok=memory_ok)
+    fake = FakeAPI(response=response)
     monkeypatch.setattr("agents.interviewer.get_api", lambda: fake)
-    iv = Interviewer(existing_tables=list(existing), memory_text=memory_text,
-                     memory_synced=memory_synced)
+    iv = Interviewer(existing_tables=list(existing), memory_text=memory_text)
     return iv, fake
 
 
@@ -64,33 +57,12 @@ def test_specs_reference_existing(monkeypatch):
     assert iv._specs_reference_existing(None) is False
 
 
-# ── upload-once ──────────────────────────────────────────
+# ── prompt injection: always injected once relevant ──────
 
-def test_memory_uploaded_once(monkeypatch):
-    iv, fake = _make(monkeypatch, memory_ok=True)
-    iv.chat("我想加一張連到 users 的表")
-    assert fake.memory_calls == ["現有DB結構XYZ"]
-    assert iv.memory_synced is True
-    iv.chat("再補一個欄位")  # still relevant (sticky) but already synced
-    assert len(fake.memory_calls) == 1  # not re-uploaded
-
-
-def test_specs_trigger_upload(monkeypatch):
-    iv, fake = _make(monkeypatch, response=_specs_response(references="users.id"),
-                     memory_ok=True)
-    # User message alone doesn't mention an existing table, but the designed FK does
-    iv.chat("幫我設計一張操作紀錄表")
-    assert fake.memory_calls == ["現有DB結構XYZ"]
-    assert iv.memory_synced is True
-
-
-# ── fallback injection ───────────────────────────────────
-
-def test_fallback_injects_when_not_synced(monkeypatch):
-    iv, fake = _make(monkeypatch, memory_ok=False)
+def test_injects_when_existing_table_mentioned(monkeypatch):
+    iv, fake = _make(monkeypatch)
     iv.chat("我要連到 users")
     assert "現有DB結構XYZ" in fake.chat_prompts[0]
-    assert iv.memory_synced is False  # upload failed → stays unsynced
     # sticky: next turn still injects even without mentioning the table again
     iv.chat("好")
     assert "現有DB結構XYZ" in fake.chat_prompts[1]
@@ -100,12 +72,12 @@ def test_no_injection_when_irrelevant(monkeypatch):
     iv, fake = _make(monkeypatch)
     iv.chat("我要做一個全新的 products 系統")
     assert "現有DB結構XYZ" not in fake.chat_prompts[0]
-    assert fake.memory_calls == []
-    assert iv.memory_synced is False
 
 
-def test_synced_skips_injection_and_upload(monkeypatch):
-    iv, fake = _make(monkeypatch, memory_synced=True)
-    iv.chat("我要連到 users")
-    assert "現有DB結構XYZ" not in fake.chat_prompts[0]  # already in API memory
-    assert fake.memory_calls == []  # not re-uploaded
+def test_specs_reference_triggers_injection_on_next_turn(monkeypatch):
+    iv, fake = _make(monkeypatch, response=_specs_response(references="users.id"))
+    # User message alone doesn't mention an existing table, but the designed FK does
+    iv.chat("幫我設計一張操作紀錄表")
+    assert "現有DB結構XYZ" not in fake.chat_prompts[0]  # not yet relevant on this turn
+    iv.chat("好")
+    assert "現有DB結構XYZ" in fake.chat_prompts[1]  # sticky after FK referenced existing table

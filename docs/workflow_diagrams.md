@@ -60,7 +60,7 @@ flowchart TD
     F --> B
     E -->|成功| G[建立 Session\nphase=reviewing]
     G --> H[啟動 review Worker Thread]
-    H --> I[Reviewer.review\n呼叫 Pensieve API]
+    H --> I[Reviewer.review\n呼叫 LLM API]
     I --> J[phase=review_done\noutputs 05_review_report.md]
 
     J --> K[審查頁：渲染報告]
@@ -105,7 +105,7 @@ flowchart LR
     end
 
     subgraph External
-        PA[Pensieve AI API]
+        PA[LLM API (OpenAI 相容)]
         PG[(PostgreSQL\n外部 DB)]
     end
 

@@ -61,7 +61,7 @@ from web.session_store import (
     try_start_generation,
     GENERATION_FILES,
 )
-from web.generation_worker import run_generation, run_incremental, run_review, run_single_file, run_business_db_memory_sync, EXTRA_FILES
+from web.generation_worker import run_generation, run_incremental, run_review, run_single_file, EXTRA_FILES
 from web import activity_log
 
 _interviewer_store: dict[str, Interviewer] = {}
@@ -137,7 +137,6 @@ def _get_interviewer(session_id: str) -> Interviewer:
                 context=context,
                 existing_tables=existing_tables,
                 memory_text=memory_text,
-                memory_synced=session.get("memory_synced", False),
             )
         return _interviewer_store[session_id]
 
@@ -327,8 +326,6 @@ def api_add_business_db():
     with _db_agent_lock:
         _db_agent = None
 
-    run_business_db_memory_sync(name)
-
     logger.info("settings: business DB added", extra={"name": name, "masked": _mask_db_url(url)})
     activity_log.record("business_db_configured", None, {"name": name, "masked_url": _mask_db_url(url)})
     try:
@@ -406,9 +403,6 @@ def api_create_session():
     if mode == "review" and context_tables_json and not db_error:
         run_review(session["id"])
 
-    # Business DB memory is maintained separately via run_business_db_memory_sync;
-    # workbench sessions no longer push to shared knowledge to avoid overlap.
-
     logger.info("session created", extra={"session_id": session["id"], "mode": mode, "phase": session["phase"]})
     activity_log.record("session_created", session["id"],
                         {"mode": mode, "title": title, "db_imported": len(context_tables_json)})
@@ -469,7 +463,6 @@ def api_import_db(session_id):
     import_updates: dict = {
         "context_tables": context_tables_json,
         "context_text": context_text,
-        "memory_synced": False,  # new structure must be re-pushed to LLM memory
         "last_db_import": {"imported_at": imported_at, "table_count": len(tables), "error": None},
         "db_url": db_url,
     }
@@ -550,10 +543,6 @@ def api_send_message(session_id):
 
     interviewer = _get_interviewer(session_id)
     reply_text, tables, summary = interviewer.chat(content)
-
-    # Persist the memory-synced flag so we don't re-upload after a restart
-    if interviewer.memory_synced and not session.get("memory_synced"):
-        update_session(session_id, {"memory_synced": True})
 
     add_message(session_id, "ai", reply_text)
 

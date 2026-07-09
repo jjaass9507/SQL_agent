@@ -113,7 +113,7 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
   "generation_status": {"01_specification.md": "waiting|loading|done|failed", ...},
   "generation_errors": {"03_ddl.sql": "錯誤訊息（失敗時才有）"},
   "context_tables": [ ...從現有 DB 匯入的 TableSpec JSON... ],
-  "context_text":   "格式化後的現有 DB 結構文字（作為 LLM 記憶/fallback 注入）",
+  "context_text":   "格式化後的現有 DB 結構文字（動到現有表時注入 system prompt）",
   "memory_synced":  false
 }
 ```
@@ -190,7 +190,7 @@ Phase.GENERATING
 【設計模式】
 使用者文字輸入
     → Interviewer.chat()
-        → PensieveAPI.chat(question, answer)
+        → LLMClient.chat(question, answer)
         → 解析 <TABLE_SPECS> + <REQUIREMENTS_SUMMARY> XML tags
     → (reply_text, list[TableSpec], list[str] summary)
         ↓ 並行（ThreadPoolExecutor max_workers=4）
@@ -205,7 +205,7 @@ Phase.GENERATING
     → db_introspect.extract_schema()
     → list[TableSpec]  （存為 context_tables）
     → Reviewer.review(tables)
-        → PensieveAPI.chat(一次呼叫)
+        → LLMClient.chat(一次呼叫)
     → str (Markdown 審查報告)
     → outputs["05_review_report.md"] + phase="review_done"
 ```
@@ -217,10 +217,8 @@ Phase.GENERATING
 ### Interviewer（`agents/interviewer.py`）
 
 - 維護本地 `_history`（`list[dict]`），記錄每輪對話
-- **現有 DB 結構作為 LLM 記憶（knowledge）**：採全域固定 `PENSIEVE_VECTOR_ID` + coverage，結構持久共享。
-  - **主要時機（eager）**：凡是「取得/匯入現有 DB 結構」的動作就上傳——建立 session 帶 `db_url`（設計或審查）、或對既有 session `import-db`。由 `web/generation_worker.py:run_memory_sync()` 背景上傳 `context_text`，成功後設 `session["memory_synced"]=True`。
-  - **次要時機（lazy，安全網）**：若 eager 上傳尚未完成或 `vector_id` 未設定，`Interviewer.chat()` 在對話「動到現有表」時（使用者提及現有表名，或 `TABLE_SPECS` 同名/外鍵指向現有表）會補上傳，未同步前以 system-prompt 注入現有結構作 fallback。
-  - 重新匯入時 `memory_synced` 重置，eager 上傳以 coverage 覆蓋最新結構。
+- **現有 DB 結構注入 system prompt**：Chat Completions API 無跨請求記憶機制，因此改為對話「動到現有表」時（使用者提及現有表名，或 `TABLE_SPECS` 同名/外鍵指向現有表）即把現有 DB 結構文字（`context_text`）注入 system prompt；一旦觸發即持續注入（sticky）。
+- `sessions.memory_synced` 欄位保留於資料庫（供未來擴充），但 Interviewer 不再讀寫此旗標，一律以上述規則注入。
 - 當需求完整時，LLM 在回覆前附加 `<REQUIREMENTS_SUMMARY>`（3–6 條整合摘要），再附加 `<TABLE_SPECS>` JSON
 - 回傳 `(reply_text, list[TableSpec] | None, list[str] summary)`
 
@@ -301,24 +299,27 @@ class TableSpec:
 
 ## API 整合（`utils/client.py`）
 
-使用 PensieveAPI 模式，統一的 HTTP 呼叫封裝：
+`LLMClient` 呼叫 OpenAI 相容 Chat Completions API，統一的 HTTP 呼叫封裝：
 
 ```python
+POST {LLM_BASE_URL}/chat/completions
+Authorization: Bearer {LLM_API_KEY}
+
 payload = {
-    "token": ...,
-    "empno": ...,
-    "variables": {
-        "building": ...,   # flow 名稱，來自 PENSIEVE_BUILDING 環境變數
-        "question": ...,   # 任務描述 / system prompt + 上下文
-        "answer": ...,     # 當前輸入 / 結構化資料
-    }
+    "model": ...,          # 來自 LLM_MODEL 環境變數
+    "messages": [
+        {"role": "system", "content": [{"type": "text", "text": ...}]},  # system_prompt 有值時插入
+        {"role": "user",   "content": [{"type": "text", "text": ...}]},
+    ],
 }
-# POST → 解析 response["Result"] → 回傳純文字
+# POST → 解析 choices[0].message.content（字串或 parts 陣列皆支援）→ 回傳純文字
 ```
 
-`get_api()` 提供 singleton，避免重複讀取環境變數。
+核心方法 `chat_messages(messages, system_prompt=None)`；相容方法 `chat(system_prompt, human_prompt)` 包成單則 user 訊息呼叫 `chat_messages`，供既有 Interviewer/Reviewer/Writers/nl2sql 呼叫端零改動沿用。
 
-另提供 `update_memory(content)`：以 multipart 上傳 txt 至 `PENSIEVE_VECTOR_URL`（uploadVector），寫入 `PENSIEVE_VECTOR_ID` 指定的 vector store 作為 LLM 記憶。採固定 filename 達成 coverage（重複上傳取代同一份文件）；解析回傳的 `isSuccess` 與 `SuccessFile` 判定成功。`vector_id` 未設定時回傳 False，呼叫端（Interviewer）退回 system-prompt 注入 fallback。
+HTTP 429（rate limit）自動指數退避重試（2/4/8 秒，最多 3 次）；requests 例外時記錄 log 並回傳 `None`。
+
+`get_api()` 提供 singleton，避免重複讀取環境變數；缺少 `LLM_BASE_URL`／`LLM_API_KEY`／`LLM_MODEL` 任一環境變數時會 raise 清楚錯誤。金鑰只存在 `.env`（git ignored），不得寫入任何程式碼或文件。
 
 ---
 

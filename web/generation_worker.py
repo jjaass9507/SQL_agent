@@ -133,69 +133,6 @@ def _incremental(session_id: str) -> None:
         update_generation_status(session_id, INCREMENTAL_FILE, "failed", error=str(e))
 
 
-def run_memory_sync(session_id: str) -> None:
-    """Upload the session's existing-DB structure to the shared LLM knowledge (background).
-
-    Eager: runs whenever the existing schema is imported/refreshed, so knowledge
-    is updated without waiting for a chat that happens to touch an existing table."""
-    thread = threading.Thread(target=_memory_sync, args=(session_id,), daemon=True)
-    thread.start()
-
-
-def _memory_sync(session_id: str) -> None:
-    from utils.client import get_api
-    session = get_session(session_id)
-    if not session:
-        return
-    context_text = (session.get("context_text") or "").strip()
-    if not context_text:
-        return
-    try:
-        if get_api().update_memory(context_text):
-            update_session(session_id, {"memory_synced": True})
-    except Exception as e:
-        logger.error("memory sync failed: %s", e, extra={"session_id": session_id})
-
-
-def run_business_db_memory_sync(name: str | None = None) -> None:
-    """Upload business database structure(s) to LLM memory (background).
-
-    name=None syncs all configured DBs; name=<str> syncs only that one.
-    """
-    thread = threading.Thread(target=_business_db_memory_sync, args=(name,), daemon=True)
-    thread.start()
-
-
-def _business_db_memory_sync(_only_name: str | None = None) -> None:
-    from web.app_settings import get_business_databases
-    from web.db_introspect import extract_schema, format_context
-    from utils.client import get_api
-
-    all_dbs = get_business_databases()
-    # When syncing a single DB, rebuild the full file with all DBs so the
-    # combined file always reflects the complete current state.
-    parts = []
-    for db in all_dbs:
-        url = db.get("url", "")
-        name = db.get("name", "unknown")
-        if not url:
-            continue
-        tables, err = extract_schema(url, None)
-        if err or not tables:
-            logger.warning("business_db_memory_sync[%s]: extract failed: %s", name, err)
-            continue
-        parts.append(f"=== 資料庫：{name} ===\n{format_context(tables)}")
-
-    if not parts:
-        return
-    combined = "\n\n".join(parts)
-    try:
-        get_api().update_memory(combined, filename="business_databases.txt")
-        logger.info("business_db_memory_sync: uploaded business_databases.txt (%d db(s))", len(parts))
-    except Exception as e:
-        logger.error("business_db_memory_sync failed: %s", e)
-
-
 def run_review(session_id: str) -> None:
     """Start background schema review for a 'review' mode session."""
     thread = threading.Thread(target=_review, args=(session_id,), daemon=True)
