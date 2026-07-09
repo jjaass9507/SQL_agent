@@ -160,6 +160,17 @@ GET /api/sessions/{id}  (前端每 2 秒輪詢)
 - `try_start_generation()` 在單一鎖內原子性地將 phase 從 `confirming` 改為 `generating`，防止重複觸發文件產出
 - 四個 Writer 以 `ThreadPoolExecutor(max_workers=4)` 並行執行，互相獨立；各自的 `update_generation_status` 呼叫透過 per-session lock 保護
 
+### SQL 安全層（`web/sql_safety.py`）
+
+DB Agent 對業務資料庫下達的唯讀查詢（`db_manager`）與 DDL 變更（`ddl_guard` / `ddl_executor`）共用同一個 SQL 分析模組，避免兩條路徑各自維護語句切分邏輯而產生邊界不一致：
+
+- `skeleton(sql) -> str`：把註解與字串／識別字面值換成**等長空白**（保留 offset），讓關鍵字檢查不會被字面值中的關鍵字誤判，也不會被前導註解繞過；`len(skeleton(sql)) == len(sql)` 恆成立，skeleton 中找到的分號位置可直接用來切原文。
+- `split_statements(sql) -> list[str]`：以 `skeleton()` 找出的分號位置切分**原文**（字串/註解內的 `;` 不會被當成語句邊界），回傳去空白後的非空語句清單。
+- `check_read_only(sql) -> str | None`：唯讀護欄。先要求 `split_statements(sql)` 剛好一條語句（防止 `SELECT 1; DELETE FROM t` 這類 stacked-statement 繞過），再檢查 SELECT/EXPLAIN 開頭、CTE 內的 DML（`WITH ... DELETE/UPDATE/INSERT/MERGE`）、`SELECT ... INTO`。供 `db_manager._check_sql`（`execute_query`/`explain_query`）委派使用。
+- `check_ddl_allowlist(ddl) -> str | None`：DDL allowlist 護欄。檢查長度上限、禁用關鍵字（`DROP`/`TRUNCATE`/`DELETE`/`INSERT`/`UPDATE`/...）、禁止 `ALTER COLUMN`、語句數上限，並逐句比對 allowlist（僅接受 `CREATE TABLE`、`CREATE [UNIQUE] INDEX`、`ALTER TABLE ... ADD COLUMN/CONSTRAINT`）。供 `ddl_guard.check_ddl_safety` 委派使用。
+
+`web/ddl_executor.execute_ddl()` 以 `split_statements()` 切出的語句在**單一交易**內逐句執行：全部成功才 `commit()`，任一語句失敗即 `rollback()` 並回傳錯誤（不再用 `autocommit`，避免中途失敗留下半套 DDL 變更）。
+
 ---
 
 ## CLI 架構（`main.py` + `agents/orchestrator.py`）

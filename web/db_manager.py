@@ -3,53 +3,18 @@ DB Management Agent — runs SELECT/EXPLAIN queries against a session's target d
 Security enforcement is centralised here; app.py routes only call these functions.
 db_url is always sourced from the server-side session record, never from the frontend.
 """
-import re
 import logging
 
-logger = logging.getLogger(__name__)
+from web.sql_safety import check_read_only
 
-# Reject DML, DDL, and DCL
-_FORBIDDEN_RE = re.compile(
-    r"^\s*(CREATE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|INSERT|UPDATE|DELETE|MERGE)\b",
-    re.IGNORECASE,
-)
+logger = logging.getLogger(__name__)
 
 QUERY_TIMEOUT_MS = 30_000
 
 
-def _sql_skeleton(sql: str) -> str:
-    """
-    Strip comments and string/identifier literals so keyword checks cannot be
-    bypassed by leading comments and cannot false-positive on literal text.
-    """
-    s = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)   # block comments
-    s = re.sub(r"--[^\n]*", " ", s)                        # line comments
-    s = re.sub(r"'(?:''|[^'])*'", " ", s)                  # single-quoted strings
-    s = re.sub(r'"(?:""|[^"])*"', " ", s)                  # quoted identifiers
-    return s
-
-
 def _check_sql(sql: str) -> str | None:
     """Returns an error string if the SQL is forbidden, else None."""
-    if not sql or not sql.strip():
-        return "SQL query is empty"
-    skeleton = _sql_skeleton(sql).strip()
-    if not skeleton:
-        return "SQL query is empty"
-    # First keyword after stripping comments must not be a write/DDL/DCL verb.
-    if _FORBIDDEN_RE.match(skeleton):
-        return "Only SELECT and EXPLAIN queries are allowed"
-    # Data-modifying CTE, e.g. WITH x AS (...) DELETE ...
-    if re.match(r"^\s*WITH\b", skeleton, re.IGNORECASE) and re.search(
-        r"\b(INSERT|UPDATE|DELETE|MERGE)\b", skeleton, re.IGNORECASE
-    ):
-        return "Data-modifying statements are not allowed"
-    # SELECT ... INTO creates a table (a write disguised as a SELECT).
-    if re.match(r"^\s*SELECT\b", skeleton, re.IGNORECASE) and re.search(
-        r"\bINTO\b", skeleton, re.IGNORECASE
-    ):
-        return "SELECT ... INTO is not allowed"
-    return None
+    return check_read_only(sql)
 
 
 def execute_query(db_url: str, sql: str, limit: int = 500) -> dict:
