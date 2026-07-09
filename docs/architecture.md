@@ -223,8 +223,14 @@ web/routes/agent.py 把上述結果整形為與舊版相容的 response：
 | `run_query` | `sql_safety.check_read_only` → `db_manager.execute_query` |
 | `explain_query` | `db_manager.explain_query` |
 | `analyze_schema` | `db_manager.schema_tree` → `schema_advisor.analyze`（零 API 成本） |
+| `check_conventions` | `db_introspect.extract_schema` → `convention_checker.infer_conventions` + `.check_conventions`（零 API 成本） |
+| `find_related_tables` | `db_introspect.extract_schema` → `table_relation.find_related`（零 API 成本） |
+| `check_table_docs` | `db_introspect.extract_schema` → `metadata_checker.check_metadata_completeness`（零 API 成本） |
+| `draft_comment_ddl` | `metadata_checker.draft_comment_ddl`（純文字組裝，零 API 成本） |
 
 `dispatch(name, args, ctx)` 對未知工具、缺參數、handler 內部例外一律回傳 `{"error": ...}` 而不 raise，讓錯誤能當作 observation 回饋給 LLM 自我修正。`ToolContext.resolve_db_url(name)` 依序解析：工具呼叫的 `db` 參數 → 本回合選擇的 `db_name` → 第一個已設定的業務資料庫。`nl2sql` 不在此登錄——agent 自己寫 SQL，`nl2sql` 保留給手動工作台。
+
+`check_conventions` / `find_related_tables` 的 `design_tables` 參數採用與 `dataclasses.asdict(TableSpec)` 相同的 JSON 形狀（`session_store.tables_from_json` 負責還原），由 LLM 在呼叫工具時一併提供正在設計的資料表；未提供 `design_tables` 時 `find_related_tables` 只做需求文字 → 現有表的關鍵詞比對。
 
 ### Transcript 重建與截斷（`agents/agent_loop.py`）
 
@@ -235,7 +241,26 @@ web/routes/agent.py 把上述結果整形為與舊版相容的 response：
 
 ### 系統提示（`prompts/agent_loop.txt`）
 
-角色/能力/限制與舊版 `db_agent.txt` 相同；額外注入 `tool_registry.render_catalog()` 產生的工具目錄，以及 `_compact_schema_summary()` 產生的精簡結構摘要（僅資料庫與資料表名稱，不含欄位——欄位細節由 `get_schema`/`get_table_ddl` 工具按需查詢，避免每回合都把完整 schema 塞進 prompt）。內含 3 個 few-shot 範例示範 `<TOOL>`→`<OBSERVATION>`→`<FINAL>` 連鎖。`<DDL_SUGGESTION>`/`<DESIGN_REQUEST>` 標籤語意與舊版相同：前者仍只是文字建議，需使用者按「執行 DDL」才會經 `ddl_guard` 驗證後執行；後者觸發 `web/routes/agent.py` 的 `_create_design_session()` 建立一個新的設計 session。
+角色/能力/限制與舊版 `db_agent.txt` 相同；額外注入 `tool_registry.render_catalog()` 產生的工具目錄，以及 `_compact_schema_summary()` 產生的精簡結構摘要（僅資料庫與資料表名稱，不含欄位——欄位細節由 `get_schema`/`get_table_ddl` 工具按需查詢，避免每回合都把完整 schema 塞進 prompt）。內含 4 個 few-shot 範例示範 `<TOOL>`→`<OBSERVATION>`→`<FINAL>` 連鎖（含檢查文件完整性 → 草擬 COMMENT → `<DDL_SUGGESTION>` 呈現的流程）。`<DDL_SUGGESTION>`/`<DESIGN_REQUEST>` 標籤語意與舊版相同：前者仍只是文字建議，需使用者按「執行 DDL」才會經 `ddl_guard` 驗證後執行；後者觸發 `web/routes/agent.py` 的 `_create_design_session()` 建立一個新的設計 session。
+
+## 建表標準一致性 / 需求關聯分析 / 文件完整性檢查
+
+三個純規則式模組（零 API 成本），供確認頁、Interviewer、DB Agent 工具共用：
+
+| 模組 | 函式 | 用途 |
+|---|---|---|
+| `web/convention_checker.py` | `infer_conventions(existing_tables) -> dict` | 從現有 DB 的 `TableSpec` 清單以多數決推斷命名風格（snake/camel）、PK 慣例（欄名/型態）、`created_at` 比例、FK `_id` 命名比例、軟刪除比例；資料表數 < 3 時回傳 `{}`（樣本不足不檢查） |
+| | `check_conventions(design_tables, conventions) -> list[dict]` | 逐表比對，回傳與 `schema_advisor.analyze()` 同形的警告（`{level, code, table, column, message}`），code 如 `convention_naming` / `convention_pk_type` / `convention_timestamps` / `convention_fk_naming` / `convention_soft_delete` |
+| `web/table_relation.py` | `find_related(requirement_text, design_tables, existing_tables) -> dict` | 確定性計分：需求文字關鍵詞命中現有表名/欄位/註解 → `related`；設計表的 `xxx_id` 欄位對映現有表 PK → `fk_suggestions`；欄位重疊率 > 60% → `duplicate_risks` |
+| `web/metadata_checker.py` | `check_metadata_completeness(existing_tables) -> dict` | 統計 table/column comment 覆蓋率與缺漏清單，排除平台記帳表（沿用 `db_schema.platform_table_names()`） |
+| | `draft_comment_ddl(db, table, comments) -> str` | 把 `{table_comment, columns: {name: comment}}` 組成安全引用（雙引號 identifier、單引號跳脫）的 `COMMENT ON TABLE/COLUMN` 語句 |
+
+**整合點**：
+- **DB Agent 工具**：`tool_registry` 註冊 `check_conventions` / `find_related_tables` / `check_table_docs` / `draft_comment_ddl`，資料來源一律用 `db_introspect.extract_schema()`（含 table/column comment，`get_schema` 用的 `db_manager.schema_tree` 沒有）；`design_tables` 參數與 `dataclasses.asdict(TableSpec)` 同形
+- **`web/sql_safety.py`**：`check_ddl_allowlist` 的 allowlist 加入 `COMMENT ON (TABLE|COLUMN)`——`COMMENT ON ... IS '...'` 的字串內容會被 `skeleton()` 遮蔽，不影響關鍵字檢查
+- **確認頁**（`app.py:confirm_page`）：有 `context_tables`（匯入的現有 DB）時，把 `check_conventions` 的警告併入 `schema_advisor` 的警告清單一併顯示；`find_related()` 的結果（以 `session.key_points` 串接作為需求文字）放進新欄位 `relation_report`，`templates/confirm.html` 以 `RELATION_REPORT` JSON 傳給 `static/js/confirm.js` 動態渲染「與現有資料庫的關聯」區塊（相關表 / FK 建議 / 重複風險，無資料時不顯示）
+- **Interviewer**（`agents/interviewer.py`）：建構時若有 ≥ 3 張現有表（`existing_table_specs`）便推斷 conventions；設計階段的每一輪（既有-DB 結構被觸發注入時）額外注入 conventions 摘要與該輪訊息命中的 top 3 相關表，引導 LLM 遵循現有標準、參照現有表
+- **DB Agent 頁**：`db_agent.js` 的「📋 檢查文件完整性」按鈕送出固定訊息，觸發 agent 走 `check_table_docs` → 草擬說明 → `draft_comment_ddl` → `<DDL_SUGGESTION>` 流程（見 `prompts/agent_loop.txt` 的「文件完整性檢查流程」段落）
 
 ---
 

@@ -100,6 +100,7 @@ def _get_interviewer(session_id: str) -> Interviewer:
             # the conversation touches an existing table) — not unconditionally.
             memory_text = session.get("context_text", "")
             existing_tables = [t.get("table_name", "") for t in session.get("context_tables", [])]
+            existing_table_specs = tables_from_json(session.get("context_tables"))
             # If a design already exists (user is iterating on it), bake the
             # current schema into the context so a freshly-built interviewer
             # still knows what's been designed — even after a server restart.
@@ -112,6 +113,7 @@ def _get_interviewer(session_id: str) -> Interviewer:
                 context=context,
                 existing_tables=existing_tables,
                 memory_text=memory_text,
+                existing_table_specs=existing_table_specs,
             )
         return _interviewer_store[session_id]
 
@@ -152,6 +154,7 @@ def confirm_page(session_id):
 
     diff = None
     warnings = []
+    relation_report = None
     if session.get("tables"):
         from web.schema_advisor import analyze
         designed = tables_from_json(session["tables"])
@@ -161,7 +164,15 @@ def confirm_page(session_id):
             existing = tables_from_json(session["context_tables"])
             diff = compute_diff(designed, existing)
 
-    return render_template("confirm.html", session=session, diff=diff, warnings=warnings)
+            from web.convention_checker import check_conventions, infer_conventions
+            warnings += check_conventions(designed, infer_conventions(existing))
+
+            from web.table_relation import find_related
+            requirement_text = "\n".join(session.get("key_points") or [])
+            relation_report = find_related(requirement_text, designed, existing)
+
+    return render_template("confirm.html", session=session, diff=diff, warnings=warnings,
+                           relation_report=relation_report)
 
 
 @app.get("/sessions/<session_id>/docs")

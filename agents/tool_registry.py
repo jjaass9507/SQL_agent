@@ -151,6 +151,63 @@ def _tool_analyze_schema(args: dict, ctx: ToolContext) -> dict:
     return {"warnings": warnings}
 
 
+def _tool_check_conventions(args: dict, ctx: ToolContext) -> dict:
+    design_tables = args.get("design_tables")
+    if not design_tables:
+        return {"error": "缺少必要參數：design_tables"}
+    from web.convention_checker import check_conventions, infer_conventions
+    from web.db_introspect import extract_schema
+    from web.session_store import tables_from_json
+    url, err = _resolve(args, ctx)
+    if err:
+        return {"error": err}
+    existing, ex_err = extract_schema(url)
+    if ex_err and not existing:
+        return {"error": ex_err}
+    conventions = infer_conventions(existing)
+    warnings = check_conventions(tables_from_json(design_tables), conventions)
+    return {"conventions": conventions, "warnings": warnings}
+
+
+def _tool_find_related_tables(args: dict, ctx: ToolContext) -> dict:
+    err = _require(args, "requirement")
+    if err:
+        return {"error": err}
+    from web.db_introspect import extract_schema
+    from web.session_store import tables_from_json
+    from web.table_relation import find_related
+    url, err = _resolve(args, ctx)
+    if err:
+        return {"error": err}
+    existing, ex_err = extract_schema(url)
+    if ex_err and not existing:
+        return {"error": ex_err}
+    design_tables = tables_from_json(args.get("design_tables")) or None
+    return find_related(args["requirement"], design_tables, existing)
+
+
+def _tool_check_table_docs(args: dict, ctx: ToolContext) -> dict:
+    from web.db_introspect import extract_schema
+    from web.metadata_checker import check_metadata_completeness
+    url, err = _resolve(args, ctx)
+    if err:
+        return {"error": err}
+    existing, ex_err = extract_schema(url)
+    if ex_err and not existing:
+        return {"error": ex_err}
+    return check_metadata_completeness(existing)
+
+
+def _tool_draft_comment_ddl(args: dict, ctx: ToolContext) -> dict:
+    err = _require(args, "table", "comments")
+    if err:
+        return {"error": err}
+    from web.metadata_checker import draft_comment_ddl
+    db_name = args.get("db") or ctx.db_name
+    ddl = draft_comment_ddl(db_name, args["table"], args["comments"])
+    return {"ddl": ddl}
+
+
 # ── registry ─────────────────────────────────────────────────────────────────
 
 _REGISTRY: dict[str, Tool] = {}
@@ -195,6 +252,34 @@ _register(Tool(
     description="對指定資料庫的目前結構跑規則式設計檢查（缺 PK、外鍵無索引、明文密碼欄位等），零 API 成本。",
     args_doc='{"db": "資料庫名稱（可省略）"}',
     handler=_tool_analyze_schema,
+))
+_register(Tool(
+    name="check_conventions",
+    description="檢查設計中的新資料表是否符合現有資料庫的建表慣例（命名風格、PK、時間欄位等，多數決推斷），零 API 成本。",
+    args_doc=('{"db": "資料庫名稱（可省略）", "design_tables": '
+              '[{"table_name": "...", "columns": [{"name": "...", "data_type": "...", '
+              '"is_primary_key": true}]}]}'),
+    handler=_tool_check_conventions,
+))
+_register(Tool(
+    name="find_related_tables",
+    description="分析需求文字（與可選的設計表）跟現有資料表的關聯：可重用的表、建議的外鍵、重複建表風險。",
+    args_doc=('{"db": "資料庫名稱（可省略）", "requirement": "需求文字", '
+              '"design_tables": "可省略，格式同 check_conventions"}'),
+    handler=_tool_find_related_tables,
+))
+_register(Tool(
+    name="check_table_docs",
+    description="檢查現有資料表的用途說明（table comment）與欄位說明（column comment）是否齊全。",
+    args_doc='{"db": "資料庫名稱（可省略）"}',
+    handler=_tool_check_table_docs,
+))
+_register(Tool(
+    name="draft_comment_ddl",
+    description="把草擬好的資料表/欄位說明組成 COMMENT ON TABLE/COLUMN 語句，供以 DDL_SUGGESTION 呈現待確認。",
+    args_doc=('{"db": "資料庫名稱（可省略）", "table": "資料表名稱", '
+              '"comments": {"table_comment": "...", "columns": {"欄位名": "說明"}}}'),
+    handler=_tool_draft_comment_ddl,
 ))
 
 

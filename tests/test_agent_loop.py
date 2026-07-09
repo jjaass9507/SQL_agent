@@ -9,6 +9,7 @@ import json
 import pytest
 
 import agents.agent_loop as agent_loop
+from models.schema import ColumnSpec, TableSpec
 from web.session_store import create_session, get_session
 
 
@@ -234,6 +235,62 @@ def test_no_tool_no_final_tag_treated_as_reply(monkeypatch):
 
     assert result["reply"] == "外鍵是用來維護關聯完整性的欄位。"
     assert len(fake.calls) == 1
+
+
+# ── Phase 3: convention check / relation analysis / doc-completeness chains ──
+
+def test_design_flow_calls_find_related_then_check_conventions(monkeypatch):
+    import web.db_introspect as db_introspect
+    existing = [TableSpec(table_name="products", description="商品主檔", columns=[
+        ColumnSpec(name="id", data_type="integer", nullable=False, description="", is_primary_key=True),
+        ColumnSpec(name="name", data_type="varchar", nullable=True, description=""),
+    ])]
+    monkeypatch.setattr(db_introspect, "extract_schema", lambda url, schema="public": (existing, ""))
+
+    fake = _FakeLLMClient([
+        '<TOOL name="find_related_tables">{"requirement": "新增訂單項目"}</TOOL>',
+        ('<TOOL name="check_conventions">{"design_tables": [{"table_name": "order_items", '
+         '"description": "", "columns": [{"name": "id", "data_type": "integer", "nullable": false, '
+         '"description": "", "is_primary_key": true}]}]}</TOOL>'),
+        '<FINAL>已完成分析。</FINAL>',
+    ])
+    monkeypatch.setattr(agent_loop, "get_api", lambda: fake)
+
+    sid = _new_session()
+    result = agent_loop.run_agent_turn(sid, "我想新增訂單項目表", db_name="demo")
+
+    assert len(fake.calls) == 3
+    assert result["steps"][0]["tool"] == "find_related_tables"
+    assert "error" not in result["steps"][0]["result"]
+    assert result["steps"][1]["tool"] == "check_conventions"
+    assert "error" not in result["steps"][1]["result"]
+    assert result["reply"] == "已完成分析。"
+
+
+def test_check_docs_flow_calls_check_table_docs_then_draft_comment_ddl(monkeypatch):
+    import web.db_introspect as db_introspect
+    existing = [TableSpec(table_name="orders", description="", columns=[
+        ColumnSpec(name="id", data_type="integer", nullable=False, description=""),
+    ])]
+    monkeypatch.setattr(db_introspect, "extract_schema", lambda url, schema="public": (existing, ""))
+
+    fake = _FakeLLMClient([
+        '<TOOL name="check_table_docs">{}</TOOL>',
+        '<TOOL name="draft_comment_ddl">{"table": "orders", "comments": {"table_comment": "訂單主檔"}}</TOOL>',
+        '<FINAL>已草擬說明。</FINAL>',
+    ])
+    monkeypatch.setattr(agent_loop, "get_api", lambda: fake)
+
+    sid = _new_session()
+    result = agent_loop.run_agent_turn(sid, "檢查文件完整性", db_name="demo")
+
+    assert len(fake.calls) == 3
+    assert result["steps"][0]["tool"] == "check_table_docs"
+    assert "error" not in result["steps"][0]["result"]
+    assert result["steps"][1]["tool"] == "draft_comment_ddl"
+    assert "error" not in result["steps"][1]["result"]
+    assert "COMMENT ON TABLE" in result["steps"][1]["result"]["ddl"]
+    assert result["reply"] == "已草擬說明。"
 
 
 # ── unknown conversation id ───────────────────────────────────────────────────

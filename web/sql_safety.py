@@ -34,6 +34,7 @@ _ALLOWED_RE = re.compile(
     r"^\s*("
     r"CREATE\s+(TABLE|UNIQUE\s+INDEX|INDEX)"
     r"|ALTER\s+TABLE\s+\S+\s+ADD\s+(COLUMN|CONSTRAINT)"
+    r"|COMMENT\s+ON\s+(TABLE|COLUMN)"
     r")\b",
     re.IGNORECASE,
 )

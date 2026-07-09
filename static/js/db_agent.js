@@ -6,6 +6,7 @@
   const sendBtn = document.getElementById('da-send');
   const schemaTree = document.getElementById('da-schema-tree');
   const clearBtn = document.getElementById('da-clear-chat');
+  const checkDocsBtn = document.getElementById('da-check-docs');
   const refreshBtn = document.getElementById('da-refresh-schema');
   const sidebarRefreshBtn = document.getElementById('da-sidebar-refresh');
   const dbSelect = document.getElementById('da-db-select');
@@ -410,6 +411,15 @@
         designPanel.style.display = 'none';
         designPanel.setAttribute('aria-hidden', 'true');
       }
+    });
+  }
+
+  // ── Check documentation completeness (quick button) ─────────────────────────
+
+  if (checkDocsBtn) {
+    checkDocsBtn.addEventListener('click', () => {
+      inputEl.value = '請檢查目前資料庫的資料表與欄位說明是否完整，若有缺漏請草擬說明供我確認。';
+      sendMessage();
     });
   }
 

@@ -54,15 +54,48 @@ def _parse_tables(json_str: str) -> list[TableSpec] | None:
 
 class Interviewer:
     def __init__(self, context: str = "", existing_tables: list[str] | None = None,
-                 memory_text: str = ""):
+                 memory_text: str = "", existing_table_specs: list[TableSpec] | None = None):
         self._api = get_api()
         self._history: list[dict] = []  # {"role": "user"|"assistant", "content": str}
         self._context = context  # designed-schema continuity, injected before SYSTEM_PROMPT
         self._existing_lower = {n.lower() for n in (existing_tables or [])}
         self._memory_text = memory_text  # existing DB structure (txt) injected into system prompt
+        # Full TableSpec list (with columns) for convention inference / related-table
+        # scoring — existing_tables above only carries names.
+        self._existing_specs = existing_table_specs or []
+        self._conventions = {}
+        if len(self._existing_specs) >= 3:
+            from web.convention_checker import infer_conventions
+            self._conventions = infer_conventions(self._existing_specs)
         # Once the conversation touches an existing table, keep injecting the
         # existing-DB structure every turn (sticky).
         self._fallback_active = False
+
+    def _conventions_and_relation_text(self, user_message: str) -> str:
+        """Conventions summary + top related existing tables for this turn's
+        message, so the LLM is nudged to follow existing standards and reuse
+        existing tables while designing."""
+        lines = []
+        if self._conventions:
+            c = self._conventions
+            lines.append("--- 現有資料庫建立慣例（新設計請盡量遵循）---")
+            lines.append(f"命名風格：{c.get('naming_style', '')}")
+            if c.get("pk_name"):
+                lines.append(f"主鍵慣例：欄位名 {c['pk_name']}，型態多為 {c.get('pk_type', '')}")
+            if c.get("timestamp_ratio", 0) >= 0.5:
+                lines.append("多數資料表有 created_at 稽核欄位")
+            if c.get("soft_delete_ratio", 0) >= 0.5:
+                lines.append("多數資料表有軟刪除欄位（如 deleted_at）")
+            lines.append("--- 慣例說明結束 ---")
+        if self._existing_specs:
+            from web.table_relation import find_related
+            top = find_related(user_message, None, self._existing_specs).get("related", [])[:3]
+            if top:
+                lines.append("--- 與此次需求可能相關的現有資料表 ---")
+                for r in top:
+                    lines.append(f"- {r['table']}（{r.get('reason', '')}）")
+                lines.append("--- 相關表說明結束 ---")
+        return "\n".join(lines)
 
     def _mentions_existing(self, text: str) -> bool:
         """True if the text references any existing table name (word-boundary, case-insensitive)."""
@@ -108,6 +141,9 @@ class Interviewer:
         # Existing-DB structure: inject while relevant (sticky once touched)
         if self._memory_text and self._fallback_active:
             system_prompt = self._memory_text + "\n\n" + system_prompt
+            extra = self._conventions_and_relation_text(user_message)
+            if extra:
+                system_prompt = extra + "\n\n" + system_prompt
         if history_lines:
             system_prompt += f"\n\n--- 對話歷史 ---\n{history_lines}"
 

@@ -137,3 +137,74 @@ def test_nl2sql_not_registered():
     result = dispatch("nl2sql", {}, _ctx())
     assert "error" in result
     assert "nl2sql" in result["error"]
+
+
+# ── Phase 3 tools: check_conventions / find_related_tables / check_table_docs /
+#    draft_comment_ddl ─────────────────────────────────────────────────────────
+
+def test_render_catalog_lists_phase3_tools():
+    catalog = render_catalog()
+    for name in ("check_conventions", "find_related_tables", "check_table_docs", "draft_comment_ddl"):
+        assert name in catalog
+
+
+def test_check_conventions_requires_design_tables(monkeypatch):
+    import web.db_introspect as db_introspect
+    monkeypatch.setattr(db_introspect, "extract_schema", lambda url, schema="public": ([], ""))
+    result = dispatch("check_conventions", {}, _ctx())
+    assert "error" in result
+
+
+def test_check_conventions_delegates(monkeypatch):
+    import web.db_introspect as db_introspect
+    from models.schema import ColumnSpec, TableSpec
+    existing = [
+        TableSpec(table_name=f"t{i}", description="", columns=[
+            ColumnSpec(name="id", data_type="integer", nullable=False, description="", is_primary_key=True),
+            ColumnSpec(name="created_at", data_type="timestamptz", nullable=False, description=""),
+        ]) for i in range(3)
+    ]
+    monkeypatch.setattr(db_introspect, "extract_schema", lambda url, schema="public": (existing, ""))
+    result = dispatch("check_conventions", {
+        "design_tables": [{"table_name": "userProfile", "description": "", "columns": [
+            {"name": "id", "data_type": "integer", "nullable": False, "description": "", "is_primary_key": True},
+        ]}],
+    }, _ctx())
+    assert "warnings" in result
+    assert any(w["code"] == "convention_naming" for w in result["warnings"])
+
+
+def test_find_related_tables_requires_requirement():
+    result = dispatch("find_related_tables", {}, _ctx())
+    assert "error" in result
+
+
+def test_find_related_tables_delegates(monkeypatch):
+    import web.db_introspect as db_introspect
+    from models.schema import ColumnSpec, TableSpec
+    existing = [TableSpec(table_name="orders", description="訂單主檔", columns=[
+        ColumnSpec(name="id", data_type="integer", nullable=False, description="", is_primary_key=True),
+    ])]
+    monkeypatch.setattr(db_introspect, "extract_schema", lambda url, schema="public": (existing, ""))
+    result = dispatch("find_related_tables", {"requirement": "訂單查詢"}, _ctx())
+    assert "related" in result and "fk_suggestions" in result and "duplicate_risks" in result
+
+
+def test_check_table_docs_delegates(monkeypatch):
+    import web.db_introspect as db_introspect
+    from models.schema import ColumnSpec, TableSpec
+    existing = [TableSpec(table_name="orders", description="", columns=[
+        ColumnSpec(name="id", data_type="integer", nullable=False, description="")])]
+    monkeypatch.setattr(db_introspect, "extract_schema", lambda url, schema="public": (existing, ""))
+    result = dispatch("check_table_docs", {}, _ctx())
+    assert "summary" in result
+
+
+def test_draft_comment_ddl_requires_table_and_comments():
+    result = dispatch("draft_comment_ddl", {}, _ctx())
+    assert "error" in result
+
+
+def test_draft_comment_ddl_builds_ddl():
+    result = dispatch("draft_comment_ddl", {"table": "orders", "comments": {"table_comment": "訂單"}}, _ctx())
+    assert "COMMENT ON TABLE" in result["ddl"]
