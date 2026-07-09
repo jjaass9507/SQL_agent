@@ -100,6 +100,8 @@ def _summarize(result: dict) -> str:
         return "已取得執行計畫"
     if "ddl" in result:
         return "已取得建表語句"
+    if "proposal_id" in result:
+        return f"已建立變更提案 #{result['proposal_id'][:8]}"
     if "databases" in result:
         return f"{len(result.get('databases', []))} 個資料庫"
     return "完成"
@@ -159,7 +161,7 @@ def run_agent_turn(conversation_id: str, user_message: str, db_name: str | None 
     session = session_store.get_session(conversation_id)
     if session is None:
         return {"reply": "找不到對話 session，請重新整理頁面。", "steps": [],
-                "ddl_suggestion": None, "design_request": None}
+                "ddl_suggestion": None, "design_request": None, "proposal": None}
 
     session_store.add_message(conversation_id, "user", user_message)
 
@@ -184,7 +186,8 @@ def run_agent_turn(conversation_id: str, user_message: str, db_name: str | None 
         if not response:
             reply = "抱歉，無法取得回應，請稍後再試。"
             session_store.add_message(conversation_id, "ai", reply)
-            return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None}
+            return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None,
+                    "proposal": None}
 
         tool_match = _TOOL_RE.search(response)
         if not tool_match:
@@ -207,7 +210,8 @@ def run_agent_turn(conversation_id: str, user_message: str, db_name: str | None 
             if json_fail_count >= MAX_JSON_FAILS:
                 reply = "抱歉，工具呼叫的參數格式持續錯誤，請換個方式描述你的需求。"
                 session_store.add_message(conversation_id, "ai", reply)
-                return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None}
+                return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None,
+                        "proposal": None}
             continue
 
         json_fail_count = 0
@@ -219,9 +223,29 @@ def run_agent_turn(conversation_id: str, user_message: str, db_name: str | None 
             {"tool": tool_name, "args": args, "observation": obs_text}, ensure_ascii=False))
         steps.append({"tool": tool_name, "args": args, "result_summary": _summarize(result), "result": result})
 
+        if tool_name == "propose_ddl":
+            return _finish_propose_ddl(conversation_id, result, steps)
+
     reply = "已達到單回合最大工具呼叫次數，以下是目前已知的資訊，如需進一步協助請再詢問一次。"
     session_store.add_message(conversation_id, "ai", reply)
-    return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None}
+    return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None, "proposal": None}
+
+
+def _finish_propose_ddl(conversation_id: str, result: dict, steps: list[dict]) -> dict:
+    """propose_ddl is a terminal tool: the loop ends the moment it is called,
+    with no further LLM round-trip. The reply is synthesised here from the
+    tool's own result (success or error) rather than written by the LLM."""
+    if "error" in result:
+        reply = f"提案未成立：{result['error']}"
+        proposal = None
+    else:
+        proposal = {"proposal_id": result.get("proposal_id"), "dry_run_ok": result.get("dry_run_ok"),
+                    "status": result.get("status")}
+        reply = (f"已提交結構變更提案（編號 {proposal['proposal_id']}），dry-run 驗證通過，"
+                "等待管理員審核後才會執行。")
+    session_store.add_message(conversation_id, "ai", reply)
+    return {"reply": reply, "steps": steps, "ddl_suggestion": None, "design_request": None,
+            "proposal": proposal}
 
 
 def _finish(conversation_id: str, response: str, steps: list[dict]) -> dict:
@@ -242,4 +266,5 @@ def _finish(conversation_id: str, response: str, steps: list[dict]) -> dict:
     clean_text = _DESIGN_TAG_RE.sub("", _DDL_TAG_RE.sub("", text)).strip()
 
     session_store.add_message(conversation_id, "ai", clean_text)
-    return {"reply": clean_text, "steps": steps, "ddl_suggestion": ddl, "design_request": design_request}
+    return {"reply": clean_text, "steps": steps, "ddl_suggestion": ddl, "design_request": design_request,
+            "proposal": None}

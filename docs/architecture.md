@@ -193,7 +193,12 @@ agents.agent_loop.run_agent_turn(conversation_id, message, db_name)
         ├─ 3. 迴圈（最多 MAX_STEPS=8 次）：
         │       呼叫 LLMClient.chat_messages(messages, system_prompt)
         │       │
-        │       ├─ 回覆含 <TOOL name="...">{json}</TOOL>
+        │       ├─ 回覆含 <TOOL name="propose_ddl">{json}</TOOL>（terminal）
+        │       │     → tool_registry.dispatch("propose_ddl", args, ctx)
+        │       │     → session_store.add_message(role="tool", ...)
+        │       │     → 迴圈立即結束（不再呼叫 LLM），reply 由 agent_loop 自行合成
+        │       │
+        │       ├─ 回覆含其他 <TOOL name="...">{json}</TOOL>
         │       │     → tool_registry.dispatch(name, args, ctx)
         │       │     → 結果截斷（每則 ≤20 列 / ≤4,000 字）
         │       │     → 以 assistant(<TOOL>) + user(<OBSERVATION>) 塞回 messages
@@ -201,14 +206,14 @@ agents.agent_loop.run_agent_turn(conversation_id, message, db_name)
         │       │     → 繼續下一輪
         │       │
         │       └─ 回覆含 <FINAL>...</FINAL> 或完全沒有 <TOOL> 標籤
-        │             → 從 <FINAL> 內容解析 <DDL_SUGGESTION> / <DESIGN_REQUEST>
+        │             → 從 <FINAL> 內容解析 <DDL_SUGGESTION>（舊版相容）/ <DESIGN_REQUEST>
         │             → session_store.add_message(role="ai", content=乾淨文字)
         │             → 迴圈結束
         │
-        └─ 4. 回傳 {reply, steps:[{tool,args,result_summary,result}], ddl_suggestion, design_request}
+        └─ 4. 回傳 {reply, steps:[{tool,args,result_summary,result}], ddl_suggestion, design_request, proposal}
         ▼
 web/routes/agent.py 把上述結果整形為與舊版相容的 response：
-  reply / steps（新）/ ddl_suggestion / ddl_db / query_result / query_error / design_session
+  reply / steps（新）/ ddl_suggestion / ddl_db / query_result / query_error / design_session / proposal（新，propose_ddl 成功時附 proposal_id）
 ```
 
 ### 工具目錄（`agents/tool_registry.py`）
@@ -227,6 +232,7 @@ web/routes/agent.py 把上述結果整形為與舊版相容的 response：
 | `find_related_tables` | `db_introspect.extract_schema` → `table_relation.find_related`（零 API 成本） |
 | `check_table_docs` | `db_introspect.extract_schema` → `metadata_checker.check_metadata_completeness`（零 API 成本） |
 | `draft_comment_ddl` | `metadata_checker.draft_comment_ddl`（純文字組裝，零 API 成本） |
+| `propose_ddl` | `sql_safety.check_ddl_allowlist` → `ddl_validator.validate_ddl`（dry-run）→ `change_requests.create`（見下方「人工審批」一節）。**terminal 工具**：`read_only=False`，`agent_loop` 執行完就結束本回合，不再呼叫 LLM |
 
 `dispatch(name, args, ctx)` 對未知工具、缺參數、handler 內部例外一律回傳 `{"error": ...}` 而不 raise，讓錯誤能當作 observation 回饋給 LLM 自我修正。`ToolContext.resolve_db_url(name)` 依序解析：工具呼叫的 `db` 參數 → 本回合選擇的 `db_name` → 第一個已設定的業務資料庫。`nl2sql` 不在此登錄——agent 自己寫 SQL，`nl2sql` 保留給手動工作台。
 
@@ -241,7 +247,7 @@ web/routes/agent.py 把上述結果整形為與舊版相容的 response：
 
 ### 系統提示（`prompts/agent_loop.txt`）
 
-角色/能力/限制與舊版 `db_agent.txt` 相同；額外注入 `tool_registry.render_catalog()` 產生的工具目錄，以及 `_compact_schema_summary()` 產生的精簡結構摘要（僅資料庫與資料表名稱，不含欄位——欄位細節由 `get_schema`/`get_table_ddl` 工具按需查詢，避免每回合都把完整 schema 塞進 prompt）。內含 4 個 few-shot 範例示範 `<TOOL>`→`<OBSERVATION>`→`<FINAL>` 連鎖（含檢查文件完整性 → 草擬 COMMENT → `<DDL_SUGGESTION>` 呈現的流程）。`<DDL_SUGGESTION>`/`<DESIGN_REQUEST>` 標籤語意與舊版相同：前者仍只是文字建議，需使用者按「執行 DDL」才會經 `ddl_guard` 驗證後執行；後者觸發 `web/routes/agent.py` 的 `_create_design_session()` 建立一個新的設計 session。
+角色/能力/限制與舊版 `db_agent.txt` 相同；額外注入 `tool_registry.render_catalog()` 產生的工具目錄，以及 `_compact_schema_summary()` 產生的精簡結構摘要（僅資料庫與資料表名稱，不含欄位——欄位細節由 `get_schema`/`get_table_ddl` 工具按需查詢，避免每回合都把完整 schema 塞進 prompt）。內含 4 個 few-shot 範例示範 `<TOOL>`→`<OBSERVATION>`→`<FINAL>` 連鎖（含檢查文件完整性 → 草擬 COMMENT → `propose_ddl` 提案的流程）。**結構變更一律經 `propose_ddl` 工具提案**（見下方「人工審批」一節）；`<DDL_SUGGESTION>` 標籤解析僅為既有解析路徑保留的向後相容，不再是主要路徑。`<DESIGN_REQUEST>` 語意與舊版相同：觸發 `web/routes/agent.py` 的 `_create_design_session()` 建立一個新的設計 session（新表設計仍走原本的 interviewer 流程，不經 `propose_ddl`）。
 
 ## 建表標準一致性 / 需求關聯分析 / 文件完整性檢查
 
@@ -260,7 +266,56 @@ web/routes/agent.py 把上述結果整形為與舊版相容的 response：
 - **`web/sql_safety.py`**：`check_ddl_allowlist` 的 allowlist 加入 `COMMENT ON (TABLE|COLUMN)`——`COMMENT ON ... IS '...'` 的字串內容會被 `skeleton()` 遮蔽，不影響關鍵字檢查
 - **確認頁**（`app.py:confirm_page`）：有 `context_tables`（匯入的現有 DB）時，把 `check_conventions` 的警告併入 `schema_advisor` 的警告清單一併顯示；`find_related()` 的結果（以 `session.key_points` 串接作為需求文字）放進新欄位 `relation_report`，`templates/confirm.html` 以 `RELATION_REPORT` JSON 傳給 `static/js/confirm.js` 動態渲染「與現有資料庫的關聯」區塊（相關表 / FK 建議 / 重複風險，無資料時不顯示）
 - **Interviewer**（`agents/interviewer.py`）：建構時若有 ≥ 3 張現有表（`existing_table_specs`）便推斷 conventions；設計階段的每一輪（既有-DB 結構被觸發注入時）額外注入 conventions 摘要與該輪訊息命中的 top 3 相關表，引導 LLM 遵循現有標準、參照現有表
-- **DB Agent 頁**：`db_agent.js` 的「📋 檢查文件完整性」按鈕送出固定訊息，觸發 agent 走 `check_table_docs` → 草擬說明 → `draft_comment_ddl` → `<DDL_SUGGESTION>` 流程（見 `prompts/agent_loop.txt` 的「文件完整性檢查流程」段落）
+- **DB Agent 頁**：`db_agent.js` 的「📋 檢查文件完整性」按鈕送出固定訊息，觸發 agent 走 `check_table_docs` → 草擬說明 → `draft_comment_ddl` → `propose_ddl` 提案流程（見 `prompts/agent_loop.txt` 的「文件完整性檢查流程」段落）
+
+---
+
+## 人工審批（HITL）變更請求（`web/change_requests.py` + `web/routes/changes.py`）
+
+任何結構變更（agent 透過 `propose_ddl` 提案，或使用者在 DB Agent 頁把一則 `<DDL_SUGGESTION>` 送審）都不會直接執行，而是落地成一筆 `pending` 的 change request，交由管理員以 `ADMIN_TOKEN` 核准/駁回後才會真正跑 DDL。落實 `app.py` 早期 `# TODO(auth)` 的缺口。
+
+### 生命週期
+
+```
+propose_ddl / POST /api/change-requests
+        │  sql_safety.check_ddl_allowlist → ddl_validator.validate_ddl（dry-run，失敗則直接擋下、不建立請求）
+        ▼
+change_requests.create()  →  status = "pending"
+        │
+        │  管理員在 DB Agent 頁「待審變更請求」面板核准/駁回（需 X-Admin-Token）
+        ▼
+POST /api/change-requests/<id>/approve                    POST /api/change-requests/<id>/reject
+        │  重跑 check_ddl_allowlist + validate_ddl（防資料庫已 drift）        │
+        │  ├─ 任一失敗 → change_requests.decide(id, "failed", error=...)     │
+        │  └─ 皆通過   → ddl_executor.execute_ddl()（單一交易）              │
+        │        ├─ 成功 → decide(id, "executed") + activity_log.record     │
+        │        └─ 失敗 → decide(id, "failed", error=...) + activity_log   │
+        ▼                                                                   ▼
+status: executed | failed                                        status: rejected（永不執行）
+```
+
+### 資料形狀（`web/change_requests.py`）
+
+`{id, db_name, ddl, reason, status, dry_run_ok, created_at, decided_at, error}`，`status ∈ {pending, approved, rejected, executed, failed}`。與 `session_store.py` 相同的雙後端慣例：`DATABASE_URL` 已設 → PostgreSQL（`web/db_schema.py` 的 `change_requests_table`，`ensure_schema()` 自動建表；正式部署另有 `alembic/versions/0004_change_requests.py`）；未設 → 單一 JSON 檔 `data/change_requests.json`（`threading.Lock` 保護讀寫）。公開函式：`create` / `get` / `list_requests(status=None)` / `decide(id, status, error=None)`。
+
+### `propose_ddl`（terminal 工具）
+
+見上方「工具目錄」。是 `agents/tool_registry.py` 中唯一 `read_only=False` 的工具，也是 `agents/agent_loop.py` 中唯一的 terminal 工具：一旦被呼叫（不論成功或失敗），迴圈立即結束、不再呼叫 LLM，回覆文字由 `agent_loop._finish_propose_ddl()` 直接合成（附 `proposal_id` 或錯誤原因），而非交給 LLM 自己寫 `<FINAL>`。
+
+### `web/routes/changes.py`（blueprint，`/api/change-requests`）
+
+| 路由 | 說明 |
+|---|---|
+| `GET /api/change-requests?status=` | 列表，`status` 可選（`pending` 等） |
+| `POST /api/change-requests` | 手動送審：DB Agent 頁 DDL 建議卡片的「送審」按鈕呼叫，走同一套 allowlist + dry-run 驗證 |
+| `POST /api/change-requests/<id>/approve` | 需 `@require_admin`；重驗 → 執行 → 記錄結果 |
+| `POST /api/change-requests/<id>/reject` | 需 `@require_admin`；標記 `rejected`，永不執行 |
+
+`require_admin` decorator：環境變數 `ADMIN_TOKEN` 未設定 → 一律 `403`（提示需先設定）；已設定但 header `X-Admin-Token` 不符 → `401`。這是 `docs/permission_matrix.md` 所述完整 RBAC 落地前的過渡機制。
+
+### 前端（`static/js/db_agent.js` + `templates/db_agent.html`）
+
+`/api/db-agent/execute-ddl`（直接執行）已移除。DDL 建議卡片的按鈕由「執行 DDL」改為「送審」（呼叫 `POST /api/change-requests`）；頁面新增「待審變更請求」面板：列出 `pending` 請求、核准/駁回按鈕、管理員權杖輸入框（值存於瀏覽器 `sessionStorage`，隨每次核准/駁回請求以 `X-Admin-Token` header 送出，不落地到伺服器端存放）。
 
 ---
 

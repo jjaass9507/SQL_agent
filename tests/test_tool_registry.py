@@ -208,3 +208,47 @@ def test_draft_comment_ddl_requires_table_and_comments():
 def test_draft_comment_ddl_builds_ddl():
     result = dispatch("draft_comment_ddl", {"table": "orders", "comments": {"table_comment": "訂單"}}, _ctx())
     assert "COMMENT ON TABLE" in result["ddl"]
+
+
+# ── Phase 4: propose_ddl (allowlist -> dry-run -> pending change request) ───
+
+def test_render_catalog_lists_propose_ddl():
+    assert "propose_ddl" in render_catalog()
+
+
+def test_propose_ddl_requires_ddl():
+    result = dispatch("propose_ddl", {}, _ctx())
+    assert "error" in result
+
+
+def test_propose_ddl_rejects_disallowed_ddl():
+    result = dispatch("propose_ddl", {"ddl": "DROP TABLE x;"}, _ctx())
+    assert "error" in result
+
+
+def test_propose_ddl_dry_run_failure_returns_error_and_no_request(monkeypatch, tmp_path):
+    import web.change_requests as change_requests
+    import web.ddl_validator as ddl_validator
+    monkeypatch.setattr(change_requests, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(change_requests, "_JSON_PATH", tmp_path / "change_requests.json")
+    monkeypatch.setattr(ddl_validator, "validate_ddl", lambda ddl, url: {"ok": False, "error": "boom"})
+
+    result = dispatch("propose_ddl", {"ddl": "CREATE INDEX idx_x ON t(id);"}, _ctx())
+    assert "error" in result
+    assert "boom" in result["error"]
+    assert change_requests.list_requests() == []
+
+
+def test_propose_ddl_creates_pending_request(monkeypatch, tmp_path):
+    import web.change_requests as change_requests
+    import web.ddl_validator as ddl_validator
+    monkeypatch.setattr(change_requests, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(change_requests, "_JSON_PATH", tmp_path / "change_requests.json")
+    monkeypatch.setattr(ddl_validator, "validate_ddl", lambda ddl, url: {"ok": True})
+
+    result = dispatch("propose_ddl", {"ddl": "CREATE INDEX idx_x ON t(id);", "reason": "speed"}, _ctx())
+    assert result == {"proposal_id": result["proposal_id"], "dry_run_ok": True, "status": "pending"}
+    stored = change_requests.get(result["proposal_id"])
+    assert stored["ddl"] == "CREATE INDEX idx_x ON t(id);"
+    assert stored["reason"] == "speed"
+    assert stored["status"] == "pending"

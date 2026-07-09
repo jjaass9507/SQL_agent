@@ -14,6 +14,9 @@
   const resultsList = document.getElementById('da-results-list');
   const resultsClearBtn = document.getElementById('da-results-clear');
   const designPanel = document.getElementById('da-design-panel');
+  const pendingListEl = document.getElementById('da-pending-list');
+  const pendingRefreshBtn = document.getElementById('da-pending-refresh');
+  const adminTokenInput = document.getElementById('da-admin-token');
 
   if (!messagesEl) return; // no-db state, page shows redirect
 
@@ -229,6 +232,10 @@
       if (data.design_session) {
         openDesignPanel(data.design_session);
       }
+
+      if (data.proposal) {
+        loadPendingRequests();
+      }
     } catch (e) {
       removeById(thinkingId);
       appendBubble('連線失敗，請重新整理頁面後再試', 'error');
@@ -246,7 +253,7 @@
 
     const label = document.createElement('div');
     label.className = 'da-ddl-label';
-    label.textContent = 'AI 建議的 DDL（請確認後執行）：' + (ddlDb ? ` [目標：${ddlDb}]` : '');
+    label.textContent = 'AI 建議的 DDL（送審後由管理員核准才會執行）：' + (ddlDb ? ` [目標：${ddlDb}]` : '');
     block.appendChild(label);
 
     const pre = document.createElement('pre');
@@ -256,15 +263,15 @@
 
     const actions = document.createElement('div');
     actions.className = 'da-ddl-actions';
-    const runBtn = document.createElement('button');
-    runBtn.className = 'btn btn-primary btn-sm';
-    runBtn.textContent = '執行 DDL';
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-primary btn-sm';
+    submitBtn.textContent = '送審';
     const dismissBtn = document.createElement('button');
     dismissBtn.className = 'btn btn-ghost btn-sm';
     dismissBtn.textContent = '取消';
     const resultEl = document.createElement('div');
     resultEl.className = 'da-ddl-result';
-    actions.appendChild(runBtn);
+    actions.appendChild(submitBtn);
     actions.appendChild(dismissBtn);
     block.appendChild(actions);
     block.appendChild(resultEl);
@@ -272,34 +279,34 @@
     messagesEl.appendChild(block);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
-    runBtn.addEventListener('click', async () => {
-      runBtn.disabled = true;
-      runBtn.textContent = '⟳ 執行中…';
+    submitBtn.addEventListener('click', async () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '⟳ 送審中…';
       resultEl.textContent = '';
       resultEl.className = 'da-ddl-result';
       try {
-        const res = await fetch('/api/db-agent/execute-ddl', {
+        const res = await fetch('/api/change-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ddl, db_name: ddlDb || currentDb() }),
         });
         const data = await res.json();
-        if (data.ok) {
-          resultEl.textContent = `✓ 已執行 ${data.statements_run} 條語句`;
+        if (res.ok) {
+          resultEl.textContent = `✓ 已送審（編號 ${data.id}），等待管理員核准`;
           resultEl.classList.add('ok');
-          runBtn.style.display = 'none';
-          loadSchemaTree();
+          submitBtn.style.display = 'none';
+          loadPendingRequests();
         } else {
-          resultEl.textContent = '✗ ' + (data.error || '執行失敗');
+          resultEl.textContent = '✗ ' + (data.error || '送審失敗');
           resultEl.classList.add('err');
-          runBtn.disabled = false;
-          runBtn.textContent = '執行 DDL';
+          submitBtn.disabled = false;
+          submitBtn.textContent = '送審';
         }
       } catch (e) {
         resultEl.textContent = '✗ 連線失敗';
         resultEl.classList.add('err');
-        runBtn.disabled = false;
-        runBtn.textContent = '執行 DDL';
+        submitBtn.disabled = false;
+        submitBtn.textContent = '送審';
       }
     });
 
@@ -413,6 +420,78 @@
       }
     });
   }
+
+  // ── Pending change requests panel ────────────────────────────────────────
+
+  const ADMIN_TOKEN_KEY = 'sqlagent_admin_token';
+  const STATUS_LABELS = { pending: '待審', approved: '已核准', rejected: '已駁回', executed: '已執行', failed: '失敗' };
+
+  if (adminTokenInput) {
+    adminTokenInput.value = sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
+    adminTokenInput.addEventListener('change', () => {
+      sessionStorage.setItem(ADMIN_TOKEN_KEY, adminTokenInput.value);
+    });
+  }
+
+  function renderPendingList(items) {
+    if (!pendingListEl) return;
+    if (!Array.isArray(items) || !items.length) {
+      pendingListEl.innerHTML = '<div class="workbench-sidebar-loading">目前沒有待審的變更請求</div>';
+      return;
+    }
+    pendingListEl.innerHTML = items.map(r => `
+      <div class="da-pending-item" data-id="${escHtml(r.id)}">
+        <div class="da-pending-item-meta">
+          <span>${escHtml(r.db_name || '')}</span>
+          <span class="da-pending-status da-pending-status-${escHtml(r.status)}">${escHtml(STATUS_LABELS[r.status] || r.status)}</span>
+        </div>
+        <pre class="da-ddl-pre">${escHtml(r.ddl)}</pre>
+        ${r.reason ? `<div class="da-pending-reason">${escHtml(r.reason)}</div>` : ''}
+        ${r.error ? `<div class="da-ddl-result err">✗ ${escHtml(r.error)}</div>` : ''}
+        <div class="da-pending-actions">
+          <button class="btn btn-primary btn-sm da-pending-approve">核准</button>
+          <button class="btn btn-ghost btn-sm da-pending-reject">駁回</button>
+        </div>
+      </div>`).join('');
+
+    pendingListEl.querySelectorAll('.da-pending-item').forEach(el => {
+      const id = el.dataset.id;
+      const approveBtn = el.querySelector('.da-pending-approve');
+      const rejectBtn = el.querySelector('.da-pending-reject');
+      if (approveBtn) approveBtn.addEventListener('click', () => decideChangeRequest(id, 'approve'));
+      if (rejectBtn) rejectBtn.addEventListener('click', () => decideChangeRequest(id, 'reject'));
+    });
+  }
+
+  function loadPendingRequests() {
+    if (!pendingListEl) return;
+    fetch('/api/change-requests?status=pending')
+      .then(r => r.json())
+      .then(renderPendingList)
+      .catch(() => {});
+  }
+
+  async function decideChangeRequest(id, action) {
+    const token = adminTokenInput ? adminTokenInput.value.trim() : '';
+    try {
+      const res = await fetch(`/api/change-requests/${id}/${action}`, {
+        method: 'POST',
+        headers: { 'X-Admin-Token': token },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert('操作失敗：' + (data.error || res.status));
+        return;
+      }
+      loadPendingRequests();
+      loadSchemaTree();
+    } catch (e) {
+      alert('連線失敗');
+    }
+  }
+
+  if (pendingRefreshBtn) pendingRefreshBtn.addEventListener('click', loadPendingRequests);
+  loadPendingRequests();
 
   // ── Check documentation completeness (quick button) ─────────────────────────
 

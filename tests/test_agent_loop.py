@@ -293,6 +293,67 @@ def test_check_docs_flow_calls_check_table_docs_then_draft_comment_ddl(monkeypat
     assert result["reply"] == "已草擬說明。"
 
 
+# ── Phase 4: propose_ddl is a terminal tool ──────────────────────────────────
+
+def _isolate_change_requests(monkeypatch, tmp_path):
+    import web.change_requests as change_requests
+    monkeypatch.setattr(change_requests, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(change_requests, "_JSON_PATH", tmp_path / "change_requests.json")
+    return change_requests
+
+
+def test_propose_ddl_ends_loop_without_further_llm_call(monkeypatch, tmp_path):
+    change_requests = _isolate_change_requests(monkeypatch, tmp_path)
+    import web.ddl_validator as ddl_validator
+    monkeypatch.setattr(ddl_validator, "validate_ddl", lambda ddl, url: {"ok": True})
+
+    fake = _FakeLLMClient([
+        '<TOOL name="propose_ddl">{"ddl": "CREATE INDEX idx_x ON orders(created_at);", "reason": "慢查詢"}</TOOL>',
+        '<FINAL>（不應該被呼叫到這裡）</FINAL>',
+    ])
+    monkeypatch.setattr(agent_loop, "get_api", lambda: fake)
+
+    sid = _new_session()
+    result = agent_loop.run_agent_turn(sid, "幫我加個索引", db_name="demo")
+
+    # Terminal: only the one LLM call that emitted the <TOOL propose_ddl> — the
+    # loop must not call the LLM again for a <FINAL> wrap-up.
+    assert len(fake.calls) == 1
+    assert result["steps"][0]["tool"] == "propose_ddl"
+    assert result["proposal"] is not None
+    assert result["proposal"]["proposal_id"]
+    assert result["proposal"]["status"] == "pending"
+    assert "已提交結構變更提案" in result["reply"]
+    assert result["proposal"]["proposal_id"] in result["reply"]
+
+    stored = change_requests.get(result["proposal"]["proposal_id"])
+    assert stored["status"] == "pending"
+
+    # Persisted transcript: user, tool (propose_ddl call+observation), ai.
+    session = get_session(sid)
+    assert [m["role"] for m in session["messages"]] == ["user", "tool", "ai"]
+
+
+def test_propose_ddl_dry_run_failure_still_terminal(monkeypatch, tmp_path):
+    change_requests = _isolate_change_requests(monkeypatch, tmp_path)
+    import web.ddl_validator as ddl_validator
+    monkeypatch.setattr(ddl_validator, "validate_ddl", lambda ddl, url: {"ok": False, "error": "語法錯誤"})
+
+    fake = _FakeLLMClient([
+        '<TOOL name="propose_ddl">{"ddl": "CREATE INDEX idx_x ON orders(created_at);"}</TOOL>',
+        '<FINAL>（不應該被呼叫到這裡）</FINAL>',
+    ])
+    monkeypatch.setattr(agent_loop, "get_api", lambda: fake)
+
+    sid = _new_session()
+    result = agent_loop.run_agent_turn(sid, "幫我加個索引", db_name="demo")
+
+    assert len(fake.calls) == 1  # still terminal even when the tool errors
+    assert result["proposal"] is None
+    assert "提案未成立" in result["reply"]
+    assert change_requests.list_requests() == []
+
+
 # ── unknown conversation id ───────────────────────────────────────────────────
 
 def test_unknown_conversation_id_returns_graceful_error(monkeypatch):

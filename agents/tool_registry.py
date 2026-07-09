@@ -208,6 +208,30 @@ def _tool_draft_comment_ddl(args: dict, ctx: ToolContext) -> dict:
     return {"ddl": ddl}
 
 
+def _tool_propose_ddl(args: dict, ctx: ToolContext) -> dict:
+    """Terminal tool (see agents/agent_loop.py): allowlist -> dry-run ->
+    create a pending change_requests row. Never executes anything itself."""
+    err = _require(args, "ddl")
+    if err:
+        return {"error": err}
+    ddl = args["ddl"]
+    from web.sql_safety import check_ddl_allowlist
+    safety_err = check_ddl_allowlist(ddl)
+    if safety_err:
+        return {"error": safety_err}
+    url, err = _resolve(args, ctx)
+    if err:
+        return {"error": err}
+    from web.ddl_validator import validate_ddl
+    dry_run = validate_ddl(ddl, url)
+    if not dry_run.get("ok"):
+        return {"error": f"dry-run 驗證失敗：{dry_run.get('error', '未知錯誤')}"}
+    from web import change_requests
+    db_name = args.get("db") or ctx.db_name
+    req = change_requests.create(db_name, ddl, args.get("reason", ""), dry_run_ok=True)
+    return {"proposal_id": req["id"], "dry_run_ok": True, "status": "pending"}
+
+
 # ── registry ─────────────────────────────────────────────────────────────────
 
 _REGISTRY: dict[str, Tool] = {}
@@ -276,10 +300,19 @@ _register(Tool(
 ))
 _register(Tool(
     name="draft_comment_ddl",
-    description="把草擬好的資料表/欄位說明組成 COMMENT ON TABLE/COLUMN 語句，供以 DDL_SUGGESTION 呈現待確認。",
+    description="把草擬好的資料表/欄位說明組成 COMMENT ON TABLE/COLUMN 語句，供 propose_ddl 提案。",
     args_doc=('{"db": "資料庫名稱（可省略）", "table": "資料表名稱", '
               '"comments": {"table_comment": "...", "columns": {"欄位名": "說明"}}}'),
     handler=_tool_draft_comment_ddl,
+))
+_register(Tool(
+    name="propose_ddl",
+    description=("提案一項結構變更（CREATE TABLE、ALTER TABLE ADD COLUMN/CONSTRAINT、CREATE INDEX、"
+                 "COMMENT ON）。會先做 allowlist 檢查與 dry-run 驗證，通過後建立待審變更請求，交由管理員"
+                 "核准後才會實際執行。呼叫後本回合立即結束（terminal 工具）。"),
+    args_doc='{"db": "資料庫名稱（可省略）", "ddl": "CREATE INDEX ...;", "reason": "為何需要此變更"}',
+    handler=_tool_propose_ddl,
+    read_only=False,
 ))
 
 

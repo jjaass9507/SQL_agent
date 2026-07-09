@@ -1,7 +1,26 @@
 # SQL Agent — 權限矩陣
 
-> **目前狀態**：v0.5 尚未實作認證機制，所有端點為公開存取。  
-> 本文件定義 v1.0 目標的角色與權限設計，作為未來認證層實作依據。
+> **目前狀態**：v0.5 尚未實作使用者認證機制，一般端點為公開存取。  
+> **例外（已實作）**：結構變更審批（`POST /api/change-requests/<id>/approve|reject`）已加上
+> `ADMIN_TOKEN` 共享密鑰防護——見下方「已實作：變更審批 ADMIN_TOKEN」一節。  
+> 本文件其餘部分定義 v1.0 目標的角色與權限設計，作為未來認證層實作依據。
+
+---
+
+## 已實作：變更審批 `ADMIN_TOKEN`（Phase 4）
+
+`POST /api/change-requests/<id>/approve` 與 `POST /api/change-requests/<id>/reject`（`web/routes/changes.py`
+的 `require_admin` decorator）是目前唯一有存取控制的端點：
+
+| 情境 | 回應 |
+|---|---|
+| 伺服器未設定環境變數 `ADMIN_TOKEN` | `403`，訊息提示需先設定 |
+| 已設定 `ADMIN_TOKEN`，但請求 header `X-Admin-Token` 缺漏或不符 | `401` |
+| `X-Admin-Token` 與 `ADMIN_TOKEN` 相符 | 放行 |
+
+`GET /api/change-requests`（列表）與 `POST /api/change-requests`（提案/送審）**不**受此保護——任何人都能
+提案一項結構變更，但只有持有權杖者能核准使其真正執行到資料庫上。這是完整 RBAC 落地前的過渡機制：只鎖住
+「執行變更」這一個高風險動作，不是通用的使用者權限系統，因此仍列在下方「目前缺口」中。
 
 ---
 
@@ -34,6 +53,10 @@
 | `GET /health` | ✅ | ✅ | ✅ | ✅ |
 | `GET /api/admin/sessions` | ❌ | ❌ | ❌ | ✅ |
 | `GET /api/admin/logs` | ❌ | ❌ | ❌ | ✅ |
+| `GET /api/change-requests` | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/change-requests` | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/change-requests/<id>/approve` | ❌（已實作 `ADMIN_TOKEN`）| ❌ | ❌ | ✅（`X-Admin-Token`）|
+| `POST /api/change-requests/<id>/reject` | ❌（已實作 `ADMIN_TOKEN`）| ❌ | ❌ | ✅（`X-Admin-Token`）|
 
 ---
 

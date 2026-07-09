@@ -169,9 +169,15 @@ def api_db_agent_chat():
     if design_request:
         result["design_session"] = _create_design_session(design_request)
 
+    proposal = outcome.get("proposal")
+    if proposal:
+        result["proposal"] = proposal
+
     logger.info("db_agent chat", extra={"has_ddl": bool(ddl), "has_design": bool(design_request),
+                                        "has_proposal": bool(proposal),
                                         "steps": len(outcome.get("steps", []))})
-    activity_log.record("db_agent_chat", None, {"has_ddl": bool(ddl), "steps": len(outcome.get("steps", []))})
+    activity_log.record("db_agent_chat", None, {"has_ddl": bool(ddl), "has_proposal": bool(proposal),
+                                                "steps": len(outcome.get("steps", []))})
     return jsonify(result)
 
 
@@ -204,37 +210,4 @@ def api_db_agent_query():
     if "error" in result:
         result["error"] = sanitize_db_error(result["error"])
         return jsonify(result), 400
-    return jsonify(result)
-
-
-@bp.post("/execute-ddl")
-def api_db_agent_execute_ddl():
-    """Validate and execute a confirmed DDL suggestion against a named business DB.
-
-    # TODO(auth): When user roles are implemented, this route should create a
-    # pending change request instead of executing immediately. The request goes
-    # to admin for review, and only admin approval triggers execute_ddl().
-    """
-    from web.ddl_executor import execute_ddl
-    from web.ddl_guard import check_ddl_safety
-    data = request.get_json(silent=True) or {}
-    db_name = (data.get("db_name") or "").strip() or None
-    ddl = (data.get("ddl") or "").strip()
-    if not ddl:
-        return jsonify({"error": "ddl required"}), 400
-    biz_url = _resolve_biz_url(db_name)
-    if not biz_url:
-        return jsonify({"error": "尚未設定業務資料庫，或找不到指定的資料庫"}), 400
-
-    safety_err = check_ddl_safety(ddl)
-    if safety_err:
-        return jsonify({"error": safety_err}), 400
-
-    result = execute_ddl(biz_url, ddl)
-    if not result.get("ok"):
-        result["error"] = sanitize_db_error(result.get("error", "執行失敗"))
-        return jsonify(result), 400
-
-    logger.info("db_agent ddl executed", extra={"stmts": result.get("statements_run")})
-    activity_log.record("db_agent_ddl_executed", None, {"statements_run": result.get("statements_run")})
     return jsonify(result)

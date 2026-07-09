@@ -83,6 +83,21 @@
       <div id="da-results-list" class="da-results-list"></div>
     </div>
 
+    <!-- Pending change-request approvals -->
+    <div id="da-pending-panel" class="da-pending-panel">
+      <div class="da-pending-header">
+        <span class="da-results-title">待審變更請求</span>
+        <div class="da-pending-header-actions">
+          <input id="da-admin-token" type="password" class="da-admin-token-input"
+                 placeholder="管理員權杖（X-Admin-Token）" title="核准/駁回需要的管理員權杖，儲存在瀏覽器 sessionStorage">
+          <button id="da-pending-refresh" class="btn btn-ghost btn-sm" title="重新整理">↻</button>
+        </div>
+      </div>
+      <div id="da-pending-list" class="da-pending-list">
+        <div class="workbench-sidebar-loading">載入中…</div>
+      </div>
+    </div>
+
     <!-- Design panel (fixed right slide-in) -->
     <div id="da-design-panel" class="da-design-panel" style="display:none;" aria-hidden="true">
       <div class="da-design-panel-header">

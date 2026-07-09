@@ -65,8 +65,10 @@ from web.response_utils import hide_platform_tables as _hide_platform_tables
 from web.response_utils import sanitize_db_error as _sanitize_db_error
 from web.response_utils import mask_db_url as _mask_db_url
 from web.routes.agent import bp as db_agent_bp
+from web.routes.changes import bp as changes_bp
 
 app.register_blueprint(db_agent_bp)
+app.register_blueprint(changes_bp)
 
 _interviewer_store: dict[str, Interviewer] = {}
 _interviewer_lock = threading.Lock()
