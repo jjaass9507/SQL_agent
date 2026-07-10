@@ -47,6 +47,14 @@ def api_llm_health():
     if not result.get("ok"):
         logger.error("LLM health check failed", extra={"detail": result.get("error")})
         return jsonify(result), 503
+    probe = api.probe_system_prompt()
+    result["system_mode"] = api.system_mode
+    result["system_prompt_honored"] = probe.get("honored")
+    if probe.get("honored") is False:
+        if api.system_mode == "system":
+            result["hint"] = "此 gateway 疑似忽略 system 訊息，請在 .env 設 LLM_SYSTEM_MODE=inline 後重啟"
+        else:
+            result["hint"] = "inline 模式下模型仍未遵循指令，請確認 LLM_MODEL 對應的模型能力"
     return jsonify(result)
 
 
