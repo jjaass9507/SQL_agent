@@ -48,14 +48,31 @@ def api_llm_health():
         logger.error("LLM health check failed", extra={"detail": result.get("error")})
         return jsonify(result), 503
     probe = api.probe_system_prompt()
+    history_probe = api.probe_history()
     result["system_mode"] = api.system_mode
     result["system_prompt_honored"] = probe.get("honored")
-    if probe.get("honored") is False:
-        if api.system_mode == "system":
-            result["hint"] = "此 gateway 疑似忽略 system 訊息，請在 .env 設 LLM_SYSTEM_MODE=inline 後重啟"
+    result["history_honored"] = history_probe.get("honored")
+    if probe.get("honored") is False or history_probe.get("honored") is False:
+        if probe.get("honored") is False:
+            if api.system_mode == "system":
+                hint = "此 gateway 疑似忽略 system 訊息，請在 .env 設 LLM_SYSTEM_MODE=inline 後重啟"
+            else:
+                hint = "inline 模式下模型仍未遵循指令，請確認 LLM_MODEL 對應的模型能力"
         else:
-            result["hint"] = "inline 模式下模型仍未遵循指令，請確認 LLM_MODEL 對應的模型能力"
+            hint = "此 gateway 疑似未正確轉發多輪對話歷史"
+        result["hint"] = f"{hint}；請打 GET /api/llm/diagnose 取得建議設定"
     return jsonify(result)
+
+
+@bp.get("/api/llm/diagnose")
+def api_llm_diagnose():
+    """能力探測矩陣：嘗試 (LLM_CONTENT_FORMAT, LLM_SYSTEM_MODE) 各組合，回傳矩陣與建議設定。"""
+    from utils.client import run_capability_matrix
+    try:
+        result = run_capability_matrix()
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    return jsonify({"matrix": result["matrix"], "recommended": result["recommendation"]})
 
 
 @bp.get("/api/activity")
