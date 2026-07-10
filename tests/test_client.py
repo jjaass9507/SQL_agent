@@ -1,4 +1,6 @@
 """Tests for LLMClient — OpenAI-compatible Chat Completions client."""
+import json
+
 import pytest
 
 from utils.client import LLMClient, get_api
@@ -14,6 +16,7 @@ class _FakeResp:
     def __init__(self, status_code=200, payload=None):
         self.status_code = status_code
         self._payload = payload or {}
+        self.text = json.dumps(self._payload)
 
     def raise_for_status(self):
         if self.status_code >= 400 and self.status_code != 429:
@@ -235,6 +238,35 @@ def test_get_api_returns_singleton(monkeypatch):
     assert isinstance(first, LLMClient)
 
 
+# ── LLM_TIMEOUT env var ──────────────────────────────────
+
+def test_get_api_uses_llm_timeout_env(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_TIMEOUT", "45")
+    assert get_api().timeout == (10, 45)
+
+
+def test_get_api_defaults_timeout_when_unset(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.delenv("LLM_TIMEOUT", raising=False)
+    assert get_api().timeout == (10, 120)
+
+
+def test_get_api_falls_back_to_default_on_invalid_llm_timeout(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_TIMEOUT", "abc")
+    assert get_api().timeout == (10, 120)
+
+
 # ── connection diagnostics（proxy 繞過 / connect timeout / ping）──────────
 
 def test_post_bypasses_proxies_and_uses_connect_timeout(monkeypatch):
@@ -247,7 +279,7 @@ def test_post_bypasses_proxies_and_uses_connect_timeout(monkeypatch):
     monkeypatch.setattr("utils.client.requests.post", fake_post)
     _client().chat_messages([{"role": "user", "content": [{"type": "text", "text": "x"}]}])
     assert captured["proxies"] == {"http": None, "https": None}
-    assert captured["timeout"] == (10, 300)  # (connect, read)
+    assert captured["timeout"] == (10, 120)  # (connect, read)
 
 
 def test_ping_success(monkeypatch):
