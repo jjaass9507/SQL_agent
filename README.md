@@ -294,6 +294,10 @@ SQL_agent/
 │   ├── fixtures/sample_spec.json
 │   └── test_*.py
 │
+├── .claude/                     # Claude Code 設定
+│   ├── skills/fable-architect/  # 規劃／執行分工 skill（Fable 規劃、Sonnet 執行）
+│   └── agents/plan-executor.md  # Sonnet 程式碼執行 subagent 定義
+│
 ├── data/                        # Session 資料（git ignored）
 └── output/                      # CLI 產出目錄（git ignored）
 ```
