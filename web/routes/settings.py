@@ -64,7 +64,7 @@ def api_activity():
 def api_set_settings():
     """Set (or clear) the database used as the platform's memory."""
     from sqlalchemy import text
-    from web.app_settings import set_database_url, set_platform_schema, get_platform_schema
+    from web.app_settings import set_database_url, set_platform_schema
     from web.db_engine import get_engine
     from web.db_schema import ensure_schema
 
