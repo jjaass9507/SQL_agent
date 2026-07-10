@@ -678,7 +678,42 @@ def test_llm_health_gateway_down(client, monkeypatch):
 def test_llm_health_ok(client, monkeypatch):
     fake = MagicMock()
     fake.ping.return_value = {"ok": True, "model": "m"}
+    fake.probe_system_prompt.return_value = {"honored": True, "reply": "SYSMARK_OK"}
+    fake.system_mode = "system"
     monkeypatch.setattr("utils.client.get_api", lambda: fake)
     resp = client.get("/api/llm/health")
     assert resp.status_code == 200
-    assert resp.get_json()["ok"] is True
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["system_mode"] == "system"
+    assert body["system_prompt_honored"] is True
+    assert "hint" not in body
+
+
+def test_llm_health_system_not_honored_hints_inline(client, monkeypatch):
+    """system mode 下若 system prompt 未被遵循，提示改用 LLM_SYSTEM_MODE=inline。"""
+    fake = MagicMock()
+    fake.ping.return_value = {"ok": True, "model": "m"}
+    fake.probe_system_prompt.return_value = {"honored": False, "reply": "我不知道你在說什麼"}
+    fake.system_mode = "system"
+    monkeypatch.setattr("utils.client.get_api", lambda: fake)
+    resp = client.get("/api/llm/health")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["system_prompt_honored"] is False
+    assert "LLM_SYSTEM_MODE=inline" in body["hint"]
+
+
+def test_llm_health_inline_not_honored_hints_model_capability(client, monkeypatch):
+    """已是 inline 模式仍未遵循，提示改確認模型能力，不再建議切 inline。"""
+    fake = MagicMock()
+    fake.ping.return_value = {"ok": True, "model": "m"}
+    fake.probe_system_prompt.return_value = {"honored": False, "reply": "我不知道你在說什麼"}
+    fake.system_mode = "inline"
+    monkeypatch.setattr("utils.client.get_api", lambda: fake)
+    resp = client.get("/api/llm/health")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["system_prompt_honored"] is False
+    assert "LLM_SYSTEM_MODE=inline" not in body["hint"]
+    assert "LLM_MODEL" in body["hint"]

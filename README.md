@@ -128,6 +128,7 @@ LLM_VERIFY=false
 | `LLM_MODEL` | ✓ | 模型名稱 |
 | `LLM_VERIFY` | | SSL 憑證驗證（預設 `false`，供自簽憑證端點使用） |
 | `LLM_TIMEOUT` | | 等待 gateway 回應的秒數上限（read timeout，預設 `120`）。無效值（非數字）會退回預設值並寫入 warning log |
+| `LLM_SYSTEM_MODE` | | system prompt 傳遞模式：`system`（獨立 system role 訊息，預設）或 `inline`（併入第一則 user 訊息文字）。無效值會退回預設值並寫入 warning log |
 
 > **連線疑難排解**：啟動後可用 `GET /api/llm/health` 實際打一次 gateway，
 > 回傳成功或完整失敗原因（連線錯誤類型、HTTP 狀態碼、回應片段）。
@@ -149,6 +150,12 @@ LLM_VERIFY=false
 > 但未回應，可依序排查：(a) 在同一台機器直接對 gateway 跑原生 `curl` 比對是否
 > 也慢；(b) 確認 `LLM_MODEL` 的值正確——部分 gateway 對不存在的 model id
 > 不回錯誤而是直接掛住；(c) 視需要調小 `LLM_TIMEOUT`（預設 120 秒）讓失敗更快浮現。
+>
+> 若模型回覆像是完全沒看到角色設定/工具說明（例如 DB Agent 不知道自己有
+> 工具、看不到 schema 摘要），代表 gateway 可能忽略了獨立的 system role
+> 訊息。打 `GET /api/llm/health` 看回應中的 `system_prompt_honored`：
+> 若為 `false`，在 `.env` 設 `LLM_SYSTEM_MODE=inline` 後重啟，改把
+> system prompt 併入第一則 user 訊息文字傳送。
 | `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
 | `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
 | `ADMIN_TOKEN` | | 核准/駁回 DB Agent 變更請求所需的共享密鑰（`X-Admin-Token` header）。未設定時，`/api/change-requests/<id>/approve` 與 `.../reject` 一律回 403 |

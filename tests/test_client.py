@@ -267,6 +267,35 @@ def test_get_api_falls_back_to_default_on_invalid_llm_timeout(monkeypatch):
     assert get_api().timeout == (10, 120)
 
 
+# ── LLM_SYSTEM_MODE env var ──────────────────────────────
+
+def test_get_api_defaults_system_mode_when_unset(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.delenv("LLM_SYSTEM_MODE", raising=False)
+    assert get_api().system_mode == "system"
+
+
+def test_get_api_uses_llm_system_mode_env(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_SYSTEM_MODE", "inline")
+    assert get_api().system_mode == "inline"
+
+
+def test_get_api_falls_back_to_default_on_invalid_llm_system_mode(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_SYSTEM_MODE", "bogus")
+    assert get_api().system_mode == "system"
+
+
 # ── connection diagnostics（proxy 繞過 / connect timeout / ping）──────────
 
 def test_post_bypasses_proxies_and_uses_connect_timeout(monkeypatch):
@@ -322,3 +351,99 @@ def test_ping_unexpected_shape(monkeypatch):
     result = _client().ping()
     assert result["ok"] is False
     assert "choices" in result["error"]
+
+
+# ── system_mode="inline" (system prompt merged into first user message) ──
+
+def test_inline_mode_no_system_message_and_prefixes_user_text(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(system_mode="inline")
+    client.chat_messages(
+        [{"role": "user", "content": [{"type": "text", "text": "問題"}]}],
+        system_prompt="你是助手",
+    )
+
+    messages = captured["json"]["messages"]
+    assert all(m["role"] != "system" for m in messages)
+    assert len(messages) == 1
+    text = messages[0]["content"][0]["text"]
+    assert text.startswith("【角色指令】\n你是助手")
+    assert "【輸入】\n問題" in text
+
+
+def test_inline_mode_does_not_mutate_caller_messages(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda *a, **k: _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]}),
+    )
+    original = [{"role": "user", "content": [{"type": "text", "text": "問題"}]}]
+    client = _client(system_mode="inline")
+    client.chat_messages(original, system_prompt="你是助手")
+
+    assert original[0]["content"][0]["text"] == "問題"
+
+
+def test_inline_mode_without_system_prompt_unchanged(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(system_mode="inline")
+    client.chat_messages([{"role": "user", "content": [{"type": "text", "text": "x"}]}])
+    assert captured["json"]["messages"][0]["content"][0]["text"] == "x"
+
+
+# ── probe_system_prompt ───────────────────────────────────
+
+def test_probe_system_prompt_honored(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "SYSMARK_OK"}}]}),
+    )
+    result = _client().probe_system_prompt()
+    assert result == {"honored": True, "reply": "SYSMARK_OK"}
+
+
+def test_probe_system_prompt_not_honored(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "我不知道你在說什麼"}}]}),
+    )
+    result = _client().probe_system_prompt()
+    assert result["honored"] is False
+    assert result["reply"] == "我不知道你在說什麼"
+
+
+def test_probe_system_prompt_request_exception(monkeypatch):
+    import requests as real_requests
+
+    def raise_err(*a, **k):
+        raise real_requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr("utils.client.requests.post", raise_err)
+    result = _client().probe_system_prompt()
+    assert result["honored"] is None
+    assert "ConnectionError" in result["error"]
+
+
+def test_probe_system_prompt_uses_inline_mode_when_configured(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "SYSMARK_OK"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    _client(system_mode="inline").probe_system_prompt()
+    messages = captured["json"]["messages"]
+    assert all(m["role"] != "system" for m in messages)
+    assert "SYSMARK_OK" in messages[0]["content"][0]["text"]
