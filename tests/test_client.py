@@ -188,3 +188,60 @@ def test_get_api_returns_singleton(monkeypatch):
     second = get_api()
     assert first is second
     assert isinstance(first, LLMClient)
+
+
+# ── connection diagnostics（proxy 繞過 / connect timeout / ping）──────────
+
+def test_post_bypasses_proxies_and_uses_connect_timeout(monkeypatch):
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return _FakeResp(200, {"choices": [{"message": {"content": "hi"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    _client().chat_messages([{"role": "user", "content": [{"type": "text", "text": "x"}]}])
+    assert captured["proxies"] == {"http": None, "https": None}
+    assert captured["timeout"] == (10, 300)  # (connect, read)
+
+
+def test_ping_success(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "pong"}}]}),
+    )
+    result = _client().ping()
+    assert result == {"ok": True, "model": "m"}
+
+
+def test_ping_connection_error(monkeypatch):
+    import requests
+
+    def fake_post(url, **kwargs):
+        raise requests.exceptions.ConnectionError("connection refused")
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    result = _client().ping()
+    assert result["ok"] is False
+    assert "ConnectionError" in result["error"]
+    assert result["url"].endswith("/chat/completions")
+
+
+def test_ping_http_error_includes_body(monkeypatch):
+    resp = _FakeResp(401, {})
+    resp.text = '{"error": "invalid api key"}'
+    monkeypatch.setattr("utils.client.requests.post", lambda url, **kw: resp)
+    result = _client().ping()
+    assert result["ok"] is False
+    assert result["status_code"] == 401
+    assert "invalid api key" in result["error"]
+
+
+def test_ping_unexpected_shape(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"unexpected": True}),
+    )
+    result = _client().ping()
+    assert result["ok"] is False
+    assert "choices" in result["error"]

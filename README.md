@@ -127,6 +127,11 @@ LLM_VERIFY=false
 | `LLM_API_KEY` | ✓ | API 金鑰（僅放 `.env`，不得寫入任何程式碼或文件） |
 | `LLM_MODEL` | ✓ | 模型名稱 |
 | `LLM_VERIFY` | | SSL 憑證驗證（預設 `false`，供自簽憑證端點使用） |
+
+> **連線疑難排解**：啟動後可用 `GET /api/llm/health` 實際打一次 gateway，
+> 回傳成功或完整失敗原因（連線錯誤類型、HTTP 狀態碼、回應片段）。
+> 對 LLM 的請求一律**繞過系統 HTTP(S) proxy**（內網 gateway 場景），
+> connect timeout 10 秒——主機不通會快速失敗並寫入 log，而非長時間無回應。
 | `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
 | `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
 | `ADMIN_TOKEN` | | 核准/駁回 DB Agent 變更請求所需的共享密鑰（`X-Admin-Token` header）。未設定時，`/api/change-requests/<id>/approve` 與 `.../reject` 一律回 403 |
@@ -206,6 +211,7 @@ python app.py
 | `GET` | `/api/settings` | 取得目前記憶後端狀態（密碼遮罩） |
 | `POST` | `/api/settings` | 設定／清除作為記憶的資料庫連線（測試連線並建表） |
 | `GET` | `/api/activity` | 平台使用紀錄（寫入設定的 PostgreSQL，JSON 模式回空陣列） |
+| `GET` | `/api/llm/health` | LLM 連線診斷：實際呼叫 gateway，失敗時回傳完整原因（503） |
 | `POST` | `/api/ddl-import` | 由貼上的 CREATE TABLE DDL 建立設計 Session |
 | `GET` | `/api/sessions/<id>/schema-tree` | 結構瀏覽器資料（實際 DB 或設計 Schema） |
 | `POST` | `/api/sessions/<id>/query` | 對 Session 的目標資料庫執行唯讀 SQL |

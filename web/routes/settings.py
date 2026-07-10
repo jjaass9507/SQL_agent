@@ -35,6 +35,21 @@ def api_get_settings():
     })
 
 
+@bp.get("/api/llm/health")
+def api_llm_health():
+    """LLM 連線診斷：實際打一次 gateway，回傳成功或完整失敗原因。"""
+    from utils.client import get_api
+    try:
+        api = get_api()
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    result = api.ping()
+    if not result.get("ok"):
+        logger.error("LLM health check failed", extra={"detail": result.get("error")})
+        return jsonify(result), 503
+    return jsonify(result)
+
+
 @bp.get("/api/activity")
 def api_activity():
     """Recent platform usage records from the configured database (empty in JSON mode)."""

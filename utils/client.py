@@ -19,7 +19,9 @@ class LLMClient:
         self.api_key = api_key
         self.model = model
         self.verify = verify
-        self.timeout = timeout
+        # (connect, read) — fail fast when the gateway host is unreachable
+        # instead of hanging for the full read timeout with no log output.
+        self.timeout = (10, timeout)
 
     def chat_messages(self, messages: list[dict], system_prompt: Optional[str] = None) -> Optional[str]:
         """送出 messages（可選在最前插入 system_prompt），回傳 AI 純文字回應。
@@ -46,6 +48,8 @@ class LLMClient:
                     json=payload,
                     headers=headers,
                     verify=self.verify,
+                    # Internal gateway — never route through system HTTP(S) proxies.
+                    proxies={"http": None, "https": None},
                     timeout=self.timeout,
                 )
 
@@ -61,12 +65,45 @@ class LLMClient:
                 return self._extract_content(data)
 
             except requests.exceptions.RequestException as e:
-                logger.error("LLM API request error: %s", e)
+                logger.error("LLM API request error (%s → %s): %s",
+                             type(e).__name__, url, e)
                 return None
 
         logger.error("LLM API rate limit retries exhausted after %d attempts: %s",
                      len(_RETRY_DELAYS) + 1, last_error)
         return None
+
+    def ping(self) -> dict:
+        """單次連線診斷（不重試）：送最小 prompt，回傳 {ok, error?, status_code?}。
+        錯誤內容原樣回傳給呼叫端，供 /api/llm/health 顯示連線失敗原因。"""
+        url = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "ping"}]}],
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = requests.post(
+                url, json=payload, headers=headers, verify=self.verify,
+                proxies={"http": None, "https": None}, timeout=(10, 60),
+            )
+        except requests.exceptions.RequestException as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}", "url": url}
+        if response.status_code != 200:
+            return {"ok": False, "status_code": response.status_code,
+                    "error": response.text[:300], "url": url}
+        try:
+            content = self._extract_content(response.json())
+        except ValueError:
+            return {"ok": False, "status_code": 200,
+                    "error": f"回應不是 JSON：{response.text[:200]}", "url": url}
+        if content is None:
+            return {"ok": False, "status_code": 200,
+                    "error": "回應格式非預期（缺 choices[0].message.content）", "url": url}
+        return {"ok": True, "model": self.model}
 
     def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
         """相容介面：包成單則 user 訊息 + system_prompt 呼叫 chat_messages。"""
