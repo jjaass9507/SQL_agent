@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -8,13 +9,14 @@ import requests
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS = (2, 4, 8)  # seconds between attempts
+_DEFAULT_READ_TIMEOUT = 120  # seconds; overridable via LLM_TIMEOUT env var
 
 
 class LLMClient:
     """OpenAI 相容 Chat Completions API 客戶端。"""
 
     def __init__(self, base_url: str, api_key: str, model: str,
-                 verify: bool = False, timeout: int = 300):
+                 verify: bool = False, timeout: int = 120):
         base_url = base_url.rstrip("/")
         # 使用者可能貼「v1 base」（OpenAI 慣例）或整段「完整 completions 端點」
         # （部分內網 gateway 的原生格式）。兩者皆須支援：若已包含
@@ -46,8 +48,13 @@ class LLMClient:
         }
         url = f"{self.base_url}/chat/completions"
 
+        payload_size = len(json.dumps(payload))
+
         last_error: Optional[str] = None
         for attempt, delay in enumerate((*_RETRY_DELAYS, None), start=1):
+            logger.info("LLM request begin: attempt=%d payload_chars=%d model=%s",
+                        attempt, payload_size, self.model)
+            start = time.monotonic()
             try:
                 response = requests.post(
                     url,
@@ -58,6 +65,9 @@ class LLMClient:
                     proxies={"http": None, "https": None},
                     timeout=self.timeout,
                 )
+                elapsed = time.monotonic() - start
+                logger.info("LLM request done: elapsed=%.1fs status=%d response_chars=%d",
+                            elapsed, response.status_code, len(response.text))
 
                 if response.status_code == 429:
                     last_error = f"HTTP 429 Too Many Requests (attempt {attempt})"
@@ -71,8 +81,9 @@ class LLMClient:
                 return self._extract_content(data)
 
             except requests.exceptions.RequestException as e:
-                logger.error("LLM API request error (%s → %s): %s",
-                             type(e).__name__, url, e)
+                elapsed = time.monotonic() - start
+                logger.error("LLM API request error (%s → %s) after %.1fs: %s",
+                             type(e).__name__, url, elapsed, e)
                 return None
 
         logger.error("LLM API rate limit retries exhausted after %d attempts: %s",
@@ -152,10 +163,19 @@ def get_api() -> LLMClient:
             raise RuntimeError("請設定環境變數 LLM_API_KEY（參考 .env.example）")
         if not model:
             raise RuntimeError("請設定環境變數 LLM_MODEL（參考 .env.example）")
+        raw_timeout = os.environ.get("LLM_TIMEOUT")
+        timeout = _DEFAULT_READ_TIMEOUT
+        if raw_timeout:
+            try:
+                timeout = int(raw_timeout)
+            except ValueError:
+                logger.warning("LLM_TIMEOUT=%r 不是有效整數，改用預設值 %ds",
+                                raw_timeout, _DEFAULT_READ_TIMEOUT)
         _client = LLMClient(
             base_url=base_url,
             api_key=api_key,
             model=model,
             verify=os.environ.get("LLM_VERIFY", "false").lower() == "true",
+            timeout=timeout,
         )
     return _client

@@ -127,6 +127,7 @@ LLM_VERIFY=false
 | `LLM_API_KEY` | ✓ | API 金鑰（僅放 `.env`，不得寫入任何程式碼或文件） |
 | `LLM_MODEL` | ✓ | 模型名稱 |
 | `LLM_VERIFY` | | SSL 憑證驗證（預設 `false`，供自簽憑證端點使用） |
+| `LLM_TIMEOUT` | | 等待 gateway 回應的秒數上限（read timeout，預設 `120`）。無效值（非數字）會退回預設值並寫入 warning log |
 
 > **連線疑難排解**：啟動後可用 `GET /api/llm/health` 實際打一次 gateway，
 > 回傳成功或完整失敗原因（連線錯誤類型、HTTP 狀態碼、回應片段）。
@@ -140,6 +141,14 @@ LLM_VERIFY=false
 > 若曾在同一個終端機（例如 PowerShell）手動 `export`／`$env:` 設過
 > `LLM_VERIFY`、`LLM_BASE_URL` 等變數，編輯 `.env` 後現在會**覆蓋**這些
 > 殘留的環境變數（`load_dotenv(override=True)`），不需要另開新終端機。
+>
+> 每次對 LLM 的請求都會寫入 log：送出前一筆「LLM request begin」（attempt、
+> payload 字元數、model），完成後一筆「LLM request done」（耗時、HTTP 狀態碼、
+> 回應字元數），例外時的錯誤 log 也會附上已等待的秒數。若 log 出現
+> 「LLM request begin」但長時間沒有對應的完成 log，代表 gateway 已收到請求
+> 但未回應，可依序排查：(a) 在同一台機器直接對 gateway 跑原生 `curl` 比對是否
+> 也慢；(b) 確認 `LLM_MODEL` 的值正確——部分 gateway 對不存在的 model id
+> 不回錯誤而是直接掛住；(c) 視需要調小 `LLM_TIMEOUT`（預設 120 秒）讓失敗更快浮現。
 | `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
 | `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
 | `ADMIN_TOKEN` | | 核准/駁回 DB Agent 變更請求所需的共享密鑰（`X-Admin-Token` header）。未設定時，`/api/change-requests/<id>/approve` 與 `.../reject` 一律回 403 |
