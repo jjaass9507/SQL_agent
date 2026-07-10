@@ -6,7 +6,7 @@ import sys
 from dotenv import load_dotenv
 from flask import Flask, jsonify
 
-load_dotenv()
+load_dotenv(override=True)
 
 # When this file is executed directly (`python app.py`), Python registers it
 # in sys.modules as "__main__", not "app" — so web/routes/sessions.py's

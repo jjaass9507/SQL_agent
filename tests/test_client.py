@@ -82,6 +82,51 @@ def test_chat_compat_wraps_chat_messages(monkeypatch):
     assert body["messages"][1]["content"] == [{"type": "text", "text": "輸入"}]
 
 
+# ── base_url normalization（完整 completions 端點 vs v1 base）──────────
+
+def test_base_url_full_completions_endpoint_not_duplicated(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(url=url)
+        return _FakeResp(200, {"choices": [{"message": {"content": "hi"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(base_url="https://10.10.23.120:4231/public/kits/openai/v1/chat/completions")
+    client.chat_messages([{"role": "user", "content": [{"type": "text", "text": "x"}]}])
+
+    assert captured["url"] == "https://10.10.23.120:4231/public/kits/openai/v1/chat/completions"
+    assert "chat/completions/chat/completions" not in captured["url"]
+
+
+def test_base_url_v1_base_still_works(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(url=url)
+        return _FakeResp(200, {"choices": [{"message": {"content": "hi"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(base_url="https://10.10.23.120:4231/public/kits/openai/v1")
+    client.chat_messages([{"role": "user", "content": [{"type": "text", "text": "x"}]}])
+
+    assert captured["url"] == "https://10.10.23.120:4231/public/kits/openai/v1/chat/completions"
+
+
+def test_base_url_full_completions_endpoint_with_trailing_slash(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(url=url)
+        return _FakeResp(200, {"choices": [{"message": {"content": "hi"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(base_url="https://10.10.23.120:4231/public/kits/openai/v1/chat/completions/")
+    client.chat_messages([{"role": "user", "content": [{"type": "text", "text": "x"}]}])
+
+    assert captured["url"] == "https://10.10.23.120:4231/public/kits/openai/v1/chat/completions"
+
+
 # ── response parsing: content as string or parts array ──
 
 def test_response_content_as_string(monkeypatch):

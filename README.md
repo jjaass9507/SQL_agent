@@ -123,7 +123,7 @@ LLM_VERIFY=false
 
 | 變數 | 必填 | 說明 |
 |---|---|---|
-| `LLM_BASE_URL` | ✓ | OpenAI 相容 Chat Completions API 端點（`{base_url}/chat/completions`） |
+| `LLM_BASE_URL` | ✓ | OpenAI 相容 Chat Completions API 端點。貼「v1 base」或整段「完整 completions 端點」（`.../chat/completions`）皆可，程式會自動正規化 |
 | `LLM_API_KEY` | ✓ | API 金鑰（僅放 `.env`，不得寫入任何程式碼或文件） |
 | `LLM_MODEL` | ✓ | 模型名稱 |
 | `LLM_VERIFY` | | SSL 憑證驗證（預設 `false`，供自簽憑證端點使用） |
@@ -132,6 +132,14 @@ LLM_VERIFY=false
 > 回傳成功或完整失敗原因（連線錯誤類型、HTTP 狀態碼、回應片段）。
 > 對 LLM 的請求一律**繞過系統 HTTP(S) proxy**（內網 gateway 場景），
 > connect timeout 10 秒——主機不通會快速失敗並寫入 log，而非長時間無回應。
+>
+> `LLM_BASE_URL` 不論貼「v1 base」（如 `.../v1`）或某些內網 gateway
+> 提供的「完整 completions 端點」（如 `.../v1/chat/completions`），都會被
+> 自動正規化，不會組出重複的 `/chat/completions/chat/completions`。
+>
+> 若曾在同一個終端機（例如 PowerShell）手動 `export`／`$env:` 設過
+> `LLM_VERIFY`、`LLM_BASE_URL` 等變數，編輯 `.env` 後現在會**覆蓋**這些
+> 殘留的環境變數（`load_dotenv(override=True)`），不需要另開新終端機。
 | `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
 | `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
 | `ADMIN_TOKEN` | | 核准/駁回 DB Agent 變更請求所需的共享密鑰（`X-Admin-Token` header）。未設定時，`/api/change-requests/<id>/approve` 與 `.../reject` 一律回 403 |

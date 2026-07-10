@@ -15,7 +15,13 @@ class LLMClient:
 
     def __init__(self, base_url: str, api_key: str, model: str,
                  verify: bool = False, timeout: int = 300):
-        self.base_url = base_url.rstrip("/")
+        base_url = base_url.rstrip("/")
+        # 使用者可能貼「v1 base」（OpenAI 慣例）或整段「完整 completions 端點」
+        # （部分內網 gateway 的原生格式）。兩者皆須支援：若已包含
+        # /chat/completions 尾巴，先砍掉，避免下方組 URL 時重複。
+        if base_url.endswith("/chat/completions"):
+            base_url = base_url[: -len("/chat/completions")].rstrip("/")
+        self.base_url = base_url
         self.api_key = api_key
         self.model = model
         self.verify = verify

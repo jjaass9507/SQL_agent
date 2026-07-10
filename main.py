@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 for _var in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
     if not os.getenv(_var):
