@@ -76,6 +76,19 @@ def test_check_sql_allows_select_with_keywords_in_literals():
     assert _check_sql("SELECT * FROM updates WHERE id IN (1, 2)") is None
 
 
+def test_check_sql_rejects_stacked_statements():
+    # A trailing statement must not slip through keyword checks that only
+    # look at the first statement.
+    assert _check_sql("SELECT 1; DELETE FROM t") is not None
+    assert _check_sql("SELECT 1; SELECT 2") is not None
+
+
+def test_check_sql_rejects_string_semicolon_bypass():
+    # A `;` inside a string literal must not be mistaken for a statement
+    # boundary that "hides" the second, forbidden statement.
+    assert _check_sql("SELECT ';' ; DROP TABLE x") is not None
+
+
 # ── execute_query ─────────────────────────────────────────────────────────────
 
 def test_execute_query_rejects_forbidden_sql():

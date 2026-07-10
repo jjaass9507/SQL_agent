@@ -175,6 +175,11 @@
     </div>
     {% endif %}
 
+    <!-- "Related to existing DB" panel — populated by confirm.js from RELATION_REPORT
+        (server-computed by web/table_relation.py); stays empty/hidden when there's
+        nothing to show. -->
+    <div id="relation-section"></div>
+
     <!-- Version history panel (shown when more than 1 version exists) -->
     {% if session.table_versions and session.table_versions | length > 1 %}
     <div class="version-section">
@@ -204,6 +209,7 @@
 <script>
   const SESSION_ID = "{{ session.id }}";
   const INITIAL_TABLES = {{ session.tables | tojson }};
+  const RELATION_REPORT = {{ relation_report | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/schema_editor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/confirm.js') }}"></script>

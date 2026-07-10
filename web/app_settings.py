@@ -112,3 +112,16 @@ def remove_business_database(name: str) -> None:
 
 def set_business_databases(dbs: list) -> None:
     _set_key("business_databases", dbs)
+
+
+# ── Global DB Agent conversation ─────────────────────────────────────────────
+
+def get_agent_session_id() -> str:
+    """Session id of the single global DB Agent conversation (Phase 5 auth
+    will split this per-user; for now everyone shares one)."""
+    with _lock:
+        return _read().get("agent_session_id", "")
+
+
+def set_agent_session_id(session_id: str) -> None:
+    _set_key("agent_session_id", session_id)

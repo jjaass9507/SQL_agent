@@ -36,7 +36,7 @@ flowchart TD
     end
 
     subgraph External ["外部服務"]
-        PA["Pensieve AI API\n(LLM)"]
+        PA["LLM API (OpenAI 相容)\n(LLM)"]
         PG["PostgreSQL\n(使用者現有 DB)"]
     end
 
@@ -96,7 +96,7 @@ flowchart TD
     end
 
     subgraph AIServices ["AI 服務"]
-        LLM["Pensieve AI API\n(LLM)"]
+        LLM["LLM API (OpenAI 相容)\n(LLM)"]
     end
 
     subgraph ExtDB ["使用者外部資源"]

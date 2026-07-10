@@ -26,22 +26,22 @@ cp .env.example .env
 `.env.example` 內容：
 
 ```dotenv
-# ── Pensieve AI API（必填）──────────────────────────────
-PENSIEVE_TOKEN=your_token_here
-PENSIEVE_EMPNO=your_empno_here
-PENSIEVE_URL=https://pensieve.example.com/api/flow_chat/
-PENSIEVE_BUILDING=question
-PENSIEVE_VERIFY=false
+# ── LLM API（OpenAI 相容 Chat Completions，必填）──────────
+LLM_BASE_URL=https://your-llm-gateway.example.com/v1
+LLM_API_KEY=your_api_key_here
+LLM_MODEL=your_model_here
+LLM_VERIFY=false
 
 # ── Flask ──────────────────────────────────────────────
-FLASK_ENV=production        # development | production
-SECRET_KEY=<random-32-char-string>
+SECRET_KEY=<random-32-char-string>   # 非 debug 模式下仍是預設值會啟動報錯
+FLASK_DEBUG=false                    # 1/true 開啟 debug 模式，預設關閉
+HOST=127.0.0.1                       # python app.py 綁定位址，對外可設 0.0.0.0
 
 # ── 資料目錄（預設為專案根目錄下的 data/）──────────────
 # DATA_DIR=/var/app/data
 ```
 
-> `PENSIEVE_API_TOKEN` 和 `SECRET_KEY` **絕對不能 commit** 至版控。  
+> `LLM_API_KEY` 和 `SECRET_KEY` **絕對不能 commit** 至版控。  
 > `.env` 已列入 `.gitignore`。
 
 ---
@@ -58,7 +58,7 @@ pip install -r requirements.txt
 
 # 3. 設定環境變數
 cp .env.example .env
-# 編輯 .env，填入 PENSIEVE_API_TOKEN 等
+# 編輯 .env，填入 LLM_API_KEY 等
 
 # 4. 啟動開發伺服器
 python app.py

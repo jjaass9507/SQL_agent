@@ -111,7 +111,7 @@
 
 | 系統 | 類型 | 說明 |
 |---|---|---|
-| Pensieve AI API | AI LLM | 所有 AI 對話與文件生成的核心服務 |
+| LLM API（OpenAI 相容 Chat Completions） | AI LLM | 所有 AI 對話與文件生成的核心服務 |
 | PostgreSQL | 資料庫 | 使用者可選擇匯入的現有資料庫結構 |
 | 瀏覽器 Clipboard API | Web API | DDL 一鍵複製功能 |
 | Mermaid.js | 前端函式庫 | ER Diagram 即時渲染 |

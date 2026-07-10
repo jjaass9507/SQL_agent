@@ -651,3 +651,34 @@ def test_explain_forbidden_sql(client, _isolate_data):
     ss.update_session(session_id, {"db_url": "postgresql://fake/db"})
     resp2 = client.post(f"/api/sessions/{session_id}/explain", json={"sql": "CREATE TABLE x (id int)"})
     assert resp2.status_code == 400
+
+
+# ── LLM health check ────────────────────────────────────
+
+def test_llm_health_missing_env(client, monkeypatch):
+    """Unset LLM env → 503 with a clear setup hint (no cached client)."""
+    import utils.client as uc
+    monkeypatch.setattr(uc, "_client", None)
+    for var in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    resp = client.get("/api/llm/health")
+    assert resp.status_code == 503
+    assert "LLM_BASE_URL" in resp.get_json()["error"]
+
+
+def test_llm_health_gateway_down(client, monkeypatch):
+    fake = MagicMock()
+    fake.ping.return_value = {"ok": False, "error": "ConnectionError: refused", "url": "u"}
+    monkeypatch.setattr("utils.client.get_api", lambda: fake)
+    resp = client.get("/api/llm/health")
+    assert resp.status_code == 503
+    assert "ConnectionError" in resp.get_json()["error"]
+
+
+def test_llm_health_ok(client, monkeypatch):
+    fake = MagicMock()
+    fake.ping.return_value = {"ok": True, "model": "m"}
+    monkeypatch.setattr("utils.client.get_api", lambda: fake)
+    resp = client.get("/api/llm/health")
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True

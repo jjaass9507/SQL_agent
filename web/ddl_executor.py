@@ -1,9 +1,13 @@
 """Execute pre-validated DDL against a target PostgreSQL database.
 
 This module is intentionally separate from db_manager.py (which is read-only).
-All callers must pass DDL that has already been checked by ddl_guard.check_ddl_safety().
+All callers must pass DDL that has already been checked by
+sql_safety.check_ddl_allowlist() and approved via web/routes/changes.py's
+human-in-the-loop review flow.
 """
 import logging
+
+from web.sql_safety import split_statements
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +15,14 @@ DDL_TIMEOUT_MS = 30_000
 
 
 def execute_ddl(db_url: str, ddl: str) -> dict:
-    """Execute one or more DDL statements against db_url.
+    """Execute one or more DDL statements against db_url in a single transaction.
+
+    All statements run inside one transaction: if any statement fails, the
+    whole transaction is rolled back and none of the DDL takes effect.
+    Only on full success is the transaction committed.
 
     Returns {"ok": True, "statements_run": N} or {"ok": False, "error": "..."}.
-    Caller is responsible for calling ddl_guard.check_ddl_safety() first.
+    Caller is responsible for calling sql_safety.check_ddl_allowlist() first.
     """
     try:
         import psycopg2
@@ -30,19 +38,18 @@ def execute_ddl(db_url: str, ddl: str) -> dict:
     except Exception as exc:
         return {"ok": False, "error": f"連線失敗：{str(exc)[:200]}"}
 
-    conn.autocommit = True
     statements_run = 0
     try:
         with conn.cursor() as cur:
-            for stmt in ddl.split(";"):
-                stmt = stmt.strip()
-                if not stmt:
-                    continue
+            for stmt in split_statements(ddl):
                 cur.execute(stmt)
                 statements_run += 1
     except Exception as exc:
+        conn.rollback()
         logger.warning("ddl_executor: statement failed", extra={"err": str(exc)[:300]})
         return {"ok": False, "error": str(exc)[:300]}
+    else:
+        conn.commit()
     finally:
         conn.close()
 

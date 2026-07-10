@@ -38,6 +38,7 @@
         <option value="__all__">全部資料庫</option>
       </select>
       <button id="da-refresh-schema" class="btn btn-ghost btn-sm" title="重新載入結構">↻ 重新整理結構</button>
+      <button id="da-check-docs" class="btn btn-ghost btn-sm" title="檢查現有資料表的用途與欄位說明是否齊全">📋 檢查文件完整性</button>
       <button id="da-clear-chat" class="btn btn-ghost btn-sm">🗑 清除對話</button>
     </div>
 
@@ -80,6 +81,21 @@
         <button id="da-results-clear" class="btn btn-ghost btn-sm">✕ 清除</button>
       </div>
       <div id="da-results-list" class="da-results-list"></div>
+    </div>
+
+    <!-- Pending change-request approvals -->
+    <div id="da-pending-panel" class="da-pending-panel">
+      <div class="da-pending-header">
+        <span class="da-results-title">待審變更請求</span>
+        <div class="da-pending-header-actions">
+          <input id="da-admin-token" type="password" class="da-admin-token-input"
+                 placeholder="管理員權杖（X-Admin-Token）" title="核准/駁回需要的管理員權杖，儲存在瀏覽器 sessionStorage">
+          <button id="da-pending-refresh" class="btn btn-ghost btn-sm" title="重新整理">↻</button>
+        </div>
+      </div>
+      <div id="da-pending-list" class="da-pending-list">
+        <div class="workbench-sidebar-loading">載入中…</div>
+      </div>
     </div>
 
     <!-- Design panel (fixed right slide-in) -->

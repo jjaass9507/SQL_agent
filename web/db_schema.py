@@ -44,6 +44,20 @@ activity_log_table = Table("activity_log", metadata,
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# Human-in-the-loop DDL change requests (Phase 4). Agent-proposed or manually
+# submitted DDL sits here as "pending" until an admin approves/rejects it.
+change_requests_table = Table("change_requests", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("db_name", String(255), nullable=True),
+    Column("ddl", Text, nullable=False),
+    Column("reason", Text, nullable=False, server_default=""),
+    Column("status", String(20), nullable=False, server_default="pending"),
+    Column("dry_run_ok", Boolean, nullable=False, server_default=text("false")),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("decided_at", DateTime(timezone=True), nullable=True),
+    Column("error", Text, nullable=True),
+)
+
 
 def platform_table_names() -> set[str]:
     """Tables the platform owns on its storage DB — hidden from the workbench

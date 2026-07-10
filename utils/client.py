@@ -1,61 +1,64 @@
-import json
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
 
-_RATE_LIMIT_PHRASES = ("too many requests", "rate limit", "too many")
 _RETRY_DELAYS = (2, 4, 8)  # seconds between attempts
 
 
-class PensieveAPI:
-    """與 Pensieve 系統互動，呼叫 AI 進行對話。"""
+class LLMClient:
+    """OpenAI 相容 Chat Completions API 客戶端。"""
 
-    def __init__(self, token: str, empno: str, url: str,
-                 building: str = "question", verify: bool = False,
-                 vector_url: str = "https://pensieve.kh.asegroup.com/api/uploadVector/",
-                 vector_id: str = ""):
-        self.token = token
-        self.empno = empno
-        self.url = url
-        self.building = building
+    def __init__(self, base_url: str, api_key: str, model: str,
+                 verify: bool = False, timeout: int = 300):
+        base_url = base_url.rstrip("/")
+        # 使用者可能貼「v1 base」（OpenAI 慣例）或整段「完整 completions 端點」
+        # （部分內網 gateway 的原生格式）。兩者皆須支援：若已包含
+        # /chat/completions 尾巴，先砍掉，避免下方組 URL 時重複。
+        if base_url.endswith("/chat/completions"):
+            base_url = base_url[: -len("/chat/completions")].rstrip("/")
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model = model
         self.verify = verify
-        self.vector_url = vector_url
-        self.vector_id = vector_id  # vector store the chat flow is bound to
+        # (connect, read) — fail fast when the gateway host is unreachable
+        # instead of hanging for the full read timeout with no log output.
+        self.timeout = (10, timeout)
 
-    def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
-        """送出 system_prompt + human_prompt，回傳 AI 純文字回應。
-        遇到 rate-limit 錯誤時自動重試（最多 3 次，指數退避 2/4/8 秒）。"""
-        effective_human = (
-            f"【角色指令】\n{system_prompt}\n\n【輸入】\n{human_prompt}"
-            if system_prompt else human_prompt
-        )
-        payload = {
-            "token": self.token,
-            "empno": self.empno,
-            "variables": {
-                "building": self.building,
-                "other_system_prompt": system_prompt,
-                "other_human_prompt": effective_human,
-            },
+    def chat_messages(self, messages: list[dict], system_prompt: Optional[str] = None) -> Optional[str]:
+        """送出 messages（可選在最前插入 system_prompt），回傳 AI 純文字回應。
+        遇到 HTTP 429 時自動重試（最多 3 次，指數退避 2/4/8 秒）。"""
+        full_messages = list(messages)
+        if system_prompt:
+            full_messages = [
+                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+                *full_messages,
+            ]
+
+        payload = {"model": self.model, "messages": full_messages}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
         }
+        url = f"{self.base_url}/chat/completions"
 
         last_error: Optional[str] = None
         for attempt, delay in enumerate((*_RETRY_DELAYS, None), start=1):
             try:
                 response = requests.post(
-                    self.url,
+                    url,
                     json=payload,
+                    headers=headers,
                     verify=self.verify,
+                    # Internal gateway — never route through system HTTP(S) proxies.
                     proxies={"http": None, "https": None},
-                    timeout=300,
+                    timeout=self.timeout,
                 )
 
-                # Handle HTTP-level rate limiting (429)
                 if response.status_code == 429:
                     last_error = f"HTTP 429 Too Many Requests (attempt {attempt})"
                     logger.warning("rate limited (429), attempt %d", attempt)
@@ -64,95 +67,95 @@ class PensieveAPI:
                     continue
 
                 response.raise_for_status()
-
-                raw_text = response.text
-                if not raw_text or not raw_text.strip():
-                    logger.warning("empty API response")
-                    return None
-
-                try:
-                    res_data = json.loads(raw_text)
-                except json.JSONDecodeError:
-                    logger.warning("API JSON parse failed")
-                    return None
-
-                # Handle response-body rate limiting ("The token has too many requests")
-                extracted = self._extract_text(res_data)
-                if extracted and any(p in extracted.lower() for p in _RATE_LIMIT_PHRASES):
-                    last_error = f"rate limit in response (attempt {attempt}): {extracted[:80]}"
-                    logger.warning("rate limit in response body, attempt %d", attempt)
-                    if delay is not None:
-                        time.sleep(delay)
-                    continue
-
-                return extracted
+                data = response.json()
+                return self._extract_content(data)
 
             except requests.exceptions.RequestException as e:
-                logger.error("API request error: %s", e)
+                logger.error("LLM API request error (%s → %s): %s",
+                             type(e).__name__, url, e)
                 return None
 
-        # All retries exhausted
-        logger.error("API rate limit retries exhausted after %d attempts: %s",
+        logger.error("LLM API rate limit retries exhausted after %d attempts: %s",
                      len(_RETRY_DELAYS) + 1, last_error)
         return None
 
-    def update_memory(self, content: str, filename: str = "existing_schema.txt") -> bool:
-        """以 coverage 方式把 txt 內容上傳到 self.vector_id 作為 LLM 記憶。
-
-        透過 /uploadVector 上傳；採固定 filename，讓重複上傳取代同一份文件
-        （coverage 語意，避免舊結構殘留）。vector_id 未設定時直接回 False（走 fallback）。
-        成功（isSuccess 且 filename 出現在 SuccessFile）回傳 True，否則 False。
-        """
-        if not (content and content.strip() and self.vector_id):
-            return False
+    def ping(self) -> dict:
+        """單次連線診斷（不重試）：送最小 prompt，回傳 {ok, error?, status_code?}。
+        錯誤內容原樣回傳給呼叫端，供 /api/llm/health 顯示連線失敗原因。"""
+        url = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "ping"}]}],
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
         try:
             response = requests.post(
-                self.vector_url,
-                data={"vector_id": self.vector_id},
-                files={"file": (filename, content.encode("utf-8"), "text/plain")},
-                verify=self.verify,
-                proxies={"http": None, "https": None},
-                timeout=300,
+                url, json=payload, headers=headers, verify=self.verify,
+                proxies={"http": None, "https": None}, timeout=(10, 60),
             )
-            response.raise_for_status()
-            data = response.json()
-        except (requests.exceptions.RequestException, ValueError) as e:
-            logger.error("update_memory upload failed: %s", e)
-            return False
+        except requests.exceptions.RequestException as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}", "url": url}
+        if response.status_code != 200:
+            return {"ok": False, "status_code": response.status_code,
+                    "error": response.text[:300], "url": url}
+        try:
+            content = self._extract_content(response.json())
+        except ValueError:
+            return {"ok": False, "status_code": 200,
+                    "error": f"回應不是 JSON：{response.text[:200]}", "url": url}
+        if content is None:
+            return {"ok": False, "status_code": 200,
+                    "error": "回應格式非預期（缺 choices[0].message.content）", "url": url}
+        return {"ok": True, "model": self.model}
 
-        if not data.get("isSuccess"):
-            logger.error("update_memory rejected: %s", str(data.get("Result"))[:200])
-            return False
-        if filename not in (data.get("SuccessFile") or []):
-            logger.warning("update_memory embedding incomplete, FailFile=%s", data.get("FailFile"))
-            return False
-        return True
+    def chat(self, system_prompt: str, human_prompt: str) -> Optional[str]:
+        """相容介面：包成單則 user 訊息 + system_prompt 呼叫 chat_messages。"""
+        return self.chat_messages(
+            [{"role": "user", "content": [{"type": "text", "text": human_prompt}]}],
+            system_prompt=system_prompt,
+        )
 
-    def _extract_text(self, res_data: Any) -> Optional[str]:
-        if isinstance(res_data, dict):
-            if "Result" in res_data and isinstance(res_data["Result"], str):
-                text = res_data["Result"].replace("\\n", "\n").strip()
-                return text or None
-            return str(res_data)
-        if isinstance(res_data, list) and res_data:
-            return str(res_data[0])
+    @staticmethod
+    def _extract_content(data: dict) -> Optional[str]:
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            logger.warning("unexpected LLM API response shape: %s", str(data)[:200])
+            return None
+
+        if isinstance(content, str):
+            return content or None
+        if isinstance(content, list):
+            text = "".join(
+                part.get("text", "") for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+            return text or None
         return None
 
 
-_api: PensieveAPI | None = None
+_client: LLMClient | None = None
 
 
-def get_api() -> PensieveAPI:
-    global _api
-    if _api is None:
-        _api = PensieveAPI(
-            token=os.environ["PENSIEVE_TOKEN"],
-            empno=os.environ["PENSIEVE_EMPNO"],
-            url=os.environ.get("PENSIEVE_URL", "https://pensieve.kh.asegroup.com/api/flow_chat/"),
-            building=os.environ.get("PENSIEVE_BUILDING", "question"),
-            verify=os.environ.get("PENSIEVE_VERIFY", "false").lower() == "true",
-            vector_url=os.environ.get("PENSIEVE_VECTOR_URL",
-                                      "https://pensieve.kh.asegroup.com/api/uploadVector/"),
-            vector_id=os.environ.get("PENSIEVE_VECTOR_ID", ""),
+def get_api() -> LLMClient:
+    global _client
+    if _client is None:
+        base_url = os.environ.get("LLM_BASE_URL")
+        api_key = os.environ.get("LLM_API_KEY")
+        model = os.environ.get("LLM_MODEL")
+        if not base_url:
+            raise RuntimeError("請設定環境變數 LLM_BASE_URL（參考 .env.example）")
+        if not api_key:
+            raise RuntimeError("請設定環境變數 LLM_API_KEY（參考 .env.example）")
+        if not model:
+            raise RuntimeError("請設定環境變數 LLM_MODEL（參考 .env.example）")
+        _client = LLMClient(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            verify=os.environ.get("LLM_VERIFY", "false").lower() == "true",
         )
-    return _api
+    return _client
