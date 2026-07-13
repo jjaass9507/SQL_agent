@@ -128,7 +128,8 @@ LLM_VERIFY=false
 | `LLM_MODEL` | ✓ | 模型名稱 |
 | `LLM_VERIFY` | | SSL 憑證驗證（預設 `false`，供自簽憑證端點使用） |
 | `LLM_TIMEOUT` | | 等待 gateway 回應的秒數上限（read timeout，預設 `120`）。無效值（非數字）會退回預設值並寫入 warning log |
-| `LLM_SYSTEM_MODE` | | system prompt 傳遞模式：`system`（獨立 system role 訊息，預設）或 `inline`（併入第一則 user 訊息文字）。無效值會退回預設值並寫入 warning log |
+| `LLM_SYSTEM_MODE` | | system prompt 傳遞模式，三階梯：`system`（獨立 system role 訊息，預設）、`inline`（併入第一則 user 訊息文字）、`single_turn`（最後手段：角色指令＋對話歷史＋本次輸入攤平成恰好一則 user 訊息，供完全不支援多輪的 gateway 使用）。無效值會退回預設值並寫入 warning log |
+| `LLM_CONTENT_FORMAT` | | messages 的 content 形態：`parts`（預設，`[{"type":"text","text":...}]`）或 `string`（content 直接放字串）。部分 gateway 只對字串 content 做完整多輪處理。無效值會退回預設值並寫入 warning log |
 
 > **連線疑難排解**：啟動後可用 `GET /api/llm/health` 實際打一次 gateway，
 > 回傳成功或完整失敗原因（連線錯誤類型、HTTP 狀態碼、回應片段）。
@@ -156,6 +157,17 @@ LLM_VERIFY=false
 > 訊息。打 `GET /api/llm/health` 看回應中的 `system_prompt_honored`：
 > 若為 `false`，在 `.env` 設 `LLM_SYSTEM_MODE=inline` 後重啟，改把
 > system prompt 併入第一則 user 訊息文字傳送。
+>
+> **若對話從第二輪起就像失憶一樣**（DB Agent 記不得前一輪講過什麼），
+> 代表 gateway 疑似只把最後一則 user 訊息轉發給模型、其餘歷史被丟棄。
+> `GET /api/llm/health` 回應中的 `history_honored` 為 `false` 時即是此症狀。
+> 打 `GET /api/llm/diagnose` 觸發能力探測矩陣（依序嘗試 `LLM_CONTENT_FORMAT`
+> 與 `LLM_SYSTEM_MODE` 的不同組合），依回傳的 `recommended` 設定 `.env` 後重啟：
+> 最理想是 `LLM_CONTENT_FORMAT=string` + `LLM_SYSTEM_MODE=system`（完全標準的
+> OpenAI 多輪格式）；若全部組合皆失敗，會建議 `LLM_SYSTEM_MODE=single_turn`
+> 作為後備方案（每次攤平成一則訊息送出，仍可運作但較耗 token）。此時也建議
+> 向 gateway 管理者確認 `LLM_MODEL` 目前的值是否為原生模型的 model id——若是
+> gateway 上包裝的 flow/應用 id，改用原生模型通常能取得完整多輪支援。
 | `DATABASE_URL` | | 設定後 Session 改存 PostgreSQL；未設定則用 `data/*.json` |
 | `DATA_DIR` | | JSON 模式的資料目錄（預設 `data/`） |
 | `ADMIN_TOKEN` | | 核准/駁回 DB Agent 變更請求所需的共享密鑰（`X-Admin-Token` header）。未設定時，`/api/change-requests/<id>/approve` 與 `.../reject` 一律回 403 |

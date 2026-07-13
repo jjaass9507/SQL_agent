@@ -447,3 +447,309 @@ def test_probe_system_prompt_uses_inline_mode_when_configured(monkeypatch):
     messages = captured["json"]["messages"]
     assert all(m["role"] != "system" for m in messages)
     assert "SYSMARK_OK" in messages[0]["content"][0]["text"]
+
+
+# ── LLM_CONTENT_FORMAT: string vs parts ──────────────────
+
+def test_content_format_string_sends_plain_string_content(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(content_format="string")
+    client.chat_messages(
+        [{"role": "user", "content": [{"type": "text", "text": "問題"}]}],
+        system_prompt="你是助手",
+    )
+    messages = captured["json"]["messages"]
+    assert messages[0] == {"role": "system", "content": "你是助手"}
+    assert messages[1] == {"role": "user", "content": "問題"}
+
+
+def test_content_format_parts_default_sends_parts_array(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client()
+    client.chat_messages(
+        [{"role": "user", "content": "問題"}],
+        system_prompt="你是助手",
+    )
+    messages = captured["json"]["messages"]
+    assert messages[0] == {"role": "system", "content": [{"type": "text", "text": "你是助手"}]}
+    assert messages[1] == {"role": "user", "content": [{"type": "text", "text": "問題"}]}
+
+
+def test_content_format_string_does_not_mutate_caller_messages(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda *a, **k: _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]}),
+    )
+    original = [{"role": "user", "content": [{"type": "text", "text": "問題"}]}]
+    client = _client(content_format="string")
+    client.chat_messages(original)
+    assert original[0]["content"] == [{"type": "text", "text": "問題"}]
+
+
+# ── LLM_SYSTEM_MODE="single_turn" (flatten to one user message) ──
+
+def test_single_turn_flattens_multi_message_history(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(system_mode="single_turn")
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "第一句"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "回覆"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": '<TOOL name="x">{}</TOOL>'}]},
+        {"role": "user", "content": [{"type": "text", "text": '<OBSERVATION tool="x">ok</OBSERVATION>'}]},
+        {"role": "user", "content": [{"type": "text", "text": "本次輸入"}]},
+    ]
+    client.chat_messages(messages, system_prompt="你是助手")
+
+    sent = captured["json"]["messages"]
+    assert len(sent) == 1
+    assert sent[0]["role"] == "user"
+    text = sent[0]["content"][0]["text"]
+    assert "【角色指令】\n你是助手" in text
+    assert "【對話歷史】" in text
+    assert "【本次輸入】\n本次輸入" in text
+    assert "[使用者]: 第一句" in text
+    assert "[助手]: 回覆" in text
+    assert '<TOOL name="x">{}</TOOL>' in text
+    assert '<OBSERVATION tool="x">ok</OBSERVATION>' in text
+
+
+def test_single_turn_single_message_omits_history_section(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    client = _client(system_mode="single_turn")
+    client.chat(system_prompt="角色", human_prompt="輸入")
+
+    sent = captured["json"]["messages"]
+    assert len(sent) == 1
+    text = sent[0]["content"][0]["text"]
+    assert "【對話歷史】" not in text
+    assert "【角色指令】\n角色" in text
+    assert "【本次輸入】\n輸入" in text
+
+
+def test_single_turn_does_not_mutate_caller_messages(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda *a, **k: _FakeResp(200, {"choices": [{"message": {"content": "ok"}}]}),
+    )
+    original = [
+        {"role": "user", "content": [{"type": "text", "text": "第一句"}]},
+        {"role": "user", "content": [{"type": "text", "text": "本次輸入"}]},
+    ]
+    client = _client(system_mode="single_turn")
+    client.chat_messages(original, system_prompt="角色")
+    assert original[0]["content"][0]["text"] == "第一句"
+    assert original[1]["content"][0]["text"] == "本次輸入"
+
+
+# ── probe_history ─────────────────────────────────────────
+
+def test_probe_history_honored(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "你的暗號是 SYNC42"}}]}),
+    )
+    result = _client().probe_history()
+    assert result["honored"] is True
+
+
+def test_probe_history_not_honored(monkeypatch):
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "我不知道"}}]}),
+    )
+    result = _client().probe_history()
+    assert result["honored"] is False
+
+
+def test_probe_history_request_exception(monkeypatch):
+    import requests as real_requests
+
+    def raise_err(*a, **k):
+        raise real_requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr("utils.client.requests.post", raise_err)
+    result = _client().probe_history()
+    assert result["honored"] is None
+    assert "ConnectionError" in result["error"]
+
+
+def test_probe_history_sends_three_messages(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "SYNC42"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    _client().probe_history()
+    messages = captured["json"]["messages"]
+    assert len(messages) == 3
+    assert messages[0]["role"] == "user"
+    assert messages[1]["role"] == "assistant"
+    assert messages[2]["role"] == "user"
+
+
+def test_probe_history_single_turn_flattens_to_one_message(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured.update(json=json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "SYNC42"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    _client(system_mode="single_turn").probe_history()
+    messages = captured["json"]["messages"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+
+
+# ── get_api() / LLM_CONTENT_FORMAT env var ───────────────
+
+def test_get_api_defaults_content_format_when_unset(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.delenv("LLM_CONTENT_FORMAT", raising=False)
+    assert get_api().content_format == "parts"
+
+
+def test_get_api_uses_llm_content_format_env(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_CONTENT_FORMAT", "string")
+    assert get_api().content_format == "string"
+
+
+def test_get_api_falls_back_to_default_on_invalid_llm_content_format(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_CONTENT_FORMAT", "bogus")
+    assert get_api().content_format == "parts"
+
+
+def test_get_api_accepts_single_turn_system_mode(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LLM_SYSTEM_MODE", "single_turn")
+    assert get_api().system_mode == "single_turn"
+
+
+# ── run_capability_matrix ─────────────────────────────────
+
+def test_run_capability_matrix_missing_env_raises(monkeypatch):
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    from utils.client import run_capability_matrix
+    with pytest.raises(RuntimeError, match="LLM_BASE_URL"):
+        run_capability_matrix()
+
+
+def test_run_capability_matrix_does_not_touch_global_singleton(monkeypatch):
+    _reset_singleton(monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "SYSMARK_OK SYNC42"}}]}),
+    )
+    from utils.client import run_capability_matrix
+    import utils.client as client_mod
+    run_capability_matrix()
+    assert client_mod._client is None
+
+
+def test_run_capability_matrix_best_case_recommends_string_system(monkeypatch):
+    """string+system 一次過（system prompt + history 皆 honored）→ 只探測一格，建議該組合。"""
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    calls = []
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        calls.append(json)
+        return _FakeResp(200, {"choices": [{"message": {"content": "SYSMARK_OK SYNC42"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    from utils.client import run_capability_matrix
+    result = run_capability_matrix()
+
+    assert len(result["matrix"]) == 2  # string+system, parts+inline (re-tested)
+    first = result["matrix"][0]
+    assert first == {"content_format": "string", "system_mode": "system",
+                      "system_prompt_honored": True, "history_honored": True}
+    assert result["recommendation"] == {"LLM_CONTENT_FORMAT": "string", "LLM_SYSTEM_MODE": "system"}
+
+
+def test_run_capability_matrix_falls_back_to_string_inline(monkeypatch):
+    """string+system 的 system prompt 未被遵循 → 補測 string+inline，該組合全過 → 建議它。"""
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        messages = json["messages"]
+        has_system_role = any(m["role"] == "system" for m in messages)
+        if has_system_role:
+            # string+system: system role 訊息被忽略
+            return _FakeResp(200, {"choices": [{"message": {"content": "我不知道"}}]})
+        return _FakeResp(200, {"choices": [{"message": {"content": "SYSMARK_OK SYNC42"}}]})
+
+    monkeypatch.setattr("utils.client.requests.post", fake_post)
+    from utils.client import run_capability_matrix
+    result = run_capability_matrix()
+
+    assert len(result["matrix"]) == 3  # string+system (fail) → string+inline → parts+inline
+    assert result["matrix"][0]["system_prompt_honored"] is False
+    assert result["matrix"][1] == {"content_format": "string", "system_mode": "inline",
+                                    "system_prompt_honored": True, "history_honored": True}
+    assert result["recommendation"] == {"LLM_CONTENT_FORMAT": "string", "LLM_SYSTEM_MODE": "inline"}
+
+
+def test_run_capability_matrix_all_fail_recommends_single_turn(monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setattr(
+        "utils.client.requests.post",
+        lambda url, **kw: _FakeResp(200, {"choices": [{"message": {"content": "我不知道"}}]}),
+    )
+    from utils.client import run_capability_matrix
+    result = run_capability_matrix()
+
+    assert len(result["matrix"]) == 3
+    assert result["recommendation"]["LLM_SYSTEM_MODE"] == "single_turn"
+    assert "note" in result["recommendation"]
+    assert "model id" in result["recommendation"]["note"]
