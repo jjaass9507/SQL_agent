@@ -679,6 +679,7 @@ def test_llm_health_ok(client, monkeypatch):
     fake = MagicMock()
     fake.ping.return_value = {"ok": True, "model": "m"}
     fake.probe_system_prompt.return_value = {"honored": True, "reply": "SYSMARK_OK"}
+    fake.probe_history.return_value = {"honored": True, "reply": "SYNC42"}
     fake.system_mode = "system"
     monkeypatch.setattr("utils.client.get_api", lambda: fake)
     resp = client.get("/api/llm/health")
@@ -687,6 +688,7 @@ def test_llm_health_ok(client, monkeypatch):
     assert body["ok"] is True
     assert body["system_mode"] == "system"
     assert body["system_prompt_honored"] is True
+    assert body["history_honored"] is True
     assert "hint" not in body
 
 
@@ -695,6 +697,7 @@ def test_llm_health_system_not_honored_hints_inline(client, monkeypatch):
     fake = MagicMock()
     fake.ping.return_value = {"ok": True, "model": "m"}
     fake.probe_system_prompt.return_value = {"honored": False, "reply": "我不知道你在說什麼"}
+    fake.probe_history.return_value = {"honored": True, "reply": "SYNC42"}
     fake.system_mode = "system"
     monkeypatch.setattr("utils.client.get_api", lambda: fake)
     resp = client.get("/api/llm/health")
@@ -702,6 +705,7 @@ def test_llm_health_system_not_honored_hints_inline(client, monkeypatch):
     body = resp.get_json()
     assert body["system_prompt_honored"] is False
     assert "LLM_SYSTEM_MODE=inline" in body["hint"]
+    assert "/api/llm/diagnose" in body["hint"]
 
 
 def test_llm_health_inline_not_honored_hints_model_capability(client, monkeypatch):
@@ -709,6 +713,7 @@ def test_llm_health_inline_not_honored_hints_model_capability(client, monkeypatc
     fake = MagicMock()
     fake.ping.return_value = {"ok": True, "model": "m"}
     fake.probe_system_prompt.return_value = {"honored": False, "reply": "我不知道你在說什麼"}
+    fake.probe_history.return_value = {"honored": True, "reply": "SYNC42"}
     fake.system_mode = "inline"
     monkeypatch.setattr("utils.client.get_api", lambda: fake)
     resp = client.get("/api/llm/health")
@@ -717,3 +722,46 @@ def test_llm_health_inline_not_honored_hints_model_capability(client, monkeypatc
     assert body["system_prompt_honored"] is False
     assert "LLM_SYSTEM_MODE=inline" not in body["hint"]
     assert "LLM_MODEL" in body["hint"]
+
+
+def test_llm_health_history_not_honored_hints_diagnose(client, monkeypatch):
+    """system prompt honored 但多輪歷史未被遵循，提示打 /api/llm/diagnose。"""
+    fake = MagicMock()
+    fake.ping.return_value = {"ok": True, "model": "m"}
+    fake.probe_system_prompt.return_value = {"honored": True, "reply": "SYSMARK_OK"}
+    fake.probe_history.return_value = {"honored": False, "reply": "我不知道你的暗號"}
+    fake.system_mode = "system"
+    monkeypatch.setattr("utils.client.get_api", lambda: fake)
+    resp = client.get("/api/llm/health")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["system_prompt_honored"] is True
+    assert body["history_honored"] is False
+    assert "/api/llm/diagnose" in body["hint"]
+
+
+# ── /api/llm/diagnose ────────────────────────────────────
+
+def test_llm_diagnose_missing_env(client, monkeypatch):
+    def _raise():
+        raise RuntimeError("請設定環境變數 LLM_BASE_URL（參考 .env.example）")
+    monkeypatch.setattr("utils.client.run_capability_matrix", _raise)
+    resp = client.get("/api/llm/diagnose")
+    assert resp.status_code == 503
+    assert "LLM_BASE_URL" in resp.get_json()["error"]
+
+
+def test_llm_diagnose_returns_matrix_and_recommendation(client, monkeypatch):
+    fake_result = {
+        "matrix": [
+            {"content_format": "string", "system_mode": "system",
+             "system_prompt_honored": True, "history_honored": True},
+        ],
+        "recommendation": {"LLM_CONTENT_FORMAT": "string", "LLM_SYSTEM_MODE": "system"},
+    }
+    monkeypatch.setattr("utils.client.run_capability_matrix", lambda: fake_result)
+    resp = client.get("/api/llm/diagnose")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["matrix"] == fake_result["matrix"]
+    assert body["recommended"] == fake_result["recommendation"]
