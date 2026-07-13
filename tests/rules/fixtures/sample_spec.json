@@ -1,0 +1,29 @@
+[
+  {
+    "table_name": "orders",
+    "description": "訂單主表",
+    "columns": [
+      {"name": "id", "data_type": "UUID", "length": null, "nullable": false, "default": "gen_random_uuid()", "description": "訂單唯一識別碼", "is_primary_key": true, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false},
+      {"name": "user_id", "data_type": "UUID", "length": null, "nullable": false, "default": null, "description": "下單使用者", "is_primary_key": false, "is_foreign_key": true, "references": "users.id", "is_unique": false, "is_indexed": true},
+      {"name": "total_amount", "data_type": "DECIMAL", "length": 12, "nullable": false, "default": null, "description": "訂單總金額", "is_primary_key": false, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false},
+      {"name": "status", "data_type": "VARCHAR", "length": 20, "nullable": false, "default": "pending", "description": "訂單狀態：pending/paid/shipped/cancelled", "is_primary_key": false, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": true},
+      {"name": "created_at", "data_type": "TIMESTAMPTZ", "length": null, "nullable": false, "default": "NOW()", "description": "建立時間", "is_primary_key": false, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false},
+      {"name": "updated_at", "data_type": "TIMESTAMPTZ", "length": null, "nullable": false, "default": "NOW()", "description": "最後更新時間", "is_primary_key": false, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false}
+    ],
+    "constraints": [],
+    "related_tables": ["users", "order_items"]
+  },
+  {
+    "table_name": "order_items",
+    "description": "訂單明細表",
+    "columns": [
+      {"name": "id", "data_type": "UUID", "length": null, "nullable": false, "default": "gen_random_uuid()", "description": "明細唯一識別碼", "is_primary_key": true, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false},
+      {"name": "order_id", "data_type": "UUID", "length": null, "nullable": false, "default": null, "description": "所屬訂單", "is_primary_key": false, "is_foreign_key": true, "references": "orders.id", "is_unique": false, "is_indexed": true},
+      {"name": "product_id", "data_type": "UUID", "length": null, "nullable": false, "default": null, "description": "商品識別碼", "is_primary_key": false, "is_foreign_key": true, "references": "products.id", "is_unique": false, "is_indexed": true},
+      {"name": "quantity", "data_type": "INTEGER", "length": null, "nullable": false, "default": null, "description": "購買數量", "is_primary_key": false, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false},
+      {"name": "unit_price", "data_type": "DECIMAL", "length": 12, "nullable": false, "default": null, "description": "單價（下單當下快照）", "is_primary_key": false, "is_foreign_key": false, "references": null, "is_unique": false, "is_indexed": false}
+    ],
+    "constraints": ["CHECK (quantity > 0)", "CHECK (unit_price > 0)"],
+    "related_tables": ["orders", "products"]
+  }
+]
