@@ -5,6 +5,8 @@ import logging
 from fastapi import FastAPI
 
 from app.config import get_settings
+from app.web.router import mount_static
+from app.web.router import router as web_router
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,9 @@ def create_app() -> FastAPI:
     @application.get("/healthz", tags=["ops"])
     async def healthz() -> dict:
         return {"status": "ok"}
+
+    application.include_router(web_router)
+    mount_static(application)
 
     return application
 

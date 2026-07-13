@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}SQL Agent — 文件查閱{% endblock %}
+{% block page_title %}文件產出{% endblock %}
+
+{% block topbar_actions %}
+<span class="status-pill status-pill-done" data-target="generation-status">產出中</span>
+{% endblock %}
+
+{% block content %}
+<div data-session-id="{{ session_id }}">
+  <section class="card" data-target="generation-progress">
+    <h2 class="card-title">產出進度</h2>
+    <div class="progress-step-list" id="generation-progress-list" data-target="generation-progress-list">
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="specification">
+        <span class="progress-step-icon">○</span>
+        <span class="progress-step-name">規格書與資料字典</span>
+      </div>
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="er_diagram">
+        <span class="progress-step-icon">○</span>
+        <span class="progress-step-name">結構與關聯圖</span>
+      </div>
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="ddl">
+        <span class="progress-step-icon">○</span>
+        <span class="progress-step-name">DDL 腳本</span>
+      </div>
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="security_plan">
+        <span class="progress-step-icon">○</span>
+        <span class="progress-step-name">效能與安全規劃</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="page-docs-toolbar">
+    <div class="tabs" role="tablist" data-target="doc-tabs">
+      <button type="button" class="tab is-active" role="tab" data-action="switch-tab" data-target="spec">📄 規格書</button>
+      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="er_diagram">🗺 關聯圖</button>
+      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="ddl">💾 DDL</button>
+      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="security_plan">🔒 安全規劃</button>
+    </div>
+    <div class="topbar-spacer"></div>
+    <button type="button" class="btn btn-ghost btn-sm" data-action="download-single">下載此份</button>
+    <button type="button" class="btn btn-primary btn-sm" data-action="download-all">⬇ 全部下載 .zip</button>
+  </div>
+
+  <section class="tab-panel is-active" data-target="doc-panel" data-panel="spec">
+    <div class="card" data-target="doc-content-spec">
+      <p class="form-hint">文件尚未產出，等待 API 就緒。</p>
+    </div>
+  </section>
+  <section class="tab-panel" data-target="doc-panel" data-panel="er_diagram">
+    <div class="card" data-target="doc-content-er_diagram">
+      <p class="form-hint">Mermaid 圖形將於此渲染。</p>
+    </div>
+  </section>
+  <section class="tab-panel" data-target="doc-panel" data-panel="ddl">
+    <div class="card">
+      <pre class="code-block" data-target="doc-content-ddl">-- DDL 尚未產出</pre>
+      <button type="button" class="btn btn-ghost btn-sm code-copy-btn" data-action="copy-code" data-target="ddl">複製</button>
+    </div>
+  </section>
+  <section class="tab-panel" data-target="doc-panel" data-panel="security_plan">
+    <div class="card" data-target="doc-content-security_plan">
+      <p class="form-hint">文件尚未產出，等待 API 就緒。</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+<script type="module" src="{{ url_for('static', path='js/pages/docs.js') }}"></script>
+{% endblock %}

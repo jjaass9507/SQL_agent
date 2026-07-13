@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}SQL Agent — 對話{% endblock %}
+{% block page_title %}需求收集對話（階段 1/3）{% endblock %}
+
+{% block topbar_actions %}
+<a class="btn btn-ghost btn-sm" href="{{ url_for('web_index') }}">← 返回</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-chat-layout" data-session-id="{{ session_id }}">
+  <section class="chat-panel">
+    <div class="chat-messages" id="chat-messages" data-target="chat-messages">
+      <div class="chat-bubble-row">
+        <div class="chat-bubble chat-bubble-ai" data-target="ai-message">
+          您好！請描述您想建立的資料表需求，我會逐步追問細節。
+        </div>
+      </div>
+    </div>
+    <form class="chat-input-row" data-action="send-message">
+      <textarea class="form-textarea" rows="2" placeholder="輸入訊息...（Enter 送出，Shift+Enter 換行）"
+                data-target="message-input" name="message"></textarea>
+      <button type="submit" class="btn btn-primary" data-action="submit-message">送出</button>
+    </form>
+  </section>
+
+  <aside class="progress-panel card" data-target="collection-progress">
+    <h2 class="card-title">目前收集進度</h2>
+    <div class="progress-step-list" id="collection-progress-list" data-target="collection-progress-list">
+      <p class="form-hint">尚未收集到資料表，開始對話後這裡會即時更新。</p>
+    </div>
+    <button type="button" class="btn btn-accent btn-sm progress-panel-cta" data-action="go-to-confirm" disabled>
+      需求已收集完成，前往確認 →
+    </button>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', path='js/pages/chat.js') }}"></script>
+{% endblock %}

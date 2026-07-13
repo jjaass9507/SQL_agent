@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}SQL Agent — 設定{% endblock %}
+{% block page_title %}設定{% endblock %}
+
+{% block content %}
+<div class="page-settings-layout">
+  <section class="card" data-target="llm-settings">
+    <h2 class="card-title">LLM 連線設定</h2>
+    <form data-action="save-llm-settings">
+      <div class="form-field">
+        <label class="form-label" for="llm-base-url">Base URL</label>
+        <input class="form-input" type="text" id="llm-base-url" name="llm_base_url" data-target="llm-base-url">
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="llm-api-key">API Key</label>
+        <input class="form-input" type="password" id="llm-api-key" name="llm_api_key" data-target="llm-api-key">
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="llm-model">Model</label>
+        <input class="form-input" type="text" id="llm-model" name="llm_model" data-target="llm-model">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-action="test-connection">測試連線</button>
+        <button type="submit" class="btn btn-primary" data-action="submit-llm-settings">儲存</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" data-target="capability-profile">
+    <h2 class="card-title">能力探測結果</h2>
+    <button type="button" class="btn btn-ghost btn-sm" data-action="diagnose-llm">重新探測</button>
+    <div class="settings-capability-grid" id="capability-profile-grid" data-target="capability-profile-grid">
+      <span class="status-pill status-pill-in_progress" data-target="capability-multi_turn">multi_turn: 未知</span>
+      <span class="status-pill status-pill-in_progress" data-target="capability-system_role">system_role: 未知</span>
+      <span class="status-pill status-pill-in_progress" data-target="capability-native_tools">native_tools: 未知</span>
+      <span class="status-pill status-pill-in_progress" data-target="capability-json_schema">json_schema: 未知</span>
+      <span class="status-pill status-pill-in_progress" data-target="capability-streaming">streaming: 未知</span>
+    </div>
+  </section>
+
+  <section class="card" data-target="admin-settings">
+    <h2 class="card-title">管理員權限（過渡機制）</h2>
+    <div class="form-field">
+      <label class="form-label" for="admin-token">Admin Token</label>
+      <input class="form-input" type="password" id="admin-token" name="admin_token" data-target="admin-token">
+      <p class="form-hint">用於核准 change request；Phase 7 上線 JWT 認證後將移除。</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', path='js/pages/settings.js') }}"></script>
+{% endblock %}

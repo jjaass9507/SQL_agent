@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}SQL Agent — 需求確認{% endblock %}
+{% block page_title %}需求確認（階段 2/3）{% endblock %}
+
+{% block topbar_actions %}
+<a class="btn btn-ghost btn-sm" href="{{ url_for('web_chat', session_id=session_id) }}" data-action="back-to-chat">← 返回修改</a>
+{% endblock %}
+
+{% block content %}
+<div data-session-id="{{ session_id }}">
+  <div class="confirm-version-bar" data-target="version-bar">
+    <span class="form-label">版本：</span>
+    <select class="form-select" data-action="select-version" data-target="version-select">
+      <option value="latest">最新版</option>
+    </select>
+    <button type="button" class="btn btn-ghost btn-sm" data-action="restore-version">還原此版本</button>
+  </div>
+
+  <div class="page-confirm-layout">
+    <section class="card" data-target="requirement-summary">
+      <h2 class="card-title">需求摘要</h2>
+      <ul class="confirm-summary-list" id="requirement-summary-list" data-target="requirement-summary-list">
+        <li class="form-hint">尚無摘要，完成需求收集對話後將顯示於此。</li>
+      </ul>
+
+      <h2 class="card-title card-title-spaced">與現有 DB 差異</h2>
+      <div class="diff-section" id="schema-diff" data-target="schema-diff">
+        <p class="form-hint">此 session 未匯入現有 DB，無差異比對。</p>
+      </div>
+    </section>
+
+    <section class="card" data-target="schema-tables">
+      <h2 class="card-title">結構化 Schema</h2>
+      <div id="schema-tables-container" data-target="schema-tables-container">
+        <p class="form-hint">尚無資料表，完成需求收集對話後將顯示於此。</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="confirm-actions">
+    <a class="btn btn-ghost" href="{{ url_for('web_chat', session_id=session_id) }}" data-action="back-to-chat">← 返回修改需求</a>
+    <button type="button" class="btn btn-primary" data-action="confirm-generate">✓ 確認，開始產出文件</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', path='js/pages/confirm.js') }}"></script>
+{% endblock %}
