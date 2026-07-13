@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}SQL Agent — 首頁{% endblock %}
+{% block page_title %}首頁 / 工作台{% endblock %}
+
+{% block content %}
+<section class="page-index-actions">
+  <button type="button" class="btn btn-primary" data-action="create-session" data-mode="design">
+    ＋ 開始新的資料表設計
+  </button>
+  <button type="button" class="btn btn-ghost" data-action="create-session" data-mode="review">
+    匯入 DB 進行審查
+  </button>
+  <button type="button" class="btn btn-ghost" data-action="create-session" data-mode="ddl-import">
+    貼上 DDL 建立
+  </button>
+</section>
+
+<section class="page-index-filters" role="group" aria-label="狀態篩選">
+  <button type="button" class="btn btn-sm btn-ghost is-active" data-action="filter-sessions" data-status="all">全部</button>
+  <button type="button" class="btn btn-sm btn-ghost" data-action="filter-sessions" data-status="in_progress">進行中</button>
+  <button type="button" class="btn btn-sm btn-ghost" data-action="filter-sessions" data-status="confirming">待確認</button>
+  <button type="button" class="btn btn-sm btn-ghost" data-action="filter-sessions" data-status="done">已完成</button>
+</section>
+
+<section class="card">
+  <h2 class="card-title">最近的紀錄</h2>
+  <div class="page-index-list" id="session-list" data-target="session-list">
+    <p class="form-hint" data-target="session-list-empty">尚無資料，API 就緒後將顯示歷史 session。</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', path='js/pages/index.js') }}"></script>
+{% endblock %}

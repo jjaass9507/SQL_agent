@@ -1,0 +1,226 @@
+/*
+ * pages.css — 版面配置（grid/flex 結構）
+ *
+ * 只允許引用 tokens.css 的變數，禁止任何字面色碼／px 字級。
+ * 元件外觀交給 components.css，這裡只管排版。
+ */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-base);
+  color: var(--color-text-900);
+  background: var(--color-surface-50);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ── App shell ── */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  height: var(--layout-topbar-height);
+  flex-shrink: 0;
+  background: var(--color-surface-0);
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-5);
+}
+
+.topbar-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-900);
+}
+
+.topbar-spacer {
+  flex: 1;
+}
+
+.page-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+/* ── 首頁 ── */
+.page-index-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.page-index-filters {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.page-index-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.page-index-session-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.page-index-session-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── 對話頁 ── */
+.page-chat-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: var(--space-5);
+  height: 100%;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.chat-input-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+  margin-top: var(--space-3);
+}
+
+.chat-input-row .form-textarea {
+  flex: 1;
+  resize: vertical;
+}
+
+.progress-panel {
+  overflow-y: auto;
+}
+
+.progress-panel-cta {
+  margin-top: var(--space-4);
+  width: 100%;
+}
+
+/* ── 確認頁 ── */
+.page-confirm-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: var(--space-6);
+}
+
+.confirm-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.confirm-version-bar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+
+/* ── 文件頁 ── */
+.page-docs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.page-docs-toolbar .topbar-spacer {
+  flex: 1;
+}
+
+/* ── 審查頁 ── */
+.review-report-section {
+  margin-bottom: var(--space-6);
+}
+
+.review-score {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.review-score-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary-600);
+}
+
+.review-flags-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── DB Agent 頁 ── */
+.page-agent-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--space-5);
+  height: 100%;
+}
+
+.agent-ddl-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── 設定頁 ── */
+.page-settings-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 640px;
+}
+
+.settings-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}SQL Agent — 審查報告{% endblock %}
+{% block page_title %}審查模式報告{% endblock %}
+
+{% block topbar_actions %}
+<button type="button" class="btn btn-ghost btn-sm" data-action="download-report">下載報告 (.md)</button>
+{% endblock %}
+
+{% block content %}
+<div data-session-id="{{ session_id }}">
+  <section class="card review-score" data-target="review-score">
+    <span class="review-score-value" data-target="review-score-value">—/10</span>
+    <span class="form-hint" data-target="review-summary">尚未產出審查報告，等待 API 就緒。</span>
+  </section>
+
+  <section class="review-report-section" data-target="review-section" data-section="consistency">
+    <h2 class="card-title">設計一致性</h2>
+    <ul class="review-flags-list" data-target="review-flags-consistency">
+      <li class="form-hint">等待審查結果</li>
+    </ul>
+  </section>
+
+  <section class="review-report-section" data-target="review-section" data-section="integrity">
+    <h2 class="card-title">資料完整性</h2>
+    <ul class="review-flags-list" data-target="review-flags-integrity">
+      <li class="form-hint">等待審查結果</li>
+    </ul>
+  </section>
+
+  <section class="review-report-section" data-target="review-section" data-section="performance">
+    <h2 class="card-title">效能考量</h2>
+    <ul class="review-flags-list" data-target="review-flags-performance">
+      <li class="form-hint">等待審查結果</li>
+    </ul>
+  </section>
+
+  <section class="review-report-section" data-target="review-section" data-section="security">
+    <h2 class="card-title">安全性</h2>
+    <ul class="review-flags-list" data-target="review-flags-security">
+      <li class="form-hint">等待審查結果</li>
+    </ul>
+  </section>
+
+  <section class="card" data-target="review-red-flags">
+    <h2 class="card-title">規則式紅旗與修復建議</h2>
+    <div id="review-red-flags-list" data-target="review-red-flags-list">
+      <p class="form-hint">尚無紅旗項目。</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', path='js/pages/review.js') }}"></script>
+{% endblock %}
