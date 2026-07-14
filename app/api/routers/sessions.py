@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import check_session_access, get_current_user, get_db
 from app.api.schemas.sessions import (
     ConfirmResponse,
     CreateSessionRequest,
@@ -25,16 +25,19 @@ from app.api.schemas.sessions import (
     TurnResponse,
     VersionOut,
 )
+from app.config import get_settings
 from app.llm.provider import LLMProvider
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
 from app.rules.spec_models import tables_from_json
 from app.services import interview_service, session_service
+from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+CurrentUserDep = Annotated[CurrentUser | None, Depends(get_current_user)]
 
 # SSE 模式下，reply 文字模擬切成固定大小的 delta 增量送出（見本檔 docstring 設計說明）。
 _DELTA_CHUNK_SIZE = 40
@@ -127,7 +130,7 @@ async def _stream_turn(turn_response: TurnResponse) -> AsyncIterator[str]:
 
 @router.post("", response_model=SessionSummary, status_code=201)
 async def create_session(
-    payload: CreateSessionRequest, db: DbDep
+    payload: CreateSessionRequest, db: DbDep, current_user: CurrentUserDep
 ) -> SessionSummary:
     try:
         session = await session_service.create_session(
@@ -135,20 +138,26 @@ async def create_session(
         )
     except session_service.DbConnectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if get_settings().auth_enabled and current_user is not None:
+        session = await sessions_repo.update_session(db, session.id, user_id=current_user.id)
     return _to_summary(session)
 
 
 @router.get("", response_model=list[SessionSummary])
-async def list_sessions(db: DbDep) -> list[SessionSummary]:
+async def list_sessions(db: DbDep, current_user: CurrentUserDep) -> list[SessionSummary]:
     sessions = await session_service.list_sessions(db)
+    settings = get_settings()
+    if settings.auth_enabled and current_user is not None and current_user.role != "admin":
+        sessions = [s for s in sessions if s.user_id == current_user.id]
     return [_to_summary(s) for s in sessions]
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session(session_id: UUID, db: DbDep) -> SessionDetail:
+async def get_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> SessionDetail:
     detail = await session_service.get_session_detail(db, session_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="session not found")
+    await check_session_access(db, detail.session, current_user)
     return _to_detail(detail)
 
 
@@ -157,11 +166,13 @@ async def send_message(
     session_id: UUID,
     payload: SendMessageRequest,
     db: DbDep,
+    current_user: CurrentUserDep,
     accept: str | None = Header(default=None),
 ):
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    await check_session_access(db, session, current_user)
 
     provider = LLMProvider.from_settings()
     turn = await interview_service.run_turn(db, provider, session, payload.content)
@@ -179,8 +190,12 @@ async def send_message(
 
 @router.post("/{session_id}/confirm", response_model=ConfirmResponse)
 async def confirm_session(
-    session_id: UUID, db: DbDep
+    session_id: UUID, db: DbDep, current_user: CurrentUserDep
 ) -> ConfirmResponse:
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    await check_session_access(db, session, current_user)
     try:
         job = await session_service.confirm_session(db, session_id)
     except session_service.SessionNotFoundError as exc:
@@ -192,19 +207,24 @@ async def confirm_session(
 
 @router.get("/{session_id}/versions", response_model=list[VersionOut])
 async def list_versions(
-    session_id: UUID, db: DbDep
+    session_id: UUID, db: DbDep, current_user: CurrentUserDep
 ) -> list[VersionOut]:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    await check_session_access(db, session, current_user)
     versions = await versions_repo.list_versions(db, session_id)
     return [_to_version_out(v) for v in versions]
 
 
 @router.post("/{session_id}/versions/{version_num}/restore", response_model=VersionOut)
 async def restore_version(
-    session_id: UUID, version_num: int, db: DbDep
+    session_id: UUID, version_num: int, db: DbDep, current_user: CurrentUserDep
 ) -> VersionOut:
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    await check_session_access(db, session, current_user)
     try:
         restored = await session_service.restore_version(db, session_id, version_num)
     except session_service.SessionNotFoundError as exc:
@@ -216,8 +236,12 @@ async def restore_version(
 
 @router.post("/{session_id}/import-db", response_model=ImportDbResponse)
 async def import_db(
-    session_id: UUID, payload: ImportDbRequest, db: DbDep
+    session_id: UUID, payload: ImportDbRequest, db: DbDep, current_user: CurrentUserDep
 ) -> ImportDbResponse:
+    existing = await sessions_repo.get_session(db, session_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    await check_session_access(db, existing, current_user)
     try:
         session = await session_service.import_db(db, session_id, payload.db_url)
     except session_service.SessionNotFoundError as exc:

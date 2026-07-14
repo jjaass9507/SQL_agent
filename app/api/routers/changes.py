@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, require_admin
+from app.api.deps import get_db, require_admin_role
 from app.repos import change_requests as change_requests_repo
 from app.services import change_service
 
@@ -14,7 +14,9 @@ router = APIRouter(prefix="/change-requests", tags=["change-requests"])
 
 # 模組層級單例：避免 B008（Depends() 直接寫在參數預設值會被 lint 擋下）。
 _DbDep = Depends(get_db)
-_AdminDep = Depends(require_admin)
+# AUTH_ENABLED=false：比照舊 ADMIN_TOKEN 機制；true：改要求 JWT role=admin
+# （ADMIN_TOKEN 僅在認證關閉時作為過渡機制，見 app/api/deps.py::require_admin_role）。
+_AdminDep = Depends(require_admin_role)
 
 
 class CreateChangeRequestBody(BaseModel):

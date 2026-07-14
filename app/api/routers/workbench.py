@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import check_session_access, get_current_user, get_db
 from app.api.schemas.workbench import (
     DDLImportRequest,
     DDLImportResponse,
@@ -20,13 +20,17 @@ from app.api.schemas.workbench import (
     SchemaTreeResponse,
     ValidateDDLResponse,
 )
+from app.config import get_settings
 from app.llm.provider import LLMProvider
+from app.repos import sessions as sessions_repo
 from app.services import dbops
 from app.services import workbench_service as svc
+from app.services.auth_service import CurrentUser
 
 router = APIRouter(tags=["workbench"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+CurrentUserDep = Annotated[CurrentUser | None, Depends(get_current_user)]
 
 
 def _not_found(session_id: uuid.UUID) -> HTTPException:
@@ -37,8 +41,19 @@ def _no_db() -> HTTPException:
     return HTTPException(status_code=400, detail="此 session 未設定資料庫連線")
 
 
+async def _check_access(
+    db: AsyncSession, session_id: uuid.UUID, current_user: CurrentUser | None
+) -> None:
+    """session 所有權驗證（不存在時沿用本 router 既有的 404 格式）。"""
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise _not_found(session_id)
+    await check_session_access(db, session, current_user)
+
+
 @router.post("/sessions/{session_id}/query", response_model=QueryResult)
-async def query(session_id: uuid.UUID, body: QueryRequest, db: DbDep):
+async def query(session_id: uuid.UUID, body: QueryRequest, db: DbDep, current_user: CurrentUserDep):
+    await _check_access(db, session_id, current_user)
     try:
         return await svc.run_query(db, session_id, body.sql)
     except svc.SessionNotFound:
@@ -50,7 +65,10 @@ async def query(session_id: uuid.UUID, body: QueryRequest, db: DbDep):
 
 
 @router.post("/sessions/{session_id}/explain", response_model=QueryResult)
-async def explain(session_id: uuid.UUID, body: QueryRequest, db: DbDep):
+async def explain(
+    session_id: uuid.UUID, body: QueryRequest, db: DbDep, current_user: CurrentUserDep
+):
+    await _check_access(db, session_id, current_user)
     try:
         return await svc.run_explain(db, session_id, body.sql)
     except svc.SessionNotFound:
@@ -62,7 +80,8 @@ async def explain(session_id: uuid.UUID, body: QueryRequest, db: DbDep):
 
 
 @router.get("/sessions/{session_id}/schema-tree", response_model=SchemaTreeResponse)
-async def schema_tree(session_id: uuid.UUID, db: DbDep):
+async def schema_tree(session_id: uuid.UUID, db: DbDep, current_user: CurrentUserDep):
+    await _check_access(db, session_id, current_user)
     try:
         return await svc.get_schema_tree(db, session_id)
     except svc.SessionNotFound:
@@ -70,7 +89,10 @@ async def schema_tree(session_id: uuid.UUID, db: DbDep):
 
 
 @router.post("/sessions/{session_id}/nl2sql", response_model=NL2SQLResponse)
-async def nl2sql(session_id: uuid.UUID, body: NL2SQLRequest, db: DbDep):
+async def nl2sql(
+    session_id: uuid.UUID, body: NL2SQLRequest, db: DbDep, current_user: CurrentUserDep
+):
+    await _check_access(db, session_id, current_user)
     llm = LLMProvider.from_settings()
     try:
         draft = await svc.generate_nl2sql(db, session_id, body.question, llm)
@@ -84,7 +106,8 @@ async def nl2sql(session_id: uuid.UUID, body: NL2SQLRequest, db: DbDep):
 
 
 @router.post("/sessions/{session_id}/validate-ddl", response_model=ValidateDDLResponse)
-async def validate_ddl(session_id: uuid.UUID, db: DbDep):
+async def validate_ddl(session_id: uuid.UUID, db: DbDep, current_user: CurrentUserDep):
+    await _check_access(db, session_id, current_user)
     try:
         return await svc.validate_session_ddl(db, session_id)
     except svc.SessionNotFound:
@@ -92,8 +115,12 @@ async def validate_ddl(session_id: uuid.UUID, db: DbDep):
 
 
 @router.post("/ddl-import", response_model=DDLImportResponse, status_code=201)
-async def ddl_import(body: DDLImportRequest, db: DbDep):
+async def ddl_import(body: DDLImportRequest, db: DbDep, current_user: CurrentUserDep):
     try:
-        return await svc.import_ddl(db, body.title, body.ddl)
+        result = await svc.import_ddl(db, body.title, body.ddl)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    # AUTH_ENABLED=true 時，匯入建立的 session 一樣寫入建立者（同 POST /sessions）。
+    if get_settings().auth_enabled and current_user is not None:
+        await sessions_repo.update_session(db, result["id"], user_id=current_user.id)
+    return result

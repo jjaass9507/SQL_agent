@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     db_encryption_key: str | None = None  # 32-byte hex，AES-256-GCM 加密連線字串
     admin_token: str | None = None        # change request 審批過渡機制
 
+    # 認證（Phase 7）：false 時所有端點行為與 v0.5 完全相同（匿名、無所有權過濾）。
+    auth_enabled: bool = False
+    jwt_access_ttl_minutes: int = 15
+    jwt_refresh_ttl_days: int = 7
+    # 登入端點的速率限制（per-IP 滑動視窗）；一般端點限制較寬鬆，供未來擴充使用。
+    auth_rate_limit_login_max: int = 5
+    auth_rate_limit_login_window_seconds: float = 60.0
+    auth_rate_limit_general_max: int = 60
+    auth_rate_limit_general_window_seconds: float = 60.0
+
     # 伺服器
     host: str = "127.0.0.1"
     debug: bool = False
