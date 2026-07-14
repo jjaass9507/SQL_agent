@@ -5,7 +5,9 @@
 """
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -20,11 +22,20 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def _ensure_sqlite_dir(database_url: str) -> None:
+    """SQLite 檔案模式時自動補建父目錄（data/ 為 git ignored，clone 後不存在）。"""
+    url = make_url(database_url)
+    if url.get_backend_name() == "sqlite" and url.database and url.database != ":memory:":
+        Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
 def get_engine() -> AsyncEngine:
     """回傳全域唯一的 async engine（延遲建立、依 settings.database_url）。"""
     global _engine
     if _engine is None:
-        _engine = create_async_engine(get_settings().database_url, future=True)
+        database_url = get_settings().database_url
+        _ensure_sqlite_dir(database_url)
+        _engine = create_async_engine(database_url, future=True)
     return _engine
 
 
