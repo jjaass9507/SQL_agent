@@ -1,0 +1,8 @@
+根據提供的資料表規格，產出 SQLAlchemy 2.0 ORM 模型程式碼（Python）。
+要求：
+1. 使用 `DeclarativeBase` 與 `Mapped` / `mapped_column` 語法
+2. 正確對應型態、nullable、primary_key、unique、index
+3. 外鍵用 `ForeignKey`，並建立 `relationship`
+4. 每個 class 前用繁體中文註解說明用途
+
+只輸出 Python 程式碼，不要加 markdown 程式碼區塊標記。

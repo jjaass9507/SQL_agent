@@ -1,0 +1,8 @@
+根據提供的資料表規格，產出一份 Alembic migration 腳本（Python）。
+要求：
+1. 含 `revision`、`down_revision` 變數（down_revision 設為 None）
+2. `upgrade()`：用 `op.create_table` 建立所有表，含欄位、主鍵、外鍵、unique、index
+3. `downgrade()`：用 `op.drop_table` 反向刪除（依相依順序）
+4. 為外鍵欄位建立 `op.create_index`
+
+只輸出 Python 程式碼，不要加 markdown 程式碼區塊標記。
