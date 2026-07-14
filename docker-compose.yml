@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sql_agent
+      POSTGRES_PASSWORD: sql_agent
+      POSTGRES_DB: sql_agent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sql_agent -d sql_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM gateway（OpenAI 相容 Chat Completions）
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_VERIFY: ${LLM_VERIFY:-false}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-120.0}
+      LLM_FORCE_PROFILE: ${LLM_FORCE_PROFILE:-}
+      # 平台自身資料庫（正式環境用這個 compose 起的 PostgreSQL）
+      DATABASE_URL: postgresql+asyncpg://sql_agent:sql_agent@postgres:5432/sql_agent
+      # 安全
+      SECRET_KEY: ${SECRET_KEY:-dev-only-secret}
+      DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # 伺服器
+      HOST: 0.0.0.0
+      DEBUG: ${DEBUG:-false}
+
+volumes:
+  postgres_data:
