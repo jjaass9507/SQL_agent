@@ -477,3 +477,80 @@
   margin-bottom: var(--space-1);
   font-size: var(--font-size-sm);
 }
+
+/* ══════════════ DB Agent 抽屜 ══════════════ */
+.agent-drawer-toggle {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  width: var(--space-12);
+  height: var(--space-12);
+  border-radius: var(--radius-full);
+  background: var(--color-primary-600);
+  color: var(--color-text-inverse);
+  border: none;
+  font-size: var(--font-size-lg);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-dropdown);
+}
+.agent-drawer-toggle:hover {
+  background: var(--color-primary-700);
+}
+.agent-drawer-panel {
+  position: fixed;
+  right: var(--space-6);
+  bottom: calc(var(--space-12) + var(--space-8));
+  width: 360px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-dropdown);
+}
+.agent-drawer-panel[hidden] {
+  display: none;
+}
+.agent-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.agent-drawer-messages {
+  flex: 1;
+  overflow-y: auto;
+  min-height: var(--space-12);
+}
+
+/* ══════════════ Markdown 文件內容 ══════════════ */
+.doc-markdown {
+  white-space: pre-wrap;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-900);
+}
+
+/* ══════════════ 待審變更請求項目 ══════════════ */
+.change-request-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+}
+.change-request-item:last-child {
+  border-bottom: none;
+}
+
+/* ══════════════ tables_ready 橫幅 ══════════════ */
+.chat-tables-ready-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-100);
+  color: var(--color-primary-800);
+  margin-bottom: var(--space-4);
+}
