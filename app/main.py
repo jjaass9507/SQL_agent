@@ -4,6 +4,7 @@ import logging
 
 from fastapi import FastAPI
 
+from app.api import all_routers
 from app.config import get_settings
 from app.web.router import mount_static
 from app.web.router import router as web_router
@@ -22,6 +23,9 @@ def create_app() -> FastAPI:
     @application.get("/healthz", tags=["ops"])
     async def healthz() -> dict:
         return {"status": "ok"}
+
+    for api_router in all_routers():
+        application.include_router(api_router, prefix="/api/v1")
 
     application.include_router(web_router)
     mount_static(application)
