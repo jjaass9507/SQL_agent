@@ -1,0 +1,207 @@
+"""認證服務：密碼雜湊、JWT 簽發/驗證、登入/refresh/登出流程、簡易 rate limiting。
+
+依 `docs/security_design.md` 第二章實作：HS256 JWT、access 15 分/refresh 7 天、
+refresh token 存 DB（雜湊後）支援登出撤銷。`AUTH_ENABLED=false` 時本模組只會被
+`app/api/routers/auth.py` 呼叫（新端點），既有端點的行為完全不受影響。
+"""
+
+import hashlib
+import hmac
+import os
+import secrets
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
+import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.repos import users as users_repo
+from app.repos.models import User
+
+JWT_ALGORITHM = "HS256"
+
+# scrypt 參數：N（成本因子）/ r（區塊大小）/ p（平行度），依 stdlib hashlib.scrypt 建議值。
+_SCRYPT_N = 2**14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_DKLEN = 32
+
+
+class AuthError(Exception):
+    """登入 / refresh / 登出失敗的共同例外，router 轉換成對應的 HTTP status。"""
+
+
+@dataclass
+class CurrentUser:
+    """access token 驗證通過後的使用者資訊（直接信任 payload，不查 DB）。"""
+
+    id: UUID
+    role: str
+
+
+# -- 密碼雜湊（stdlib hashlib.scrypt，避免新增依賴） ---------------------------
+
+
+def hash_password(password: str) -> str:
+    """回傳格式 `scrypt$N$r$p$salt_hex$hash_hex`。"""
+    salt = os.urandom(16)
+    derived = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN,
+    )
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${derived.hex()}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """驗證密碼是否與雜湊值相符（timing-safe 比對）；格式不符一律回傳 False。"""
+    try:
+        scheme, n, r, p, salt_hex, hash_hex = stored_hash.split("$")
+        if scheme != "scrypt":
+            return False
+        derived = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=bytes.fromhex(salt_hex),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=len(hash_hex) // 2,
+        )
+        return hmac.compare_digest(derived.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+# -- JWT -----------------------------------------------------------------------
+
+
+def create_access_token(user: User) -> tuple[str, int]:
+    """簽發 access token，回傳 `(token, 存活秒數)`。payload 依 security_design.md：
+    `{sub, role, iat, exp}`。"""
+    settings = get_settings()
+    ttl = timedelta(minutes=settings.jwt_access_ttl_minutes)
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(user.id),
+        "role": user.role,
+        "iat": int(now.timestamp()),
+        "exp": int((now + ttl).timestamp()),
+    }
+    token = jwt.encode(payload, settings.secret_key, algorithm=JWT_ALGORITHM)
+    return token, int(ttl.total_seconds())
+
+
+def decode_access_token(token: str) -> CurrentUser:
+    """驗證並解析 access token；簽章不符、過期、格式錯誤一律拋 `AuthError`。"""
+    settings = get_settings()
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[JWT_ALGORITHM])
+    except jwt.PyJWTError as exc:
+        raise AuthError("access token 無效或已過期") from exc
+    try:
+        return CurrentUser(id=UUID(payload["sub"]), role=payload["role"])
+    except (KeyError, ValueError) as exc:
+        raise AuthError("access token payload 格式錯誤") from exc
+
+
+def _hash_refresh_token(raw_token: str) -> str:
+    """refresh token 存 DB 前先雜湊（SHA-256），資料庫外洩不會直接洩漏可用憑證。"""
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+async def _issue_refresh_token(db: AsyncSession, user: User) -> str:
+    settings = get_settings()
+    raw_token = secrets.token_urlsafe(48)
+    expires_at = datetime.now(UTC) + timedelta(days=settings.jwt_refresh_ttl_days)
+    await users_repo.create_refresh_token(
+        db, user_id=user.id, token_hash=_hash_refresh_token(raw_token), expires_at=expires_at
+    )
+    return raw_token
+
+
+# -- 登入 / refresh / 登出 -------------------------------------------------------
+
+
+@dataclass
+class LoginResult:
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    user: User
+
+
+async def login(db: AsyncSession, email: str, password: str) -> LoginResult:
+    """驗證帳密；失敗一律拋 `AuthError`（訊息不透露帳號是否存在）。"""
+    user = await users_repo.get_user_by_email(db, email)
+    if user is None or not verify_password(password, user.password_hash):
+        raise AuthError("帳號或密碼錯誤")
+    access_token, expires_in = create_access_token(user)
+    refresh_token = await _issue_refresh_token(db, user)
+    return LoginResult(
+        access_token=access_token, refresh_token=refresh_token, expires_in=expires_in, user=user
+    )
+
+
+@dataclass
+class RefreshResult:
+    access_token: str
+    expires_in: int
+
+
+async def refresh_access_token(db: AsyncSession, refresh_token: str) -> RefreshResult:
+    """憑有效且未撤銷的 refresh token 換發新 access token。"""
+    record = await users_repo.get_refresh_token_by_hash(db, _hash_refresh_token(refresh_token))
+    if record is None or record.revoked_at is not None:
+        raise AuthError("refresh token 無效或已撤銷")
+    # SQLite 的 DateTime(timezone=True) 讀回來是 naive（一律視為 UTC），補上 tzinfo 再比較。
+    expires_at = record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at < datetime.now(UTC):
+        raise AuthError("refresh token 已過期")
+    user = await users_repo.get_user_by_id(db, record.user_id)
+    if user is None:
+        raise AuthError("使用者不存在")
+    access_token, expires_in = create_access_token(user)
+    return RefreshResult(access_token=access_token, expires_in=expires_in)
+
+
+async def logout(db: AsyncSession, refresh_token: str) -> None:
+    """撤銷 refresh token；找不到也視為成功（登出操作維持冪等）。"""
+    await users_repo.revoke_refresh_token(db, _hash_refresh_token(refresh_token))
+
+
+# -- Rate limiting（簡單 in-memory 滑動視窗，per-IP） ------------------------------
+
+
+class RateLimiter:
+    """單一 process 的 in-memory 滑動視窗限流器。
+
+    多副本部署時每個副本各自計數，不是全域精確限流——足以擋掉單一來源的暴力
+    嘗試，嚴謹的跨副本限流需要外部儲存（Redis 等），非本階段範圍。
+    """
+
+    def __init__(self) -> None:
+        self._hits: dict[str, list[float]] = {}
+
+    def check(self, key: str, *, max_requests: int, window_seconds: float) -> bool:
+        """回傳本次請求是否允許放行；放行時一併記錄本次命中。"""
+        now = time.monotonic()
+        window_start = now - window_seconds
+        hits = [t for t in self._hits.get(key, []) if t > window_start]
+        if len(hits) >= max_requests:
+            self._hits[key] = hits
+            return False
+        hits.append(now)
+        self._hits[key] = hits
+        return True
+
+
+# 模組層級單例：/auth/login 專用（較嚴格門檻），見 app/api/routers/auth.py。
+login_rate_limiter = RateLimiter()

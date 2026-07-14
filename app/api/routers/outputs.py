@@ -16,33 +16,40 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.deps import get_db
+from app.api.deps import check_session_access, get_current_user, get_db
 from app.repos import jobs as jobs_repo
 from app.repos import outputs as outputs_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.db import get_session_factory
 from app.repos.models import SessionRecord
+from app.services.auth_service import CurrentUser
 from app.services.generation_service import EXTRA_FILENAMES
 
 router = APIRouter(tags=["outputs"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+CurrentUserDep = Annotated[CurrentUser | None, Depends(get_current_user)]
 
 _SSE_POLL_INTERVAL = 0.5
 
 
-async def _get_session_or_404(db: AsyncSession, session_id: uuid.UUID) -> SessionRecord:
+async def _get_session_or_404(
+    db: AsyncSession, session_id: uuid.UUID, current_user: CurrentUser | None = None
+) -> SessionRecord:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session 不存在")
+    await check_session_access(db, session, current_user)
     return session
 
 
 @router.get("/sessions/{session_id}/outputs")
-async def list_outputs(session_id: uuid.UUID, db: DbDep) -> list[dict]:
+async def list_outputs(
+    session_id: uuid.UUID, db: DbDep, current_user: CurrentUserDep
+) -> list[dict]:
     """列出某 session 已產出的所有文件（含內容）。"""
-    await _get_session_or_404(db, session_id)
+    await _get_session_or_404(db, session_id, current_user)
     outputs = await outputs_repo.list_outputs(db, session_id)
     return [
         {"filename": o.filename, "content": o.content, "created_at": o.created_at.isoformat()}
@@ -51,9 +58,11 @@ async def list_outputs(session_id: uuid.UUID, db: DbDep) -> list[dict]:
 
 
 @router.get("/sessions/{session_id}/outputs/zip")
-async def download_outputs_zip(session_id: uuid.UUID, db: DbDep) -> Response:
+async def download_outputs_zip(
+    session_id: uuid.UUID, db: DbDep, current_user: CurrentUserDep
+) -> Response:
     """把某 session 已產出的所有文件打包成 zip 下載。"""
-    await _get_session_or_404(db, session_id)
+    await _get_session_or_404(db, session_id, current_user)
     outputs = await outputs_repo.list_outputs(db, session_id)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -67,13 +76,15 @@ async def download_outputs_zip(session_id: uuid.UUID, db: DbDep) -> Response:
 
 
 @router.post("/sessions/{session_id}/extras/{kind}/generate")
-async def generate_extra(session_id: uuid.UUID, kind: str, db: DbDep) -> dict:
+async def generate_extra(
+    session_id: uuid.UUID, kind: str, db: DbDep, current_user: CurrentUserDep
+) -> dict:
     """建立一個 kind="extra" 的 queued job，由背景 worker 消化。
 
     延伸產出所需的目標設計表結構取自最新一版 schema 快照；`incremental` 另外
     帶入 session 匯入的現有結構（`context_tables_json`）供差異比對。
     """
-    session = await _get_session_or_404(db, session_id)
+    session = await _get_session_or_404(db, session_id, current_user)
     if kind not in EXTRA_FILENAMES:
         raise HTTPException(status_code=400, detail=f"不支援的 extra kind：{kind}")
 
@@ -135,10 +146,11 @@ async def _job_progress_stream(
 async def stream_generation_events(
     session_id: uuid.UUID,
     db: DbDep,
+    current_user: CurrentUserDep,
     job_id: uuid.UUID | None = None,
 ) -> StreamingResponse:
     """SSE：生成/審查/extra 進度（取代前端輪詢）。`job_id` 省略時跟蹤最新一個 job。"""
-    await _get_session_or_404(db, session_id)
+    await _get_session_or_404(db, session_id, current_user)
     return StreamingResponse(
         _job_progress_stream(session_id, job_id, get_session_factory()),
         media_type="text/event-stream",
