@@ -37,6 +37,17 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+# 非 .py 資產：wheel／非 editable 安裝時必須顯式宣告，否則會被剔除
+# （Dockerfile 另有 COPY app 作雙保險，見 Dockerfile 註解）
+app = [
+    "web/templates/*.html",
+    "web/static/css/*",
+    "web/static/js/*",
+    "web/static/js/lib/*",
+    "llm/prompts/*",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
