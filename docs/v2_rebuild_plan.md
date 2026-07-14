@@ -305,10 +305,13 @@ app/web/
 
 ### 9-2 【預留計畫】Google Stitch 設計風格整合（Phase 8）
 
-> **狀態：預留。** 未來會由使用者提供 Google Stitch 產出的設計
-> （Stitch 輸出為 HTML + Tailwind 風格 utility class 的靜態頁面設計稿，
-> 或 Figma 匯出）。本階段在設計稿到位前**不動工**，但前述 9-1 的分層
-> 就是為此準備的整合介面。
+> **狀態：已完成。** 使用者透過 Stitch MCP 提供了「Pro Space Gray」設計系統
+> （DESIGN.md 原文收錄於 `docs/design/stitch_design_pro_space_gray.md`），
+> 已依下述工序完成置換：tokens.css 全面改值（深灰 tiered 背景 + System Blue、
+> Inter 13px + JetBrains Mono、陰影歸零）、components.css 逐元件對齊、
+> pages.css 三欄 Pro Shell；模板僅 base.html 加 3 行（color-scheme + webfont），
+> data-*/JS/測試零變動，399 測試全綠。9-1 的分層架構驗證有效——
+> 整個換膚未觸碰任何邏輯層。
 
 設計稿到位後的整合工序（給實作 AI 的固定流程）：
 
