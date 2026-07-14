@@ -15,6 +15,47 @@
   </button>
 </section>
 
+<section class="card" data-target="review-form-card" hidden>
+  <h2 class="card-title">匯入 DB 進行審查</h2>
+  <form data-action="submit-review-import">
+    <div class="form-field">
+      <label class="form-label" for="review-title">名稱（選填）</label>
+      <input class="form-input" type="text" id="review-title" name="title"
+             maxlength="200" data-target="review-title" placeholder="例如：訂單系統 DB 審查">
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="review-db-url">PostgreSQL 連線字串</label>
+      <input class="form-input" type="password" id="review-db-url" name="db_url"
+             data-target="review-db-url" placeholder="postgresql://user:password@host:5432/dbname">
+      <p class="form-hint">連線字串僅用於讀取結構，將加密存放且不回傳前端。</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-action="cancel-form">取消</button>
+      <button type="submit" class="btn btn-primary" data-action="submit-review-import-btn">開始審查</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" data-target="ddl-import-form-card" hidden>
+  <h2 class="card-title">貼上 DDL 建立</h2>
+  <form data-action="submit-ddl-import">
+    <div class="form-field">
+      <label class="form-label" for="ddl-import-title">名稱（選填）</label>
+      <input class="form-input" type="text" id="ddl-import-title" name="title"
+             maxlength="120" data-target="ddl-import-title" placeholder="例如：舊系統結構匯入">
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="ddl-import-text">CREATE TABLE 語句</label>
+      <textarea class="form-textarea" id="ddl-import-text" name="ddl" rows="8"
+                data-target="ddl-import-text" placeholder="CREATE TABLE users (...);"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-action="cancel-form">取消</button>
+      <button type="submit" class="btn btn-primary" data-action="submit-ddl-import-btn">匯入</button>
+    </div>
+  </form>
+</section>
+
 <section class="page-index-filters" role="group" aria-label="狀態篩選">
   <button type="button" class="btn btn-sm btn-ghost is-active" data-action="filter-sessions" data-status="all">全部</button>
   <button type="button" class="btn btn-sm btn-ghost" data-action="filter-sessions" data-status="in_progress">進行中</button>
@@ -25,7 +66,7 @@
 <section class="card">
   <h2 class="card-title">最近的紀錄</h2>
   <div class="page-index-list" id="session-list" data-target="session-list">
-    <p class="form-hint" data-target="session-list-empty">尚無資料，API 就緒後將顯示歷史 session。</p>
+    <p class="form-hint" data-target="session-list-empty">載入中…</p>
   </div>
 </section>
 {% endblock %}

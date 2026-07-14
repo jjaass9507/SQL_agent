@@ -4,7 +4,7 @@
 
 {% block topbar_actions %}
 <select class="form-select" data-action="select-db" data-target="db-select">
-  <option value="">選擇資料庫連線...</option>
+  <option value="">預設資料庫連線</option>
 </select>
 {% endblock %}
 
@@ -19,16 +19,6 @@
       </div>
     </div>
 
-    <div class="agent-ddl-confirm card" id="agent-ddl-confirm" data-target="agent-ddl-confirm" hidden>
-      <div class="form-label">AI 建議的 DDL：</div>
-      <pre class="code-block" data-target="agent-ddl-code"></pre>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-primary btn-sm" data-action="agent-run-ddl">執行 DDL</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-action="agent-dismiss-ddl">取消</button>
-      </div>
-      <div data-target="agent-ddl-result"></div>
-    </div>
-
     <form class="chat-input-row" data-action="agent-send-message">
       <textarea class="form-textarea" rows="2"
                 placeholder="詢問資料庫，或描述你想建立/修改的資料表…"
@@ -37,11 +27,27 @@
     </form>
   </section>
 
-  <aside class="card" data-target="agent-tool-trace">
-    <h2 class="card-title">工具呼叫軌跡</h2>
-    <div class="progress-step-list" id="agent-tool-trace-list" data-target="agent-tool-trace-list">
-      <p class="form-hint">尚無工具呼叫紀錄。</p>
-    </div>
+  <aside class="page-agent-sidebar">
+    <section class="card" data-target="agent-tool-trace">
+      <h2 class="card-title">工具呼叫軌跡</h2>
+      <div class="progress-step-list" id="agent-tool-trace-list" data-target="agent-tool-trace-list">
+        <p class="form-hint">尚無工具呼叫紀錄。</p>
+      </div>
+    </section>
+
+    <section class="card" data-target="change-request-panel">
+      <h2 class="card-title">待審變更請求</h2>
+      <div data-target="change-request-list">
+        <p class="form-hint">載入中…</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="agent-admin-token">Admin Token（核准/駁回需要）</label>
+        <input class="form-input" type="password" id="agent-admin-token"
+               data-target="agent-admin-token" placeholder="輸入後按儲存">
+        <p class="form-hint">存於瀏覽器 sessionStorage，關閉分頁即清除。</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="save-admin-token">儲存 Token</button>
+    </section>
   </aside>
 </div>
 {% endblock %}

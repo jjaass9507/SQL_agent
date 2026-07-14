@@ -3,7 +3,7 @@
 {% block page_title %}文件產出{% endblock %}
 
 {% block topbar_actions %}
-<span class="status-pill status-pill-done" data-target="generation-status">產出中</span>
+<span class="status-pill status-pill-in_progress" data-target="generation-status">載入中</span>
 {% endblock %}
 
 {% block content %}
@@ -11,19 +11,19 @@
   <section class="card" data-target="generation-progress">
     <h2 class="card-title">產出進度</h2>
     <div class="progress-step-list" id="generation-progress-list" data-target="generation-progress-list">
-      <div class="progress-step is-waiting" data-target="progress-item" data-file="specification">
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="01_specification.md">
         <span class="progress-step-icon">○</span>
         <span class="progress-step-name">規格書與資料字典</span>
       </div>
-      <div class="progress-step is-waiting" data-target="progress-item" data-file="er_diagram">
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="02_er_diagram.md">
         <span class="progress-step-icon">○</span>
         <span class="progress-step-name">結構與關聯圖</span>
       </div>
-      <div class="progress-step is-waiting" data-target="progress-item" data-file="ddl">
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="03_ddl.sql">
         <span class="progress-step-icon">○</span>
         <span class="progress-step-name">DDL 腳本</span>
       </div>
-      <div class="progress-step is-waiting" data-target="progress-item" data-file="security_plan">
+      <div class="progress-step is-waiting" data-target="progress-item" data-file="04_security_plan.md">
         <span class="progress-step-icon">○</span>
         <span class="progress-step-name">效能與安全規劃</span>
       </div>
@@ -44,12 +44,12 @@
 
   <section class="tab-panel is-active" data-target="doc-panel" data-panel="spec">
     <div class="card" data-target="doc-content-spec">
-      <p class="form-hint">文件尚未產出，等待 API 就緒。</p>
+      <p class="form-hint">文件尚未產出。</p>
     </div>
   </section>
   <section class="tab-panel" data-target="doc-panel" data-panel="er_diagram">
     <div class="card" data-target="doc-content-er_diagram">
-      <p class="form-hint">Mermaid 圖形將於此渲染。</p>
+      <p class="form-hint">文件尚未產出。</p>
     </div>
   </section>
   <section class="tab-panel" data-target="doc-panel" data-panel="ddl">
@@ -60,7 +60,24 @@
   </section>
   <section class="tab-panel" data-target="doc-panel" data-panel="security_plan">
     <div class="card" data-target="doc-content-security_plan">
-      <p class="form-hint">文件尚未產出，等待 API 就緒。</p>
+      <p class="form-hint">文件尚未產出。</p>
+    </div>
+  </section>
+
+  <section class="card card-title-spaced" data-target="extras-section">
+    <h2 class="card-title">延伸產出（on-demand）</h2>
+    <div class="page-index-actions">
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="orm">ORM 模型</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="migration">Alembic Migration</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="query">查詢範例</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="incremental">增量 Migration</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="dbml">DBML</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="plantuml">PlantUML</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="jsonschema">JSON Schema</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="datadict">資料字典 CSV</button>
+    </div>
+    <div data-target="extras-list">
+      <p class="form-hint">尚無延伸產出，點上方按鈕觸發。</p>
     </div>
   </section>
 </div>

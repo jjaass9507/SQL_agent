@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='css/pages.css') }}">
   {% block head_extra %}{% endblock %}
 </head>
-<body>
+<body data-active-page="{{ active_page }}">
   <div class="app-shell">
     <nav class="sidebar" aria-label="主導覽">
       <div class="sidebar-logo">SQL <span class="sidebar-logo-accent">Agent</span></div>
@@ -37,6 +37,8 @@
 
   <div class="toast-stack" id="toast-stack" data-target="toast-stack"></div>
 
+  {# 全站 DB Agent 抽屜（/agent 完整頁自動略過，見 lib/drawer.js） #}
+  <script type="module" src="{{ url_for('static', path='js/lib/drawer.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

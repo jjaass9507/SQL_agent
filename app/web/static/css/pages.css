@@ -224,3 +224,48 @@ body {
   grid-template-columns: repeat(2, 1fr);
   gap: var(--space-3);
 }
+
+/* ── DB Agent 頁側欄（工具軌跡 + 待審面板堆疊） ── */
+.page-agent-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  overflow-y: auto;
+}
+
+/* ── 對話中的 turn_done 卡片（proposal / design_request） ── */
+.agent-turn-card {
+  margin-bottom: var(--space-4);
+}
+
+/* ── 文件頁延伸產出列 ── */
+.docs-extra-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+}
+.docs-extra-row:last-child {
+  border-bottom: none;
+}
+
+/* ── 設定頁：業務 DB 列與稽核紀錄列 ── */
+.settings-db-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+}
+.settings-db-row:last-child {
+  border-bottom: none;
+}
+.settings-activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}

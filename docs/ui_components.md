@@ -108,13 +108,37 @@ Token 依賴：`--color-primary-900/800`、`--layout-sidebar-width`、`--color-a
 Token 依賴：`--color-success-100/600`、`--color-error-100/600`、`--color-warning-100/600`、
 `--color-surface-100`。
 
+## DB Agent 抽屜 — `.agent-drawer-toggle` / `.agent-drawer-panel`
+
+用途：全站右下角浮動按鈕展開的 DB Agent 對話抽屜（`app/web/static/js/lib/drawer.js`
+動態插入，/agent 完整頁不掛載）。
+子元件：`.agent-drawer-header`（標題列 + 關閉鈕）、`.agent-drawer-messages`（訊息串）。
+Token 依賴：`--color-primary-600/700`、`--radius-full`、`--shadow-md/lg`、`--z-dropdown`、`--space-*`。
+
+## Markdown 文件內容 — `.doc-markdown`
+
+用途：文件查閱頁／審查頁的 Markdown 純文字渲染（pre-wrap，不做 HTML 轉換）。
+Token 依賴：`--font-size-base`、`--line-height-normal`、`--color-text-900`。
+
+## 待審變更請求項目 — `.change-request-item`
+
+用途：DB Agent 頁「待審變更請求」面板的單筆提案（DDL 預覽 + 核准/駁回按鈕）。
+Token 依賴：`--border-color`、`--space-2/3`。
+
+## tables_ready 橫幅 — `.chat-tables-ready-banner`
+
+用途：需求收集對話頁收到 `tables_ready` 時插入的「前往確認頁」提示橫幅。
+Token 依賴：`--color-accent-100/500`、`--color-primary-800`、`--space-3/4`。
+
 ---
 
 ## 版面（`pages.css`，非元件，記錄供對照）
 
 `.app-shell`、`.main-content`、`.topbar`、`.page-content` 為 base.html 共用外殼；
 `.page-chat-layout`、`.page-confirm-layout`、`.page-agent-layout` 為各頁的 grid 兩欄配置；
-`.page-index-*`、`.page-docs-toolbar`、`.review-*`、`.settings-*` 為各頁專屬區塊排版。
+`.page-index-*`、`.page-docs-toolbar`、`.review-*`、`.settings-*` 為各頁專屬區塊排版；
+`.page-agent-sidebar`（agent 頁側欄堆疊）、`.agent-turn-card`、`.docs-extra-row`、
+`.settings-db-row`、`.settings-activity-row` 為第三波接線新增的區塊排版。
 
 ## data-* 綁定慣例
 
