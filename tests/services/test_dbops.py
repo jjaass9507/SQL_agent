@@ -37,8 +37,12 @@ async def test_explain_query():
     assert result["rows"]  # SQLite 的 EXPLAIN 至少回一列
 
 
-def test_router_autodiscovery_empty():
-    """routers/ 目前是空的：all_routers() 回空清單而非爆炸。"""
+def test_router_autodiscovery_finds_routers():
+    """all_routers() 自動探索 routers/ 下每個模組的 module-level APIRouter。"""
+    from fastapi import APIRouter
+
     from app.api import all_routers
 
-    assert all_routers() == []
+    found = all_routers()
+    assert found, "routers/ 已有路由模組，自動探索不應回空清單"
+    assert all(isinstance(r, APIRouter) for r in found)
