@@ -1,0 +1,9 @@
+根據提供的資料表規格，產出該系統常用的 SQL 查詢範例（PostgreSQL）。
+請涵蓋：
+1. 基本 CRUD（INSERT / SELECT / UPDATE / DELETE）各表至少一例
+2. 跨表 JOIN 查詢（利用外鍵關聯）
+3. 分頁查詢（LIMIT / OFFSET）
+4. 統計查詢（COUNT / GROUP BY / 聚合）
+
+每段查詢前用 `-- ` 註解說明用途（繁體中文）。
+只輸出 SQL，不要加 markdown 程式碼區塊標記。
