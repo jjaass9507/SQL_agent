@@ -5,73 +5,82 @@
  * components.css 與 pages.css 一律只能引用這裡的 var(--token-name)，
  * 禁止出現任何字面色碼或 px 字級。
  *
- * 視覺基調：深藍／灰白為主，強調色用藍綠（技術感），
- * 沿用 v0.5 的版面慣例（sidebar、chat bubble、badge…），依
- * docs/platform_design_spec.md 第七章重新配色。
- *
- * 這是未來 Google Stitch 設計置換時唯一需要覆寫的檔案
- * （見 docs/v2_rebuild_plan.md 9-2）。
+ * 視覺基調：Google Stitch「Pro Space Gray」設計系統（Phase 8 置換）。
+ * dark-mode first、tiered 深灰背景 + hairline 邊框 + System Blue 強調色，
+ * 無漸層／無陰影／無光暈。權威規格見
+ * docs/design/stitch_design_pro_space_gray.md（整合工序見
+ * docs/v2_rebuild_plan.md 9-2）。既有變數名稱全數保留，僅覆寫數值；
+ * 新增變數以符合 Stitch 元件規格所需。
  */
 
 :root {
-  /* ── 色板：primary（深藍，導覽/強調結構） ── */
-  --color-primary-900: #0d1b2e;
-  --color-primary-800: #142944;
-  --color-primary-700: #1c3860;
-  --color-primary-600: #26497c;
-  --color-primary-500: #34619c;
-  --color-primary-400: #5580b3;
-  --color-primary-300: #82a0c9;
-  --color-primary-200: #b0c1dd;
-  --color-primary-100: #d7e0ee;
-  --color-primary-50: #eef2f8;
+  /* ── 色板：primary（System Blue，導覽/強調結構） ── */
+  --color-primary-900: #161616;
+  --color-primary-800: #2d2d2d;
+  --color-primary-700: #0064d6;
+  --color-primary-600: #0a84ff;
+  --color-primary-500: #3e90ff;
+  --color-primary-400: #6babff;
+  --color-primary-300: #aac7ff;
+  --color-primary-200: #c7d9ff;
+  --color-primary-100: #e3ecff;
+  --color-primary-50: #eef4ff;
 
-  /* ── 色板：surface（灰白，背景/卡片/邊框） ── */
-  --color-surface-0: #ffffff;
-  --color-surface-50: #f7f8fa;
-  --color-surface-100: #eef0f4;
-  --color-surface-200: #e2e5eb;
-  --color-surface-300: #cdd2db;
-  --color-surface-400: #aab3c0;
+  /* ── 色板：surface（tiered 深灰背景） ── */
+  --color-surface-0: #252525;
+  --color-surface-50: #1e1e1e;
+  --color-surface-100: #2d2d2d;
+  --color-surface-200: #353535;
+  --color-surface-300: #414754;
+  --color-surface-400: #8b91a0;
 
-  /* ── 色板：text ── */
-  --color-text-900: #16202c;
-  --color-text-700: #3c4a5c;
-  --color-text-500: #63728a;
-  --color-text-400: #8896a8;
+  /* ── 色板：text（Apple 風格三階透明度） ── */
+  --color-text-900: #ffffff;
+  --color-text-700: #ebebf5cc;
+  --color-text-500: #ebebf599;
+  --color-text-400: #ebebf54d;
   --color-text-inverse: #ffffff;
 
-  /* ── 色板：accent（藍綠，技術感強調色） ── */
-  --color-accent-600: #148f87;
-  --color-accent-500: #1ba89f;
-  --color-accent-400: #34c1b8;
-  --color-accent-100: #d7f5f2;
+  /* ── 色板：accent（System Blue 家族，較亮一階以區分 primary/accent 按鈕） ── */
+  --color-accent-600: #0a84ff;
+  --color-accent-500: #3e90ff;
+  --color-accent-400: #6babff;
+  --color-accent-100: #17325c;
 
   /* ── 色板：semantic ── */
-  --color-success-600: #237a45;
-  --color-success-500: #2f9e58;
-  --color-success-100: #dff5e6;
-  --color-warning-600: #a06f08;
-  --color-warning-500: #c8890a;
-  --color-warning-100: #fdf0d8;
-  --color-error-600: #9c2f2f;
-  --color-error-500: #c23b3b;
-  --color-error-100: #fbe4e4;
+  --color-success-600: #26b34d;
+  --color-success-500: #30d158;
+  --color-success-100: #16311f;
+  --color-warning-600: #d98a08;
+  --color-warning-500: #ff9f0a;
+  --color-warning-100: #3a2c10;
+  --color-error-600: #e0392f;
+  --color-error-500: #ff453a;
+  --color-error-100: #3a1616;
   --color-info-500: var(--color-accent-500);
   --color-info-100: var(--color-accent-100);
 
+  /* ── 色板：Pro Space Gray tiered 背景（新增） ── */
+  --color-bg-sidebar: #161616;
+  --color-bg-base: #1e1e1e;
+  --color-bg-panel: #252525;
+  --color-bg-active: #2d2d2d;
+  --color-border-hairline: #323232;
+  --color-modal-backdrop: rgba(0, 0, 0, 0.6);
+  --color-scrollbar-thumb: #414754;
+
   /* ── 字型 ── */
-  --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC",
-    "Microsoft JhengHei", Roboto, sans-serif;
+  --font-family-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Microsoft JhengHei", Roboto, sans-serif;
   --font-family-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --font-size-xs: 11px;
   --font-size-sm: 12px;
-  --font-size-base: 14px;
-  --font-size-md: 15px;
-  --font-size-lg: 18px;
-  --font-size-xl: 22px;
-  --font-size-2xl: 28px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
 
   --font-weight-normal: 400;
   --font-weight-medium: 500;
@@ -81,7 +90,7 @@
   --line-height-tight: 1.2;
   --line-height-normal: 1.5;
 
-  /* ── 間距尺度（4px 基準） ── */
+  /* ── 間距尺度（4px 基準，與 DESIGN.md spacing 對齊） ── */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -92,26 +101,28 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  /* ── 圓角 ── */
-  --radius-sm: 3px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-full: 999px;
+  /* ── 圓角（照「Shapes」節：xs 4 / sm 6 / md 10 / lg 12） ── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
 
-  /* ── 陰影 ── */
-  --shadow-sm: 0 1px 2px rgba(13, 27, 46, 0.08);
-  --shadow-md: 0 4px 12px rgba(13, 27, 46, 0.12);
-  --shadow-lg: 0 10px 30px rgba(13, 27, 46, 0.18);
+  /* ── 陰影：Stitch「No Glow」硬規則——一律移除，改用 tonal layers + hairline ── */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
 
   /* ── 邊框 ── */
   --border-width-thin: 1px;
   --border-width-thick: 2px;
-  --border-color: var(--color-surface-300);
-  --border-color-strong: var(--color-primary-700);
+  --border-color: var(--color-border-hairline);
+  --border-color-strong: #414754;
 
   /* ── 版面尺寸 ── */
-  --layout-sidebar-width: 220px;
-  --layout-topbar-height: 52px;
+  --layout-sidebar-width: 240px;
+  --layout-topbar-height: 48px;
+  --layout-inspector-width: 300px;
 
   /* ── 疊層 ── */
   --z-dropdown: 100;

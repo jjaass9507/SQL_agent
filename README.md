@@ -2,15 +2,16 @@
 
 透過對話式 AI 收集資料表設計需求，自動產出規格書、ER Diagram、DDL、效能安全規劃四份技術文件，並提供現有資料庫審查、DB Agent 助手與人工審批（HITL）變更流程。
 
-> **目前狀態：Phase 0–7、9 完成，Phase 8（Stitch 設計置換）進行中。**
+> **目前狀態：Phase 0–9 全部完成。**
 > 已完成：Phase 0 專案骨架、Phase 1 LLM Provider 層（openai SDK + 能力探針 +
 > 降級轉接）、Phase 2 資料層（SQLAlchemy 2.0 async + Alembic + 加密）、
 > v0.5 純規則模組移植（`app/rules/`）、Phase 3–5（sessions / 生成 worker /
 > 審查 / DB Agent + HITL 的 services 與 API 端點）、Phase 6 前端接線
 > （`app/web/`：七頁 + 全站 DB Agent 抽屜，SSE 串流、無輪詢）、
 > Phase 7 JWT 認證（`AUTH_ENABLED` 預設關閉，啟用方式見 docs/deployment.md
-> 與 `.env.example`）、Phase 9 部署（Dockerfile / docker-compose）。
-> Phase 8 設計置換的權威規格見 `docs/design/stitch_design_pro_space_gray.md`。
+> 與 `.env.example`）、Phase 8 Google Stitch「Pro Space Gray」深色設計置換
+> （權威規格：`docs/design/stitch_design_pro_space_gray.md`）、
+> Phase 9 部署（Dockerfile / docker-compose）。
 > v0.5 完整實作保留在 `main` 分支。
 >
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`

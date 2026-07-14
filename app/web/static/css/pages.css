@@ -3,6 +3,10 @@
  *
  * 只允許引用 tokens.css 的變數，禁止任何字面色碼／px 字級。
  * 元件外觀交給 components.css，這裡只管排版。
+ *
+ * Phase 8：向 Stitch「Pro Space Gray」的 Fixed-Grid Pro App 三欄 shell 靠攏
+ * ——sidebar 240px／主區流動／inspector（進度欄、agent 側欄）~300px。
+ * 分隔一律 1px hairline，不用大間距；獨立捲動區 + 細捲軸。
  */
 
 html,
@@ -13,11 +17,43 @@ body {
   font-family: var(--font-family-sans);
   font-size: var(--font-size-base);
   color: var(--color-text-900);
-  background: var(--color-surface-50);
+  background: var(--color-bg-base);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* ── 細捲軸（macOS 風格，獨立捲動區共用） ── */
+.chat-messages,
+.page-content,
+.progress-panel,
+.page-agent-sidebar,
+.agent-drawer-messages {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) transparent;
+}
+.chat-messages::-webkit-scrollbar,
+.page-content::-webkit-scrollbar,
+.progress-panel::-webkit-scrollbar,
+.page-agent-sidebar::-webkit-scrollbar,
+.agent-drawer-messages::-webkit-scrollbar {
+  width: 8px;
+}
+.chat-messages::-webkit-scrollbar-thumb,
+.page-content::-webkit-scrollbar-thumb,
+.progress-panel::-webkit-scrollbar-thumb,
+.page-agent-sidebar::-webkit-scrollbar-thumb,
+.agent-drawer-messages::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: var(--radius-full);
+}
+.chat-messages::-webkit-scrollbar-track,
+.page-content::-webkit-scrollbar-track,
+.progress-panel::-webkit-scrollbar-track,
+.page-agent-sidebar::-webkit-scrollbar-track,
+.agent-drawer-messages::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ── App shell ── */
@@ -37,17 +73,17 @@ body {
 .topbar {
   height: var(--layout-topbar-height);
   flex-shrink: 0;
-  background: var(--color-surface-0);
+  background: var(--color-bg-base);
   border-bottom: var(--border-width-thin) solid var(--border-color);
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
 }
 
 .topbar-title {
   font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-900);
 }
 
@@ -58,26 +94,26 @@ body {
 .page-content {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-6);
+  padding: var(--space-4);
 }
 
 /* ── 首頁 ── */
 .page-index-actions {
   display: flex;
-  gap: var(--space-3);
-  margin-bottom: var(--space-6);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 .page-index-filters {
   display: flex;
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .page-index-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .page-index-session-row {
@@ -93,11 +129,11 @@ body {
   gap: var(--space-1);
 }
 
-/* ── 對話頁 ── */
+/* ── 對話頁（Column 2 主區 + Column 3 inspector：進度欄） ── */
 .page-chat-layout {
   display: grid;
-  grid-template-columns: 1fr 280px;
-  gap: var(--space-5);
+  grid-template-columns: 1fr var(--layout-inspector-width);
+  gap: var(--space-4);
   height: 100%;
 }
 
@@ -127,6 +163,8 @@ body {
 
 .progress-panel {
   overflow-y: auto;
+  border-left: var(--border-width-thin) solid var(--border-color);
+  padding-left: var(--space-4);
 }
 
 .progress-panel-cta {
@@ -138,7 +176,7 @@ body {
 .page-confirm-layout {
   display: grid;
   grid-template-columns: 320px 1fr;
-  gap: var(--space-6);
+  gap: var(--space-4);
 }
 
 .confirm-summary-list {
@@ -151,14 +189,14 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);
-  margin-top: var(--space-6);
+  margin-top: var(--space-4);
 }
 
 .confirm-version-bar {
   display: flex;
   gap: var(--space-2);
   align-items: center;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 /* ── 文件頁 ── */
@@ -166,7 +204,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .page-docs-toolbar .topbar-spacer {
@@ -175,19 +213,19 @@ body {
 
 /* ── 審查頁 ── */
 .review-report-section {
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-4);
 }
 
 .review-score {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .review-score-value {
   font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-primary-600);
 }
 
@@ -197,11 +235,11 @@ body {
   gap: var(--space-2);
 }
 
-/* ── DB Agent 頁 ── */
+/* ── DB Agent 頁（Column 2 主區 + Column 3 inspector：工具軌跡/待審） ── */
 .page-agent-layout {
   display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: var(--space-5);
+  grid-template-columns: 1fr var(--layout-inspector-width);
+  gap: var(--space-4);
   height: 100%;
 }
 
@@ -215,27 +253,29 @@ body {
 .page-settings-layout {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
   max-width: 640px;
 }
 
 .settings-capability-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 /* ── DB Agent 頁側欄（工具軌跡 + 待審面板堆疊） ── */
 .page-agent-sidebar {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
   overflow-y: auto;
+  border-left: var(--border-width-thin) solid var(--border-color);
+  padding-left: var(--space-4);
 }
 
 /* ── 對話中的 turn_done 卡片（proposal / design_request） ── */
 .agent-turn-card {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 /* ── 文件頁延伸產出列 ── */
