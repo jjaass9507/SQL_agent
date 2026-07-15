@@ -1,5 +1,10 @@
 # SQL Agent v2 — 部署指南
 
+> **正式部署走「離線 venv + Windows Server IIS（AD SSO）」這條路徑（第 4 節），不使用 Docker。**
+> 內網正式機通常無法連外，部署以 `scripts\pack_offline.ps1` → `scripts\install_offline.ps1`
+> 打包安裝，`scripts\verify_deploy.ps1` 驗證執行中的程式版本（見 4-4）。
+> 第 2 節的 Docker Compose 僅供本機/開發便利，非正式部署方式。
+
 ## 1. 本機開發（零設定）
 
 不需要 Docker、不需要 PostgreSQL。預設 `DATABASE_URL` 指向本機 SQLite。
@@ -16,7 +21,10 @@ uvicorn app.main:app --reload
 若要接真實 LLM gateway，於 `.env` 填入 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
 未設定 gateway 時，LLM 相關端點會回錯誤，但其餘功能（含健康檢查、靜態頁面）不受影響。
 
-## 2. Docker Compose（app + PostgreSQL）
+## 2. Docker Compose（app + PostgreSQL）— 僅本機/開發便利，非正式部署
+
+> 正式環境不使用本節。正式部署見第 4 節（離線 venv + IIS）。本節保留供開發時
+> 快速起一套帶 PostgreSQL 的環境。
 
 ```bash
 cp .env.example .env   # 至少填入 SECRET_KEY / DB_ENCRYPTION_KEY / LLM_* / ADMIN_TOKEN
@@ -59,21 +67,21 @@ deploy pipeline 的獨立步驟），確認遷移成功後才切換流量。
 
 ### 單 worker 限制（重要）
 
-`Dockerfile` 的 CMD 是：
+正式部署（IIS 經 web.config 拉起，見 4-2）與 Docker 都是單一 uvicorn 行程：
 
 ```
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port %HTTP_PLATFORM_PORT%   # IIS
 ```
 
-**刻意不加 `--workers N`。** 原因：v2 的背景工作機制（見
+**刻意不加 `--workers N`，IIS 站台也只綁一個後端行程。** 原因：v2 的背景工作機制（見
 `docs/v2_rebuild_plan.md` §3-1、§3-3 `app/workers/`）設計為「DB-backed `jobs` 表 + 程序內
-asyncio worker」——job runner 跑在 FastAPI process 的 event loop 裡，不是獨立的程序。若用
-`--workers N`（N > 1）啟動 uvicorn，每個 worker process 都會各自認為自己該處理 job 表，
-目前尚未實作跨 process 的鎖/協調機制，會導致 job 被重複處理或行為不可預期。
+asyncio worker」——job runner 跑在 FastAPI process 的 event loop 裡，不是獨立的程序。若跑
+多個 worker process（`--workers N`，N > 1，或 IIS 多實例），每個 process 都會各自認為自己
+該處理 job 表，目前尚未實作跨 process 的鎖/協調機制，會導致 job 被重複處理或行為不可預期。
 
 因此：
 
-- **目前建議單 worker 部署**（本 compose 設定即單 worker）。
+- **目前一律單 worker / 單行程部署**（compose 與 IIS 設定皆為單行程）。
 - 若需要橫向擴充 HTTP 吞吐量，之後應該把「job runner」拆成獨立程序 / 獨立部署單元（計畫書中
   `JobRunner` 介面即為此預留），HTTP 層則可安全地開多 worker 或多副本；只要保證 job runner
   只在其中一個程序啟動即可。
@@ -180,19 +188,48 @@ SSO 端點，否則任何能直接打到這個行程的人都能偽造/繞過 II
 
 ### 4-4 離線安裝（無法連外的正式內網機器）
 
-在一台**能連外、且 Python 版本與目標機器相同**的機器上，先把依賴下載成 wheel：
+正式機通常不能連外，用 `scripts\` 下三支 PowerShell 腳本完成打包、安裝、驗證
+（設計參考 [`MCP_server`](https://github.com/jjaass9507/MCP_server) 的離線部署方式）。
+
+**a. 打包（在能連外、Python 版本與正式機相同的機器）**
 
 ```powershell
-pip download -r requirements.txt -d .\offline_wheels
-# 或直接用 pyproject.toml 定義的套件：
-pip download . -d .\offline_wheels
+powershell -ExecutionPolicy Bypass -File scripts\pack_offline.ps1
+# 有公司 proxy 時：-Proxy http://proxy:8080
 ```
 
-把 `offline_wheels` 資料夾整個複製到目標機器，離線安裝：
+會把**含 `[postgres]` extra**（psycopg2-binary / asyncpg）的所有依賴下載成 wheel、
+連同原始碼打包成 `sql-agent-offline.zip`。**務必用本腳本、不要手動 `pip download .`**
+——手動漏掉 `[postgres]` extra，正式機就會在「新增業務 DB」時報
+`No module named 'psycopg2'`（見 [`troubleshooting.md`](troubleshooting.md) 第 7 節）。
+
+**b. 安裝（在離線正式機）**
+
+把 `sql-agent-offline.zip` 解壓到最終部署路徑（例如 `C:\inetpub\sql_agent`），
+在該路徑內執行：
 
 ```powershell
-pip install --no-index --find-links=.\offline_wheels -e .
+powershell -ExecutionPolicy Bypass -File scripts\install_offline.ps1
 ```
+
+腳本會**就地**建立 `.venv`（venv 不可搬移，見下方常見錯誤）、從離線 wheel 裝好
+專案與依賴，並把 venv 指向原始碼樹（寫一個 `app.pth`）——**往後 `git pull` 或覆蓋
+解壓新包即可更新執行中的程式，不必重裝**。安裝完成後依腳本提示設定 `.env`、跑
+`alembic upgrade head`，再由 IIS 拉起（4-2）。
+
+**c. 驗證正在跑的是哪份程式**
+
+部署後或「修好的 bug 又出現」時，在正式機執行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify_deploy.ps1
+```
+
+會顯示目前 checkout、`git pull` 更新，並確認 venv import 的 `app` 確實來自這棵
+原始碼樹（而非 site-packages 殘留舊副本）。通過後記得回收 IIS 應用程式集區讓新碼載入。
+
+> 更新只需重裝 venv 的時機：**只有 `pyproject.toml` 的依賴變動時**（重跑 a→b）。
+> 一般改程式碼 `git pull` 即可；schema 變動則另跑 `alembic upgrade head`。
 
 常見錯誤與排查：
 

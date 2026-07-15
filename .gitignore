@@ -7,3 +7,6 @@ __pycache__/
 .claude/
 sql_agent.egg-info/
 *.egg-info/
+.venv/
+offline_packages/
+sql-agent-offline.zip

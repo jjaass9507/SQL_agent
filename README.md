@@ -11,7 +11,8 @@
 > Phase 7 JWT 認證（`AUTH_ENABLED` 預設關閉，啟用方式見 docs/deployment.md
 > 與 `.env.example`）、Phase 8 Google Stitch「Pro Space Gray」深色設計置換
 > （權威規格：`docs/design/stitch_design_pro_space_gray.md`）、
-> Phase 9 部署（Dockerfile / docker-compose）。
+> Phase 9 部署（正式：離線 venv + Windows IIS/AD SSO，見 docs/deployment.md 第 4 節與
+> `scripts/*.ps1`；Docker/compose 僅供本機開發便利）。
 > v0.5 完整實作保留在 `main` 分支。
 >
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
