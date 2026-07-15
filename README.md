@@ -40,6 +40,7 @@
 | [`workflow_diagrams.md`](docs/workflow_diagrams.md) | 工作流程圖 |
 | [`test_cases.md`](docs/test_cases.md) | 測試案例 |
 | [`go_live_checklist.md`](docs/go_live_checklist.md) | 上線檢查清單 |
+| [`troubleshooting.md`](docs/troubleshooting.md) | 本機啟動與內網 gateway 實測排錯（症狀→根因→解法） |
 | `v05/` | v0.5 舊實作的架構/部署/維運文件（歷史參考，不適用於 v2） |
 
 ## 分支說明

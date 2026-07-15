@@ -7,19 +7,25 @@ json_schema structured output / 串流」的支援程度，結果包成 `Capabil
 **不在每次請求執行**。本模組只回傳 profile 物件，**不落地存檔**——
 持久化到 `app_settings` 由呼叫端（repos 層）負責。
 
+探針契約：「示範不出該能力就回 False」。gateway 回應偏離 OpenAI 標準時，
+openai SDK 可能拋出 LLMError 以外的例外（如串流迭代出非 chunk 物件的
+AttributeError），因此每支探針接住**任何**例外、記 warning 後回 False，
+絕不讓例外冒到 `/diagnose` 變成 500。
+
 注意：傳入探針的 `provider` 必須是 profile 全為 True（未套用任何降級轉接）
 的實例，探針才能量到 gateway 的真實能力；`LLMProvider` 預設建構即符合此條件。
 """
 
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from app.llm.errors import LLMError
-
 if TYPE_CHECKING:
     from app.llm.provider import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 class CapabilityProfile(BaseModel):
@@ -65,7 +71,8 @@ async def probe_multi_turn(provider: "LLMProvider") -> bool:
     ]
     try:
         result = await provider.chat(messages)
-    except LLMError:
+    except Exception as exc:
+        logger.warning("probe_multi_turn_failed: %r", exc)
         return False
     return bool(result.text) and _CODEWORD in result.text
 
@@ -81,7 +88,8 @@ async def probe_system_role(provider: "LLMProvider") -> bool:
     ]
     try:
         result = await provider.chat(messages)
-    except LLMError:
+    except Exception as exc:
+        logger.warning("probe_system_role_failed: %r", exc)
         return False
     return bool(result.text) and _SYS_MARK in result.text
 
@@ -91,7 +99,8 @@ async def probe_native_tools(provider: "LLMProvider") -> bool:
     messages = [{"role": "user", "content": "請呼叫 probe_echo 工具，value 參數固定填入 'ok'。"}]
     try:
         result = await provider.chat(messages, tools=[_PROBE_TOOL])
-    except LLMError:
+    except Exception as exc:
+        logger.warning("probe_native_tools_failed: %r", exc)
         return False
     return any(tc.name == "probe_echo" for tc in result.tool_calls)
 
@@ -101,7 +110,8 @@ async def probe_json_schema(provider: "LLMProvider") -> bool:
     messages = [{"role": "user", "content": "請回傳一個 JSON 物件，欄位 ok 固定為 true。"}]
     try:
         result = await provider.chat(messages, response_model=_ProbeSchema)
-    except LLMError:
+    except Exception as exc:
+        logger.warning("probe_json_schema_failed: %r", exc)
         return False
     return isinstance(result.parsed, _ProbeSchema) and result.parsed.ok is True
 
@@ -112,7 +122,8 @@ async def probe_streaming(provider: "LLMProvider") -> bool:
     try:
         stream = await provider.chat(messages, stream=True)
         chunks = [chunk async for chunk in stream]
-    except LLMError:
+    except Exception as exc:
+        logger.warning("probe_streaming_failed: %r", exc)
         return False
     return any(chunk.delta for chunk in chunks)
 

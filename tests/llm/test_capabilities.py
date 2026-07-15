@@ -109,6 +109,36 @@ async def test_probe_streaming_false_when_no_delta():
         assert await probe_streaming(make_provider()) is False
 
 
+async def test_probe_streaming_false_on_non_llmerror_exception(monkeypatch):
+    """gateway 串流格式不相容時 SDK 迭代會拋非 LLMError 例外，探針應回 False 而非炸掉。"""
+    provider = make_provider()
+
+    async def broken_chat(*args, **kwargs):
+        raise AttributeError("'int' object has no attribute 'choices'")
+
+    monkeypatch.setattr(provider, "chat", broken_chat)
+    assert await probe_streaming(provider) is False
+
+
+async def test_probe_all_returns_all_false_on_unexpected_exception(monkeypatch):
+    """任一探針遇到非 LLMError 例外都應吞下回 False，probe_all 不得冒例外。"""
+    provider = make_provider()
+
+    async def broken_chat(*args, **kwargs):
+        raise TypeError("gateway 回應格式非標準")
+
+    monkeypatch.setattr(provider, "chat", broken_chat)
+    profile = await probe_all(provider)
+    assert profile == CapabilityProfile(
+        multi_turn=False,
+        system_role=False,
+        native_tools=False,
+        json_schema=False,
+        streaming=False,
+        probed_at=profile.probed_at,
+    )
+
+
 async def test_probe_all_returns_full_profile_with_probed_at():
     tool_call = tool_call_payload("call_1", "probe_echo", {"value": "ok"})
     responses = [
