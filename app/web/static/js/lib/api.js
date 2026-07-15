@@ -35,7 +35,14 @@ export const ENDPOINTS = {
   settings: () => `${API_PREFIX}/settings`,
   settingsBusinessDb: () => `${API_PREFIX}/settings/business-db`,
   activity: () => `${API_PREFIX}/activity`,
+  authLogin: () => `${API_PREFIX}/auth/login`,
+  authLogout: () => `${API_PREFIX}/auth/logout`,
+  authMe: () => `${API_PREFIX}/auth/me`,
+  authSso: () => `${API_PREFIX}/auth/sso`,
 };
+
+/** /auth/* 呼叫不觸發 401 自動導向登入頁（登入頁本身就是呼叫這些端點的地方）。 */
+const AUTH_PATH_PREFIX = `${API_PREFIX}/auth/`;
 
 /** sessionStorage 存放 X-Admin-Token 的 key（HITL 過渡機制，見 docs/v2_rebuild_plan.md 第七章）。 */
 export const ADMIN_TOKEN_STORAGE_KEY = "sqlAgent.adminToken";
@@ -58,6 +65,12 @@ export async function apiFetch(url, options = {}, opts = {}) {
   }
 
   if (!response.ok) {
+    // AUTH_ENABLED=false 時後端不會回 401，此分支對匿名模式零影響。
+    if (response.status === 401 && !url.startsWith(AUTH_PATH_PREFIX)) {
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.href = `/login?next=${next}`;
+    }
+
     let detail = "";
     try {
       const body = await response.clone().json();

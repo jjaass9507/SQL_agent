@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>SQL Agent — 登入</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/components.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/pages.css') }}">
+</head>
+<body data-active-page="login">
+  <div class="page-login-shell">
+    <div class="card page-login-card">
+      <div class="page-login-logo">SQL <span class="sidebar-logo-accent">Agent</span></div>
+      <h1 class="card-title">登入</h1>
+
+      <form data-action="login-submit" novalidate>
+        <div class="form-field">
+          <label class="form-label" for="login-username">帳號</label>
+          <input class="form-input" type="text" id="login-username" name="username"
+                 data-target="login-username" placeholder="AD 帳號或 Email"
+                 autocomplete="username" required>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="login-password">密碼</label>
+          <input class="form-input" type="password" id="login-password" name="password"
+                 data-target="login-password" autocomplete="current-password" required>
+        </div>
+        <p class="page-login-error" data-target="login-error" hidden></p>
+        <div class="page-login-actions">
+          <button type="submit" class="btn btn-primary">登入</button>
+        </div>
+      </form>
+
+      <p class="page-login-divider" data-target="sso-divider" hidden>或</p>
+      <button type="button" class="btn btn-ghost page-login-sso" data-action="sso-login"
+              data-target="sso-login-btn" hidden>使用 Windows 身分登入</button>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toast-stack" data-target="toast-stack"></div>
+  <script type="module" src="{{ url_for('static', path='js/login.js') }}"></script>
+</body>
+</html>

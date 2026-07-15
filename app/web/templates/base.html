@@ -33,6 +33,15 @@
         <span class="topbar-title">{% block page_title %}{% endblock %}</span>
         <div class="topbar-spacer"></div>
         {% block topbar_actions %}{% endblock %}
+        <div class="user-menu" data-target="user-menu" hidden>
+          <button type="button" class="user-menu-trigger" data-action="toggle-user-menu">
+            <span class="user-menu-name" data-target="user-menu-name"></span>
+          </button>
+          <div class="user-menu-dropdown" data-target="user-menu-dropdown" hidden>
+            <p class="user-menu-email" data-target="user-menu-email"></p>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="logout">登出／切換使用者</button>
+          </div>
+        </div>
       </header>
       <main class="page-content">
         {% block content %}{% endblock %}
@@ -44,6 +53,47 @@
 
   {# 全站 DB Agent 抽屜（/agent 完整頁自動略過，見 lib/drawer.js） #}
   <script type="module" src="{{ url_for('static', path='js/lib/drawer.js') }}"></script>
+  {# 頂欄使用者選單：載入時打 /auth/me，anonymous 或失敗（含端點未合併）維持隱藏，匿名模式 UI 不變 #}
+  <script type="module">
+    import { ENDPOINTS, api } from "{{ url_for('static', path='js/lib/api.js') }}";
+
+    const menu = document.querySelector('[data-target="user-menu"]');
+    const nameEl = document.querySelector('[data-target="user-menu-name"]');
+    const emailEl = document.querySelector('[data-target="user-menu-email"]');
+    const dropdown = document.querySelector('[data-target="user-menu-dropdown"]');
+
+    (async function loadCurrentUser() {
+      if (!menu) return;
+      try {
+        const me = await api.get(ENDPOINTS.authMe(), { silent: true });
+        if (me && !me.anonymous) {
+          if (nameEl) nameEl.textContent = me.display_name || me.email;
+          if (emailEl) emailEl.textContent = me.email;
+          menu.hidden = false;
+        }
+      } catch {
+        // 401／端點尚未實作／匿名模式：維持隱藏
+      }
+    })();
+
+    document.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-action]");
+      if (!target) return;
+
+      if (target.dataset.action === "toggle-user-menu" && dropdown) {
+        dropdown.hidden = !dropdown.hidden;
+      }
+
+      if (target.dataset.action === "logout") {
+        try {
+          await api.post(ENDPOINTS.authLogout(), undefined, { silent: true });
+        } catch {
+          // 忽略登出端點錯誤，仍導向登入頁
+        }
+        window.location.href = "/login";
+      }
+    });
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

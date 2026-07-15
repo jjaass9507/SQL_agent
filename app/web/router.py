@@ -67,6 +67,14 @@ async def settings_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/login", response_class=HTMLResponse, name="web_login")
+async def login_page(request: Request) -> HTMLResponse:
+    """登入頁：獨立版面（不套 base.html 側欄），登入邏輯全交給 static/js/login.js。"""
+    return templates.TemplateResponse(
+        request, "login.html", {"active_page": "login"}
+    )
+
+
 def mount_static(app: FastAPI) -> None:
     """掛載 app/web/static 為 /static。供 app/main.py 呼叫。"""
     app.mount("/static", StaticFiles(directory=str(_WEB_DIR / "static")), name="static")
