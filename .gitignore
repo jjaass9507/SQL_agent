@@ -4,9 +4,11 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
-.claude/
+.claude/*
+!.claude/skills/
 sql_agent.egg-info/
 *.egg-info/
 .venv/
 offline_packages/
 sql-agent-offline.zip
+build/

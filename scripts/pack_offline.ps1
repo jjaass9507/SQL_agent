@@ -33,8 +33,11 @@ New-Item -ItemType Directory -Force -Path $PkgDir | Out-Null
 # 之後新增依賴會自動被打包，不必手改清單。
 pip download @ProxyArg ".[postgres]" -d $PkgDir
 
-# 把本專案自身也 build 成 wheel（離線端據此安裝，再切換成 live source，見 install 腳本）
-pip wheel . --no-deps --no-build-isolation -w $PkgDir
+# 把本專案自身也 build 成 wheel（離線端據此安裝，再切換成 live source，見 install 腳本）。
+# 用 build isolation（不加 --no-build-isolation）：pip 會自備乾淨的 setuptools 建 wheel，
+# 避免撞到系統上被打過補丁/過舊的 setuptools（實測 Debian 版 setuptools 會炸
+# install_layout）。打包機是連外的，隔離環境抓 build 後端沒問題。
+pip wheel . --no-deps -w $PkgDir
 
 # 打包原始碼 zip，排除 .venv / .git / 快取 / 本機資料與密鑰。
 # 注意：.venv 不可打包（venv 內的 .exe 內嵌絕對路徑，換機/換路徑即失效）。
