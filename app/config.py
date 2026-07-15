@@ -34,6 +34,21 @@ class Settings(BaseSettings):
     auth_rate_limit_general_max: int = 60
     auth_rate_limit_general_window_seconds: float = 60.0
 
+    # AD（Active Directory）登入：IIS Windows SSO 自動登入 + ldap3 SIMPLE bind 手動登入後備。
+    # ad_enabled=false（預設）時本模組完全不生效，行為與現在完全相同。
+    # 設定慣例對齊公司實戰驗證的 python-iis-ad-deploy skill（references/ad-auth.md）。
+    ad_enabled: bool = False
+    ad_mock: bool = False                 # 僅供開發：不連 AD，任何非空密碼皆放行（見 ad_auth.py）
+    ad_server: str | None = None          # ldap:// + NetBIOS 短名，例如 ldap://KH
+    ad_domain: str | None = None          # 完整網域名，例如 kh.asegroup.com（組使用者 email 用）
+    ad_base_dn: str | None = None         # LDAP 搜尋根目錄，例如 DC=kh,DC=asegroup,DC=com
+    ad_bind_dn: str | None = None         # 服務帳號（選填）；SSO 路徑查群組/顯示名用
+    ad_bind_pw: str | None = None         # 服務帳號密碼（選填）
+    ad_admin_group: str | None = None     # AD 群組 CN 名或完整 DN；memberOf 含此群組 → admin 角色
+    ad_sso_enabled: bool = False
+    ad_sso_header: str = "X-IIS-WindowsAuthToken"
+    ad_sso_remote_user_header: str | None = None  # 明確設定才啟用 REMOTE_USER 式 header 信任
+
     # 伺服器
     host: str = "127.0.0.1"
     debug: bool = False
