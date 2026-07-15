@@ -21,6 +21,10 @@ if (-not $Proxy) { $Proxy = $env:HTTPS_PROXY }
 if (-not $Proxy) { $Proxy = $env:HTTP_PROXY }
 $ProxyArg = if ($Proxy) { @("--proxy", $Proxy) } else { @() }
 
+# 打包用的 Python 版本——正式機的 venv 必須用「相同版本」建立，否則 psycopg2 / asyncpg
+# 等編譯 wheel（cp310 / cp311...）在正式機裝不上。記下這行，建 venv 時對齊。
+Write-Host "打包用 Python：$(python --version)（正式機 venv 必須用相同版本）"
+
 # 打包用的 build 後端（本專案用 setuptools；建 wheel 時需要）
 pip install @ProxyArg --upgrade pip setuptools wheel
 

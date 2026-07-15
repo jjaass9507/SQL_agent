@@ -15,11 +15,14 @@ FastAPI/uvicorn web app：對話式收集資料表需求、產文件、DB 審查
 
 ## Prerequisites
 
-容器已有 Python 3.11。裝依賴（`.[postgres]` 才有 psycopg2/asyncpg；`dev` 只給測試/lint）：
+需 Python **>=3.10**（`pyproject.toml`；容器有 3.10–3.13）。裝依賴——**extras 要合併成
+一個 specifier**，拆成兩個會被 pip 當成兩個 sql-agent 而衝突：
 
 ```bash
-pip install -e ".[dev]" ".[postgres]"
+pip install -e ".[dev,postgres]"    # 對；不要寫成 -e ".[dev]" ".[postgres]"
 ```
+
+`postgres` extra 才有 psycopg2/asyncpg（`dev` 只給測試/lint）。
 
 ## Build
 
@@ -116,6 +119,10 @@ echo "$PWD" > "$SP/app.pth"
 裝完在正式機：`copy .env.example .env` 填 `SECRET_KEY`/`DB_ENCRYPTION_KEY`/`DATABASE_URL`
 /`LLM_*`/`AUTH_ENABLED=true`/`AD_*` → `python -m alembic upgrade head` → 由 IIS 經
 `web.config` 拉起 uvicorn（`docs/deployment.md` 4-2，`processPath` 指本 `.venv` 的 python）。
+
+> **alembic 一律用 venv python 跑**：`.\.venv\Scripts\python.exe -m alembic upgrade head`。
+> 裸打 `alembic` 會走 PATH 掉到全域 Python（→ `No module named 'pydantic_settings'`）。
+> **打包機 Python 主/次版本必須 = 正式機 venv**，否則 psycopg2/asyncpg 編譯 wheel 裝不上。
 
 **驗證正式機跑的是哪份程式** — `scripts/verify_deploy.ps1`：顯示 checkout、`git pull`、
 確認 `import app` 來自原始碼樹而非 site-packages 殘留，通過後回收 IIS 應用程式集區。

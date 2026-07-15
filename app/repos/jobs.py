@@ -1,7 +1,7 @@
 """`jobs` 表的 repository 函式（背景工作狀態機：queued → running → done/failed）。"""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from app.repos.models import Job
 
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 async def create_job(

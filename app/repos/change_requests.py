@@ -1,7 +1,7 @@
 """`change_requests` 表的 repository 函式（HITL 結構變更提案審批流程）。"""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from app.repos.models import ChangeRequest
 
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 async def create_change_request(

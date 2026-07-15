@@ -11,7 +11,7 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import jwt
@@ -101,7 +101,7 @@ def create_access_token(user: User, auth_type: str | None = None) -> tuple[str, 
     `{sub, role, iat, exp}`；`auth_type` 有值時額外附上（manual/sso/local）。"""
     settings = get_settings()
     ttl = timedelta(minutes=settings.jwt_access_ttl_minutes)
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user.id),
         "role": user.role,
@@ -137,7 +137,7 @@ def _hash_refresh_token(raw_token: str) -> str:
 async def _issue_refresh_token(db: AsyncSession, user: User) -> str:
     settings = get_settings()
     raw_token = secrets.token_urlsafe(48)
-    expires_at = datetime.now(UTC) + timedelta(days=settings.jwt_refresh_ttl_days)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_ttl_days)
     await users_repo.create_refresh_token(
         db, user_id=user.id, token_hash=_hash_refresh_token(raw_token), expires_at=expires_at
     )
@@ -236,8 +236,8 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> RefreshR
     # SQLite 的 DateTime(timezone=True) 讀回來是 naive（一律視為 UTC），補上 tzinfo 再比較。
     expires_at = record.expires_at
     if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-    if expires_at < datetime.now(UTC):
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
         raise AuthError("refresh token 已過期")
     user = await users_repo.get_user_by_id(db, record.user_id)
     if user is None:

@@ -298,6 +298,73 @@ python -c "import psycopg2; print(psycopg2.__version__)"
 
 ---
 
+## 8. 部署後 `alembic upgrade head` 報 `No module named 'pydantic_settings'`
+
+### 症狀
+正式機（已 `.venv` 啟用）跑 `alembic upgrade head`，traceback 最底層：
+
+```
+from app.config import get_settings
+  from pydantic_settings import BaseSettings, SettingsConfigDict
+ModuleNotFoundError: No module named 'pydantic_settings'
+```
+
+且 traceback 上半的路徑指向**全域 Python**（例如
+`C:\Users\...\Python310\Scripts\alembic.exe`、`Python310\lib\site-packages\alembic`），
+而非 `.venv`。
+
+### 根因
+雖然提示字元是 `(.venv)`，實際執行的 `alembic` 是**全域 Python 的** `alembic.exe`——
+裸打 `alembic` 走 PATH，只要 venv 裡沒有 `alembic.exe`（代表依賴沒真的裝進 venv），
+就會掉到全域 Python，而全域沒有本專案依賴。
+
+依賴沒進 venv 的常見原因：
+1. 沒跑 `install_offline.ps1`，或它中途失敗。
+2. **Python 版本被 `requires-python` 擋掉**：pip 裝 `sql-agent` 時若報
+   `Package 'sql-agent' requires a different Python: 3.10.x not in '>=3.11'`，
+   代表機器 Python 低於專案要求。**本專案已降到支援 `>=3.10`**（`pyproject.toml`），
+   若仍看到此訊息是拿到舊版原始碼——`git pull` 更新後重裝。
+3. **打包機與正式機 Python 版本不符**：`offline_packages` 內的 psycopg2 / asyncpg 是
+   編譯 wheel（`cp310` / `cp311`...），版本不符會裝不上，導致 `pip install` 整包失敗、
+   venv 空著。
+
+> 相關症狀：`ImportError: cannot import name 'UTC' from 'datetime'`——`datetime.UTC`
+> 是 3.11 才有的別名。本專案已全數改用 `timezone.utc`，3.10 可正常執行；若仍見此錯
+> 為舊版原始碼，`git pull` 即可。
+
+### 診斷方法
+
+```powershell
+python -c "import sys; print(sys.executable)"   # 應是 ...\.venv\Scripts\python.exe，不是全域
+python --version                                 # 記住版本，要與打包機相同
+python -m alembic --version                      # 用 venv python 試；ModuleNotFound 就是依賴沒進 venv
+```
+
+### 解法
+一律**用 venv 的 python 跑**，不要裸打 `alembic`：
+
+```powershell
+python -m pip install --no-index --find-links=offline_packages "sql-agent[postgres]"
+python -m alembic upgrade head
+```
+
+若補裝時報「找不到 psycopg2 / asyncpg 相容 wheel」→ 是 **Python 版本不符**：讓正式機
+venv 用與打包機相同的版本重建（`py -3.10 -m venv .venv`），或打包機改用正式機的版本重跑
+`pack_offline.ps1`。規則：**打包機 Python 主/次版本 = 正式機 venv**（本專案 `>=3.10`，
+3.10 / 3.11 皆可，但兩端必須一致，編譯 wheel 才裝得上）。
+
+> `install_offline.ps1` 已加強：安裝後會 `import app.config` + 顯式檢查 pydantic_settings /
+> alembic / psycopg2 / asyncpg，依賴缺漏會在**安裝當下**就報錯退出（而非拖到 alembic）。
+> 注意 `app/__init__.py` 是空的，只 `import app` 驗不出依賴缺漏，故驗證用 `app.config`。
+
+### 驗證
+
+```powershell
+.\.venv\Scripts\python.exe -c "import app.config, pydantic_settings, alembic, psycopg2, asyncpg; print('OK')"
+```
+
+---
+
 ## 附錄：能力探測（Capability Probing）怎麼測
 
 能力探測判斷 gateway 支不支援五項能力，結果存進 `app_settings` 表；**不在每次請求執行**，
@@ -418,3 +485,4 @@ LLM_TIMEOUT=300.0
 | 5 | `Connection error`（proxy） | httpx 走系統 proxy，內網 IP 繞不過 | 設 `NO_PROXY` |
 | 6 | `/diagnose` 回 500 | gateway 串流不相容 + 探針只接 `LLMError` | 已修正：五探針一律 `except Exception` |
 | 7 | 新增業務 DB 400：`No module named 'psycopg2'` | `psycopg2-binary` 屬 `postgres` extra，`dev` extra 未含 | `pip install -e ".[postgres]"` |
+| 8 | 部署後 alembic `No module named 'pydantic_settings'` | 裸打 `alembic` 走全域 Python / 依賴沒進 venv（常因 Python 版本不符） | 用 `python -m alembic`；依賴裝進 venv、版本對齊打包機 |

@@ -2,7 +2,7 @@
 name = "sql-agent"
 version = "2.0.0a0"
 description = "SQL Agent v2 — AI 驅動的資料庫建檔管理平台"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "aiosqlite>=0.20",
     "alembic>=1.13",
@@ -56,7 +56,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]

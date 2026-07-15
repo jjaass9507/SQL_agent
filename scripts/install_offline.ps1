@@ -41,9 +41,17 @@ python -m venv $VenvDir
 # 用 'python -m pip'（不要用 pip.exe），全新 venv 也能運作。
 $VenvPy = Join-Path $VenvDir "Scripts\python.exe"
 
+# venv 的 Python 版本必須與「打包機」相同——offline_packages 內的 psycopg2 / asyncpg
+# 是編譯 wheel（cp310 / cp311...），版本不符會裝不上。印出來供比對。
+Write-Host "venv Python：$(& $VenvPy --version)（須與打包機相同，否則編譯 wheel 裝不上）"
+
 # 1. 從離線 wheel 安裝本專案 + 全部依賴（含 postgres extra 的 psycopg2/asyncpg）。
 #    以「名稱[extra]」安裝而非直接指定 wheel 檔，pip 才會套用 [postgres] extra。
 & $VenvPy -m pip install --no-index --find-links="$PkgDir" "sql-agent[postgres]"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "離線安裝失敗。最常見原因：venv 的 Python 版本與打包機不符（上方版本），導致 psycopg2/asyncpg 找不到相容 wheel。請用相同版本的 Python 重建 venv。"
+    exit 1
+}
 
 # 2. 讓「原始碼樹」成為權威來源：往後只要 git pull（或覆蓋解壓新包）即更新執行中的
 #    程式，不必重裝——這是「我改了程式卻沒生效」的頭號原因。
@@ -56,8 +64,13 @@ $SitePackages = & $VenvPy -c "import sysconfig; print(sysconfig.get_path('pureli
 Set-Content -Path (Join-Path $SitePackages "app.pth") -Value $Root -Encoding ASCII
 Write-Host "已寫入 $SitePackages\app.pth -> $Root"
 
-# 驗證 import 解析到原始碼樹（而非殘留副本）
-& $VenvPy -c "import app, pathlib; print('app 載入自:', pathlib.Path(app.__file__).parent)"
+# 驗證：載入 app.config（不是空的 app/__init__.py！）以實際觸發依賴 import，
+# 並顯式檢查關鍵依賴——這樣依賴缺漏會「當場」爆，而非拖到 alembic 才發現。
+& $VenvPy -c "import app.config, pydantic_settings, alembic, psycopg2, asyncpg, pathlib; print('OK：app.config 載入自', pathlib.Path(app.config.__file__).parent)"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "venv 無法載入 app.config 或缺少依賴。多半是 .pth 沒指到原始碼樹、或依賴沒裝進 venv。請檢查上方錯誤後重跑。"
+    exit 1
+}
 
 Write-Host ""
 Write-Host "安裝完成。後續步驟："

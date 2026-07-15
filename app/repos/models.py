@@ -9,7 +9,7 @@ context_table_specs 收斂為 sessions.context_tables_json。
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -29,7 +29,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 def _now() -> datetime:
     """統一的建立時間預設值（UTC）。"""
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
