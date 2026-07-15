@@ -99,6 +99,10 @@ Windows Authentication 自動帶入身分（SSO，免再輸入密碼）。此路
 uvicorn 直跑／Docker Compose 部署互斥——選這條路徑時，對外服務窗口是 IIS，
 `uvicorn` 只在 IIS 背後以 `HttpPlatformHandler` 方式被拉起，不直接對外監聽。
 
+> **權威參考**：本章是針對本專案（FastAPI/uvicorn）的摘要；完整的 IIS + AD
+> 建置細節（IIS 角色安裝、AD 認證程式碼範式、離線 wheel、疑難排解全集）以
+> 使用者提供的實戰 skill 為準，全文收錄於 [`docs/iis_ad_deploy/`](iis_ad_deploy/SKILL.md)。
+
 ### 4-1 前置需求
 
 - Windows Server 已加入要驗證使用者所在的 AD 網域。
@@ -132,6 +136,10 @@ uvicorn 直跑／Docker Compose 部署互斥——選這條路徑時，對外服
                    forwardWindowsAuthToken="true">
       <environmentVariables>
         <environmentVariable name="AUTH_ENABLED" value="true" />
+        <!-- 關閉 stdout 緩衝：沒設的話 log 檔會一片空白（輸出被 buffer 住） -->
+        <environmentVariable name="PYTHONUNBUFFERED" value="1" />
+        <!-- 繁中 Windows 預設 cp950，遇到 emoji/特殊字元會讓行程崩潰，強制 UTF-8 -->
+        <environmentVariable name="PYTHONIOENCODING" value="utf-8" />
       </environmentVariables>
     </httpPlatform>
   </system.webServer>
