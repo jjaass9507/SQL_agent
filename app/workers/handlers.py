@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.repos import outputs as outputs_repo
 from app.repos.models import Job
 from app.rules.spec_models import tables_from_json
-from app.services import generation_service, review_service
+from app.services import generation_service, llm_factory, review_service
 
 
 async def handle_generate_job(
@@ -55,6 +55,11 @@ async def handle_extra_job(
     tables = tables_from_json(tables_raw)
     context_tables = tables_from_json(payload.get("context_tables") or [])
 
-    content = await generation_service.generate_extra(kind, tables, context_tables=context_tables)
+    content = await generation_service.generate_extra(
+        kind,
+        tables,
+        context_tables=context_tables,
+        provider=await llm_factory.provider_from_db(db),
+    )
     filename = generation_service.EXTRA_FILENAMES[kind]
     await outputs_repo.upsert_output(db, job.session_id, filename, content)

@@ -10,6 +10,7 @@ from app.repos import sessions as sessions_repo
 from app.repos.models import Job
 from app.rules import schema_advisor, schema_remediation
 from app.rules.spec_models import tables_from_json
+from app.services import llm_factory
 from app.services.writers.reviewer import Reviewer
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ async def run_review(db: AsyncSession, job: Job, *, provider: LLMProvider | None
     if not context_tables:
         raise ValueError("session 缺少 context_tables，無法執行審查")
 
-    provider = provider or LLMProvider.from_settings()
+    provider = provider or await llm_factory.provider_from_db(db)
     report = await Reviewer(provider).review(context_tables)
     await outputs_repo.upsert_output(db, job.session_id, "05_review_report.md", report)
 

@@ -26,12 +26,11 @@ from app.api.schemas.sessions import (
     VersionOut,
 )
 from app.config import get_settings
-from app.llm.provider import LLMProvider
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
 from app.rules.spec_models import tables_from_json
-from app.services import interview_service, session_service
+from app.services import interview_service, llm_factory, session_service
 from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -174,7 +173,7 @@ async def send_message(
         raise HTTPException(status_code=404, detail="session not found")
     await check_session_access(db, session, current_user)
 
-    provider = LLMProvider.from_settings()
+    provider = await llm_factory.provider_from_db(db)
     turn = await interview_service.run_turn(db, provider, session, payload.content)
     turn_response = TurnResponse(
         reply=turn.reply,

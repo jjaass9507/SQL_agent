@@ -21,9 +21,8 @@ from app.api.schemas.workbench import (
     ValidateDDLResponse,
 )
 from app.config import get_settings
-from app.llm.provider import LLMProvider
 from app.repos import sessions as sessions_repo
-from app.services import dbops
+from app.services import dbops, llm_factory
 from app.services import workbench_service as svc
 from app.services.auth_service import CurrentUser
 
@@ -93,7 +92,7 @@ async def nl2sql(
     session_id: uuid.UUID, body: NL2SQLRequest, db: DbDep, current_user: CurrentUserDep
 ):
     await _check_access(db, session_id, current_user)
-    llm = LLMProvider.from_settings()
+    llm = await llm_factory.provider_from_db(db)
     try:
         draft = await svc.generate_nl2sql(db, session_id, body.question, llm)
     except svc.SessionNotFound:

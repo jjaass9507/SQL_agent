@@ -24,6 +24,7 @@ from app.rules.writers.dbml_writer import DBMLWriter
 from app.rules.writers.json_schema_writer import JSONSchemaWriter
 from app.rules.writers.plantuml_writer import PlantUMLWriter
 from app.rules.writers.spec_writer import SpecWriter
+from app.services import llm_factory
 from app.services.writers.ddl_writer import DDLWriter
 from app.services.writers.diagram_writer import DiagramWriter
 from app.services.writers.incremental_migration_writer import IncrementalMigrationWriter
@@ -131,8 +132,8 @@ async def generate_documents(
 ) -> dict[str, str | None]:
     """並行產出四份核心文件（01 規格書零 API、02 ER 圖 Mermaid 確定性產生 + LLM 關聯說明、
     03 DDL、04 安全規劃），成果寫入 outputs repo，progress_json 逐步更新。"""
-    provider = provider or LLMProvider.from_settings()
     session_factory = session_factory or get_session_factory()
+    provider = provider or await llm_factory.provider_from_factory(session_factory)
 
     progress: dict[str, str] = dict.fromkeys(FILENAMES, "waiting")
     progress_lock = asyncio.Lock()

@@ -15,13 +15,14 @@ from app.llm.capabilities import CapabilityProfile
 from app.llm.errors import LLMError
 from app.llm.provider import LLMProvider
 from app.repos import settings as settings_repo
+from app.services.llm_factory import CAPABILITY_SETTING_KEY
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 # 探測結果持久化的 app_settings key（見 docs/v2_rebuild_plan.md §4-3）。
-_PROFILE_KEY = "llm_capability_profile"
+_PROFILE_KEY = CAPABILITY_SETTING_KEY
 
 
 class HealthResponse(BaseModel):

@@ -59,6 +59,11 @@ class _ProbeSchema(BaseModel):
     ok: bool
 
 
+def _snippet(text: str | None) -> str:
+    """取回應前 200 字供 log 判讀（區分「gateway 不支援」與「模型沒照做」）。"""
+    return (text or "")[:200]
+
+
 async def probe_multi_turn(provider: "LLMProvider") -> bool:
     """歷史探針：三則訊息問暗號，檢查 gateway 是否正確記住先前輪次的內容。"""
     messages = [
@@ -74,7 +79,10 @@ async def probe_multi_turn(provider: "LLMProvider") -> bool:
     except Exception as exc:
         logger.warning("probe_multi_turn_failed: %r", exc)
         return False
-    return bool(result.text) and _CODEWORD in result.text
+    ok = bool(result.text) and _CODEWORD in result.text
+    if not ok:
+        logger.warning("probe_multi_turn_false: 回應未含暗號 text=%r", _snippet(result.text))
+    return ok
 
 
 async def probe_system_role(provider: "LLMProvider") -> bool:
@@ -91,7 +99,10 @@ async def probe_system_role(provider: "LLMProvider") -> bool:
     except Exception as exc:
         logger.warning("probe_system_role_failed: %r", exc)
         return False
-    return bool(result.text) and _SYS_MARK in result.text
+    ok = bool(result.text) and _SYS_MARK in result.text
+    if not ok:
+        logger.warning("probe_system_role_false: 回應未含標記 text=%r", _snippet(result.text))
+    return ok
 
 
 async def probe_native_tools(provider: "LLMProvider") -> bool:
@@ -102,7 +113,10 @@ async def probe_native_tools(provider: "LLMProvider") -> bool:
     except Exception as exc:
         logger.warning("probe_native_tools_failed: %r", exc)
         return False
-    return any(tc.name == "probe_echo" for tc in result.tool_calls)
+    ok = any(tc.name == "probe_echo" for tc in result.tool_calls)
+    if not ok:
+        logger.warning("probe_native_tools_false: 無原生 tool_calls text=%r", _snippet(result.text))
+    return ok
 
 
 async def probe_json_schema(provider: "LLMProvider") -> bool:
@@ -113,7 +127,10 @@ async def probe_json_schema(provider: "LLMProvider") -> bool:
     except Exception as exc:
         logger.warning("probe_json_schema_failed: %r", exc)
         return False
-    return isinstance(result.parsed, _ProbeSchema) and result.parsed.ok is True
+    ok = isinstance(result.parsed, _ProbeSchema) and result.parsed.ok is True
+    if not ok:
+        logger.warning("probe_json_schema_false: 回應非預期結構 text=%r", _snippet(result.text))
+    return ok
 
 
 async def probe_streaming(provider: "LLMProvider") -> bool:
@@ -125,7 +142,10 @@ async def probe_streaming(provider: "LLMProvider") -> bool:
     except Exception as exc:
         logger.warning("probe_streaming_failed: %r", exc)
         return False
-    return any(chunk.delta for chunk in chunks)
+    ok = any(chunk.delta for chunk in chunks)
+    if not ok:
+        logger.warning("probe_streaming_false: 未收到帶文字增量的 chunk（共 %d 個）", len(chunks))
+    return ok
 
 
 async def probe_all(provider: "LLMProvider") -> CapabilityProfile:

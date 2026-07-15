@@ -283,8 +283,46 @@ curl.exe http://127.0.0.1:8000/api/v1/llm/health             # 只 ping + 回上
 ```
 
 > 某項回 `false` 未必是 bug —— 可能 gateway 真的不支援（常見於內網 gateway 無原生 function
-> calling），偵測到就自動走降級路徑（`app/llm/adapters.py`）。探針失敗的實際例外會記在
-> uvicorn log（`probe_*_failed` warning），可據此區分「gateway 不支援」與「我方程式問題」。
+> calling），偵測到就自動走降級路徑（`app/llm/adapters.py`）。
+
+### 五項全 `false` 怎麼判讀
+
+`/llm/health` 的 ping 只需要「單輪、無 system、無 tools、無 schema、非串流」——這正是
+平台可正常操作的基本盤。五個探針各自**多加一樣東西**，如果 gateway 是「只收單輪 user
+訊息」的薄包裝（內網常見），五項全 `false` 是**正確偵測，不是 bug**：平台會自動走五條
+降級路（歷史合併單輪、system 內聯、文字模擬 tools、寬鬆 JSON 解析、非串流 SSE），功能
+不受影響。
+
+要區分「gateway 不支援」與「模型沒照做」與「我方程式問題」，看 uvicorn log 的
+warning（每個探針 False 時都會留一筆）：
+
+| log 訊息 | 意義 |
+|---|---|
+| `probe_*_failed: <例外>` | 呼叫本身失敗。`APIStatusError 4xx` → gateway 拒收該參數（不支援）；連線類 → 回到第 3~5 節排查 |
+| `probe_multi_turn_false: 回應未含暗號 text='...'` | 呼叫成功但答不出暗號。看 text：答非所問 → gateway 丟了歷史；有理解但沒複述 → 模型指令跟隨弱 |
+| `probe_system_role_false: 回應未含標記 text='...'` | 同上邏輯，看模型是回答了天氣（system 被丟棄）還是別的 |
+| `probe_native_tools_false: 無原生 tool_calls text='...'` | gateway/模型不回原生 tool_calls（內網最常見） |
+| `probe_json_schema_false: 回應非預期結構 text='...'` | response_format 被無視或模型輸出非目標 JSON |
+| `probe_streaming_false: 未收到帶文字增量的 chunk` | 串流通了但沒有內容增量 |
+
+**確認是模型指令跟隨弱（而非 gateway 限制）時的處理**：實際用對話功能驗證該能力可用後，
+可用 `.env` 的 `LLM_FORCE_PROFILE` 強制覆蓋探測結果，例如只強制多輪與 system：
+
+```
+LLM_FORCE_PROFILE={"multi_turn": true, "system_role": true, "native_tools": false, "json_schema": false, "streaming": false}
+```
+
+> 強制為 true 但 gateway 實際不支援時，對應功能會直接出錯（不再降級），請逐項驗證後再開。
+> 未列出的欄位視為 true。此變數只影響業務 provider（經 `app/services/llm_factory.py`），
+> `/diagnose` 探測不受影響、仍量測 gateway 原始能力。
+
+### 探測結果的生效範圍
+
+探測出的 profile 存進 `app_settings` 後，所有業務呼叫點（對話、workbench NL2SQL、
+文件產出、審查、DB Agent）都經由 `app/services/llm_factory.py` 讀取並套用降級轉接。
+直接 `LLMProvider.from_settings()`（不帶 profile）只出現在探針與 health ping——
+那兩處需要量測 gateway 原始能力。**新增 LLM 呼叫點時務必走 `llm_factory`，
+否則探測結果不會生效**。
 
 ### 單元測試（不碰真實 gateway，用 respx mock）
 
