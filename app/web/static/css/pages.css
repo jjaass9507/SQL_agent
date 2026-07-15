@@ -309,3 +309,45 @@ body {
   gap: var(--space-3);
   padding: var(--space-1) 0;
 }
+
+/* ── 登入頁（獨立版面，不套 app-shell） ── */
+.page-login-shell {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-sidebar);
+}
+
+.page-login-card {
+  width: 100%;
+  max-width: 360px;
+}
+
+.page-login-logo {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-900);
+  margin-bottom: var(--space-4);
+}
+
+.page-login-error {
+  font-size: var(--font-size-sm);
+  color: var(--color-error-500);
+  margin-bottom: var(--space-3);
+}
+
+.page-login-actions .btn {
+  width: 100%;
+}
+
+.page-login-divider {
+  text-align: center;
+  color: var(--color-text-400);
+  font-size: var(--font-size-xs);
+  margin: var(--space-4) 0;
+}
+
+.page-login-sso {
+  width: 100%;
+}
