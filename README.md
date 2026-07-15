@@ -15,6 +15,8 @@
 > v0.5 完整實作保留在 `main` 分支。
 >
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
+> 需連線業務 PostgreSQL 資料庫（新增業務 DB／DB Agent／workbench）時另裝
+> `pip install -e ".[postgres]"`（`psycopg2-binary`，`dev` extra 不含此依賴）。
 
 ---
 

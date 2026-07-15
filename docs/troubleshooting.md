@@ -12,7 +12,7 @@
 ## 0. 正確的啟動順序（照做可略過大部分問題）
 
 ```powershell
-# 1. 安裝依賴（含 dev）
+# 1. 安裝依賴（含 dev；要連業務 PostgreSQL 資料庫另加 postgres extra，見第 7 節）
 pip install -e ".[dev]"
 
 # 2. 建立資料表（首次或 schema 變更後必跑）
@@ -262,6 +262,42 @@ async def probe_streaming(provider: "LLMProvider") -> bool:
 
 ---
 
+## 7. 新增業務資料庫 400：`連線失敗：No module named 'psycopg2'`
+
+### 症狀
+設定頁「新增資料庫」（連線平台要建檔/審查/操作的業務 PostgreSQL）送出後回 400：
+
+```
+操作失敗（400）：連線失敗：No module named 'psycopg2'
+```
+
+### 根因
+`psycopg2-binary` 是 `pyproject.toml` 的 **`postgres` optional extra**，不在
+`dev` extra 裡（見 `[project.optional-dependencies]`）。本文件第 0 節教的
+`pip install -e ".[dev]"` 不會裝它。業務資料庫僅支援 PostgreSQL
+（`_ALLOWED_SCHEMES = ("postgresql://", "postgres://")`，見
+`app/services/settings_service.py`），新增時 `dbops.execute_query` 用
+`sqlalchemy.create_engine()` 走同步 `psycopg2` driver 測連線，模組不存在就
+直接以此訊息回傳。
+
+> 正式部署（Docker）沒有這個問題——`Dockerfile` 建置時裝的是 `.[postgres]`。
+> 只有照文件走 `pip install -e ".[dev]"` 的本機開發環境會踩到。
+
+### 解法
+
+```powershell
+pip install -e ".[postgres]"
+```
+
+### 驗證
+
+```powershell
+python -c "import psycopg2; print(psycopg2.__version__)"
+```
+能印出版本號即可，接著重新在設定頁新增資料庫。
+
+---
+
 ## 附錄：能力探測（Capability Probing）怎麼測
 
 能力探測判斷 gateway 支不支援五項能力，結果存進 `app_settings` 表；**不在每次請求執行**，
@@ -381,3 +417,4 @@ LLM_TIMEOUT=300.0
 | 4 | `Connection error`（路徑） | `LLM_BASE_URL` 多接 `/chat/completions` | 只填到 `/v1` |
 | 5 | `Connection error`（proxy） | httpx 走系統 proxy，內網 IP 繞不過 | 設 `NO_PROXY` |
 | 6 | `/diagnose` 回 500 | gateway 串流不相容 + 探針只接 `LLMError` | 已修正：五探針一律 `except Exception` |
+| 7 | 新增業務 DB 400：`No module named 'psycopg2'` | `psycopg2-binary` 屬 `postgres` extra，`dev` extra 未含 | `pip install -e ".[postgres]"` |
