@@ -11,6 +11,7 @@ JSON body（非瀏覽器客戶端）回傳。這些端點本身不受 `AUTH_ENAB
 `AD_SSO_ENABLED=true` 時另外啟用 `/auth/sso`（IIS Windows SSO 自動登入）。
 """
 
+import sys
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -18,13 +19,12 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db
 from app.api.schemas.auth import MeResponse
 from app.config import Settings, get_settings
 from app.repos import activity as activity_repo
 from app.repos import users as users_repo
 from app.services import ad_auth, auth_service
-from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -184,26 +184,44 @@ async def logout(
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(
-    db: DbDep,
-    current_user: Annotated[CurrentUser | None, Depends(get_current_user)],
-) -> MeResponse:
+async def me(request: Request, db: DbDep) -> MeResponse:
     """回傳目前登入者資訊，供登入頁／前端頂欄使用。
 
-    `AUTH_ENABLED=false` 時 `get_current_user` 恆回傳 `None`（見
-    `app/api/deps.py`），視為匿名模式而非未登入，回 200 `{anonymous: true}`；
-    `AUTH_ENABLED=true` 時未帶合法 token 已由 `get_current_user` 拋 401。
+    **永遠回 200、不回 401**（python-iis-ad-deploy skill 明載：IIS Windows
+    Auth 下 401 會觸發瀏覽器原生憑證彈窗）——未登入／token 無效／
+    `AUTH_ENABLED=false` 一律回 `{anonymous: true, auth_type: null}`，
+    由前端自行顯示登入表單。
     """
-    if current_user is None:
+    if not get_settings().auth_enabled:
+        return MeResponse(anonymous=True)
+
+    token = None
+    authorization = request.headers.get("Authorization")
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[len("bearer ") :].strip()
+    elif request.cookies.get("access_token"):
+        token = request.cookies["access_token"]
+    if not token:
+        return MeResponse(anonymous=True)
+
+    try:
+        current_user = auth_service.decode_access_token(token)
+    except auth_service.AuthError:
         return MeResponse(anonymous=True)
     user = await users_repo.get_user_by_id(db, current_user.id)
     if user is None:
-        raise HTTPException(status_code=401, detail="使用者不存在")
+        return MeResponse(anonymous=True)
+
+    # 舊 token 沒有 auth_type claim（或 refresh 換發時未保留）：依 auth_source 推導保底值。
+    auth_type = current_user.auth_type or (
+        "local" if user.auth_source == "local" else "manual"
+    )
     return MeResponse(
         email=user.email,
         display_name=user.display_name,
         role=user.role,
         auth_source=user.auth_source,
+        auth_type=auth_type,
     )
 
 
@@ -211,45 +229,47 @@ async def me(
 async def sso(request: Request, db: DbDep) -> RedirectResponse:
     """IIS Windows SSO 自動登入端點；`AD_SSO_ENABLED=false`（預設）時回 404。
 
+    身分解析照 skill 的 `get_sso_username` 三層順序（見 `_resolve_sso_username`）：
+    REMOTE_USER 式 header → NTLM/Negotiate Authorization header 純 Python 解碼
+    → Windows token handle（ctypes，僅 Windows）。解析出帳號後 JIT 供裝
+    （有服務帳號才查群組，否則只發基本 user 角色）並簽發 JWT、302 到 `/`。
+
     **安全警告（`ad_sso_remote_user_header` 模式）**：本端點會無條件信任
     `ad_sso_remote_user_header` 指定的 HTTP header 所宣稱的使用者身分
     （等同 REMOTE_USER 免密碼登入）。此 header **只能**由 IIS（搭配 IIS
     Windows Authentication，經 HttpPlatformHandler 反向代理到本平台時）
     注入或覆寫；平台**必須**只透過 IIS 對外服務，絕不能讓使用者的請求
     繞過 IIS 直接打到 uvicorn，否則任何人都能偽造此 header 冒充他人登入。
+
+    與 skill 的差異：skill 是「每請求自動 SSO + session 的 logged_out 壓制
+    旗標」；本平台改為顯式的 `/auth/sso` 進入點 + JWT cookie，登出（
+    `POST /auth/logout`）清 cookie 即可，之後不會被自動重新登入，因此不需要
+    logged_out 壓制旗標。
     """
     settings = get_settings()
     if not settings.ad_sso_enabled:
         raise HTTPException(status_code=404)
 
-    if settings.ad_sso_remote_user_header:
-        return await _sso_remote_user_header(request, db, settings)
-    return await _sso_windows_auth_token(request, settings)
+    samaccount = _resolve_sso_username(request, settings)
+    if not samaccount:
+        # 解析不到身分也不回 401（避免 IIS 觸發瀏覽器憑證彈窗）：
+        # 導回首頁、不帶 cookie，由前端顯示登入表單。
+        return RedirectResponse(url="/", status_code=302)
 
-
-async def _sso_remote_user_header(
-    request: Request, db: AsyncSession, settings: Settings
-) -> RedirectResponse:
-    """信任 IIS 注入的 REMOTE_USER header（見 `sso()` 的安全警告）。"""
-    raw_user = request.headers.get(settings.ad_sso_remote_user_header)
-    if not raw_user:
-        raise HTTPException(
-            status_code=401, detail=f"缺少 {settings.ad_sso_remote_user_header} header"
-        )
-
-    ad_user = ad_auth.lookup_user(raw_user)
+    # 有服務帳號（AD_BIND_DN/PW）才查群組/顯示名；沒有就只發基本 user 角色
+    # （skill 明載：沒服務帳號就不查群組，不做匿名查詢）。
+    ad_user = ad_auth.get_user_info(samaccount)
     if ad_user is not None:
         role = "admin" if ad_auth.is_admin(ad_user.member_of) else "user"
-        email = ad_user.mail or ad_user.upn or ad_auth.normalize_username_to_email(raw_user)
+        email = ad_user.mail or ad_auth.default_email(samaccount)
         display_name = ad_user.display_name
     else:
-        # 服務／匿名查詢失敗：仍信任 header 宣稱的身分，僅發基本 user 角色。
         role = "user"
-        email = ad_auth.normalize_username_to_email(raw_user)
+        email = ad_auth.default_email(samaccount)
         display_name = None
 
     user = await users_repo.upsert_ad_user(db, email=email, display_name=display_name, role=role)
-    result = await auth_service.issue_tokens(db, user)
+    result = await auth_service.issue_tokens(db, user, auth_type="sso")
 
     redirect = RedirectResponse(url="/", status_code=302)
     _set_auth_cookies(redirect, access_token=result.access_token, expires_in=result.expires_in)
@@ -260,42 +280,43 @@ async def _sso_remote_user_header(
     return redirect
 
 
-async def _sso_windows_auth_token(request: Request, settings: Settings) -> RedirectResponse:
-    """`X-IIS-WindowsAuthToken`（或設定值 `ad_sso_header`）模式。
+def _resolve_sso_username(request: Request, settings: Settings) -> str:
+    """SSO 身分解析，照 skill `get_sso_username` 的三層順序；回傳 sAMAccountName
+    （解析不到回空字串）。
 
-    此模式需以 pywin32 在 Windows 環境解碼 IIS HttpPlatformHandler 傳入的
-    Windows access token 參照；非 Windows 環境（本開發/測試環境為 Linux）
-    一律回 501，並提示改用 `ad_sso_remote_user_header` 模式。
+    1. REMOTE_USER 式 header（`ad_sso_remote_user_header` 有設定時）：
+       取 `\\` 後、`@` 前段。
+    2. `Authorization: NTLM/Negotiate` header：NTLM Type-3 訊息純 Python 解碼
+       （見 `ad_auth.parse_ntlm_username`）。
+    3. `X-IIS-WindowsAuthToken`（`ad_sso_header`）的 Windows token handle：
+       ctypes 解碼（見 `ad_auth.username_from_token`），僅 Windows；
+       非 Windows 環境回 501。
     """
-    import sys
+    # 方法 1：REMOTE_USER 式 header（ARR 反向代理環境有時有）
+    if settings.ad_sso_remote_user_header:
+        raw = request.headers.get(settings.ad_sso_remote_user_header, "")
+        if raw:
+            return ad_auth.sam_from_identifier(raw)
 
-    if sys.platform != "win32":
-        raise HTTPException(
-            status_code=501,
-            detail=(
-                f"{settings.ad_sso_header} token 模式僅支援 Windows（需 pywin32）解碼，"
-                "本環境非 Windows，請改用 AD_SSO_REMOTE_USER_HEADER 模式"
-                "（IIS Windows Authentication + HttpPlatformHandler 注入 REMOTE_USER）。"
-            ),
-        )
+    # 方法 2：從 NTLM token 直接解碼（瀏覽器走 NTLM 時）
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith(("NTLM ", "Negotiate ")):
+        username = ad_auth.parse_ntlm_username(authorization)
+        if username:
+            return ad_auth.sam_from_identifier(username)
 
-    token = request.headers.get(settings.ad_sso_header)
-    if not token:
-        raise HTTPException(status_code=401, detail=f"缺少 {settings.ad_sso_header} header")
+    # 方法 3：Windows token handle（HttpPlatformHandler forwardWindowsAuthToken 主要方式）
+    token_str = request.headers.get(settings.ad_sso_header, "")
+    if token_str:
+        if sys.platform != "win32":
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    f"{settings.ad_sso_header} token 模式需在 Windows 上以 ctypes 解碼"
+                    "（GetTokenInformation + LookupAccountSidW），本環境非 Windows；"
+                    "請改用 AD_SSO_REMOTE_USER_HEADER 模式。"
+                ),
+            )
+        return ad_auth.username_from_token(int(token_str, 16))
 
-    try:
-        import win32security  # noqa: F401 -- 懶載入：僅 Windows 環境會執行到此
-    except ImportError as exc:
-        raise HTTPException(
-            status_code=501,
-            detail="pywin32 未安裝，無法解碼 Windows token，請安裝 pywin32 或改用"
-            " remote-user-header 模式",
-        ) from exc
-
-    # Windows token 的實際解碼（開啟 access token handle 取得使用者 SID／群組）
-    # 需在真實 Windows/IIS 部署環境驗證，本任務的開發/測試環境為 Linux 無法驗證，
-    # 因此暫不實作，先回 501 並提示改用 remote-user-header 模式。
-    raise HTTPException(
-        status_code=501,
-        detail="Windows token 解碼尚未完整實作（待 Windows 部署環境驗證後補完）。",
-    )
+    return ""

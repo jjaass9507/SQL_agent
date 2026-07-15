@@ -19,10 +19,8 @@ async def test_ad_login_success_jit_provisions_user_and_jwt_works(
     fake_ldap.add_user(
         sam="jdoe",
         password="secret123",
-        upn="jdoe@corp.local",
         entry=FakeEntry(
             sAMAccountName="jdoe",
-            userPrincipalName="jdoe@corp.local",
             displayName="John Doe",
             mail="jdoe@corp.local",
             memberOf=[],
@@ -32,6 +30,7 @@ async def test_ad_login_success_jit_provisions_user_and_jwt_works(
     assert resp.status_code == 200
     body = resp.json()
     assert body["access_token"]
+    assert fake_ldap.bind_attempts == ["TESTDOM\\jdoe"]  # NETBIOS\sam 格式
 
     user = (
         (await db_session.execute(select(User).where(User.email == "jdoe@corp.local")))
@@ -48,14 +47,29 @@ async def test_ad_login_success_jit_provisions_user_and_jwt_works(
     assert resp2.status_code == 200
 
 
+async def test_ad_login_no_mail_attribute_email_falls_back_to_ad_domain(
+    client, enable_ad, fake_ldap, db_session
+):
+    """AD 條目沒有 mail 屬性：email 組 `sam@AD_DOMAIN`。"""
+    fake_ldap.add_user(
+        sam="nomail", password="secret123", entry=FakeEntry(sAMAccountName="nomail")
+    )
+    resp = await _login(client, "nomail", "secret123")
+    assert resp.status_code == 200
+    user = (
+        (await db_session.execute(select(User).where(User.email == "nomail@corp.local")))
+        .scalars()
+        .one()
+    )
+    assert user.auth_source == "ad"
+
+
 async def test_ad_login_admin_group_maps_admin_role(client, enable_ad, fake_ldap, db_session):
     fake_ldap.add_user(
         sam="admin1",
         password="secret123",
-        upn="admin1@corp.local",
         entry=FakeEntry(
             sAMAccountName="admin1",
-            userPrincipalName="admin1@corp.local",
             mail="admin1@corp.local",
             memberOf=["CN=SQLAgentAdmins,OU=Groups,DC=corp,DC=local"],
         ),
@@ -80,10 +94,8 @@ async def test_ad_login_admin_group_via_full_dn(
     fake_ldap.add_user(
         sam="admin2",
         password="secret123",
-        upn="admin2@corp.local",
         entry=FakeEntry(
             sAMAccountName="admin2",
-            userPrincipalName="admin2@corp.local",
             mail="admin2@corp.local",
             memberOf=["CN=SQLAgentAdmins,OU=Groups,DC=corp,DC=local"],
         ),
@@ -104,11 +116,10 @@ async def test_ad_login_role_refreshed_after_group_removed(
     """role 每次登入依 AD 群組現況刷新：admin 群組移除後應降級為 user。"""
     entry = FakeEntry(
         sAMAccountName="admin3",
-        userPrincipalName="admin3@corp.local",
         mail="admin3@corp.local",
         memberOf=["CN=SQLAgentAdmins,OU=Groups,DC=corp,DC=local"],
     )
-    fake_ldap.add_user(sam="admin3", password="secret123", upn="admin3@corp.local", entry=entry)
+    fake_ldap.add_user(sam="admin3", password="secret123", entry=entry)
     resp = await _login(client, "admin3", "secret123")
     assert resp.status_code == 200
     user = (
@@ -128,7 +139,7 @@ async def test_ad_login_role_refreshed_after_group_removed(
 
 async def test_ad_bind_fail_falls_back_to_local_success(client, enable_ad, fake_ldap, make_user):
     """AD bind 失敗（帳密錯誤，非連線問題）→ fallback 本地帳密，本地帳密正確則成功。"""
-    fake_ldap.add_user(sam="jdoe", password="ad-password", upn="jdoe@corp.local")
+    fake_ldap.add_user(sam="jdoe", password="ad-password")
     await make_user(email="local@example.com", password="local-pw-12345")
 
     resp = await _login(client, "local@example.com", "local-pw-12345")
@@ -145,7 +156,7 @@ async def test_ad_bind_fail_and_local_fail_401(client, enable_ad, fake_ldap, mak
 
 
 async def test_ad_login_audit_source_is_ad(client, enable_ad, fake_ldap, db_session):
-    fake_ldap.add_user(sam="jdoe", password="secret123", upn="jdoe@corp.local")
+    fake_ldap.add_user(sam="jdoe", password="secret123")
     await _login(client, "jdoe", "secret123")
 
     rows = (await db_session.execute(select(ActivityLog))).scalars().all()
@@ -176,6 +187,24 @@ async def test_ad_connection_error_returns_503_no_local_fallback(
 
     resp = await _login(client, "local@example.com", "local-pw-12345")
     assert resp.status_code == 503
+
+
+async def test_ad_mock_login_end_to_end(client, enable_ad, monkeypatch, db_session):
+    """AD_MOCK=true（僅供開發）：不連 AD，任何非空密碼登入成功並 JIT 建檔。"""
+    from app.config import get_settings
+
+    monkeypatch.setenv("AD_MOCK", "true")
+    get_settings.cache_clear()
+
+    resp = await _login(client, "tester", "any-password")
+    assert resp.status_code == 200
+    user = (
+        (await db_session.execute(select(User).where(User.email == "tester@corp.local")))
+        .scalars()
+        .one()
+    )
+    assert user.auth_source == "ad"
+    assert user.role == "user"
 
 
 async def test_ad_disabled_login_still_works_with_email_field(client, make_user):

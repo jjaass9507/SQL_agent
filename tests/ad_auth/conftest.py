@@ -2,7 +2,9 @@
 `ldap3` 假物件（不需真實 AD）。
 
 `AD_ENABLED` 預設維持 false；需要 AD 的測試使用 `enable_ad` fixture（連同
-`fake_ldap` 配置假的 `ldap3.Server`/`ldap3.Connection`）。
+`fake_ldap` 配置假的 `ldap3.Server`/`ldap3.Connection`）。bind 憑證格式比照
+skill 實作：`NETBIOS\\samaccount`（NetBIOS 從 AD_SERVER 短名導出，測試用
+`ldap://TESTDOM` → `TESTDOM\\jdoe`）。
 """
 
 import re
@@ -34,13 +36,11 @@ def _configure_settings(monkeypatch):
 
 @pytest.fixture
 def enable_ad(monkeypatch):
-    """開啟 `AD_ENABLED` 並提供一組測試用的 AD 連線設定。"""
+    """開啟 `AD_ENABLED` 並提供一組測試用的 AD 連線設定（NetBIOS = TESTDOM）。"""
     monkeypatch.setenv("AD_ENABLED", "true")
-    monkeypatch.setenv("AD_SERVER", "ldap://dc.test.local")
-    monkeypatch.setenv("AD_USE_SSL", "false")
-    monkeypatch.setenv("AD_DOMAIN", "CORP")
-    monkeypatch.setenv("AD_UPN_SUFFIX", "corp.local")
-    monkeypatch.setenv("AD_SEARCH_BASE", "DC=corp,DC=local")
+    monkeypatch.setenv("AD_SERVER", "ldap://TESTDOM")
+    monkeypatch.setenv("AD_DOMAIN", "corp.local")
+    monkeypatch.setenv("AD_BASE_DN", "DC=corp,DC=local")
     monkeypatch.setenv("AD_ADMIN_GROUP", "SQLAgentAdmins")
     get_settings.cache_clear()
     yield
@@ -48,8 +48,18 @@ def enable_ad(monkeypatch):
 
 
 @pytest.fixture
+def enable_ad_bind_account(monkeypatch, enable_ad):
+    """在 `enable_ad` 基礎上設定服務帳號（SSO 路徑查群組用）。"""
+    monkeypatch.setenv("AD_BIND_DN", "svc-sqlagent")
+    monkeypatch.setenv("AD_BIND_PW", "svc-password")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture
 def enable_ad_sso_header(monkeypatch, enable_ad):
-    """在 `enable_ad` 基礎上另外開啟 `ad_sso_remote_user_header` 模式。"""
+    """在 `enable_ad` 基礎上開啟 SSO 的 `ad_sso_remote_user_header` 模式。"""
     monkeypatch.setenv("AD_SSO_ENABLED", "true")
     monkeypatch.setenv("AD_SSO_REMOTE_USER_HEADER", "X-Remote-User")
     get_settings.cache_clear()
@@ -58,9 +68,9 @@ def enable_ad_sso_header(monkeypatch, enable_ad):
 
 
 @pytest.fixture
-def enable_ad_sso_token(monkeypatch, enable_ad):
-    """在 `enable_ad` 基礎上開啟 `AD_SSO_ENABLED`，但不設定 remote-user header
-    （落入 `X-IIS-WindowsAuthToken` token 模式）。"""
+def enable_ad_sso(monkeypatch, enable_ad):
+    """在 `enable_ad` 基礎上開啟 `AD_SSO_ENABLED`，不設定 remote-user header
+    （身分解析走 NTLM Authorization header 或 X-IIS-WindowsAuthToken）。"""
     monkeypatch.setenv("AD_SSO_ENABLED", "true")
     get_settings.cache_clear()
     yield
@@ -98,7 +108,14 @@ class FakeEntry:
 class FakeConnection:
     """對應 ldap3 的 Connection：`bind()`/`search()`/`unbind()`。"""
 
-    def __init__(self, server: "FakeServer", user: str | None = None, password: str | None = None):
+    def __init__(
+        self,
+        server: "FakeServer",
+        user: str | None = None,
+        password: str | None = None,
+        authentication=None,
+        **kwargs,
+    ):
         self.server = server
         self.user = user
         self.password = password
@@ -107,11 +124,10 @@ class FakeConnection:
     def bind(self) -> bool:
         if self.server.connection_error is not None:
             raise self.server.connection_error
-        if self.user is None:
-            return self.server.allow_anonymous
+        self.server.bind_attempts.append(self.user)
         return self.server.check_credentials(self.user, self.password)
 
-    def search(self, search_base, search_filter, attributes) -> bool:
+    def search(self, search_base, search_filter, search_scope=None, attributes=None) -> bool:
         entry = self.server.find_entry(search_filter)
         self.entries = [entry] if entry else []
         return bool(entry)
@@ -124,29 +140,24 @@ class FakeServer:
     """對應 ldap3 的 Server：記錄測試設定的帳密／查詢條目，供 `FakeConnection` 使用。"""
 
     def __init__(self):
-        self.allow_anonymous = False
         self.connection_error: Exception | None = None
+        self.bind_attempts: list[str | None] = []
         self._creds: dict[str, str] = {}
         self._entries_by_sam: dict[str, FakeEntry] = {}
 
-    def add_user(
-        self,
-        *,
-        sam: str,
-        password: str,
-        entry: FakeEntry | None = None,
-        upn: str | None = None,
-        domain: str | None = None,
-    ) -> None:
-        self._creds[sam.lower()] = password
-        if upn:
-            self._creds[upn.lower()] = password
-        if domain:
-            self._creds[f"{domain}\\{sam}".lower()] = password
+    def add_user(self, *, sam: str, password: str, entry: FakeEntry | None = None) -> None:
+        """註冊一個 AD 使用者：bind 憑證為 `TESTDOM\\sam`（比照 skill 的 bind 格式）。"""
+        self._creds[f"testdom\\{sam}".lower()] = password
         if entry is not None:
             self._entries_by_sam[sam.lower()] = entry
 
-    def check_credentials(self, bind_identifier: str, password: str | None) -> bool:
+    def add_bind_credential(self, bind_user: str, password: str) -> None:
+        """註冊任意格式的 bind 憑證（如服務帳號 `TESTDOM\\svc-sqlagent`）。"""
+        self._creds[bind_user.lower()] = password
+
+    def check_credentials(self, bind_identifier: str | None, password: str | None) -> bool:
+        if bind_identifier is None:
+            return False  # 不允許匿名 bind（skill：SSO 沒服務帳號就不查群組）
         expected = self._creds.get(bind_identifier.lower())
         return expected is not None and expected == password
 
@@ -165,11 +176,11 @@ def fake_ldap(monkeypatch):
 
     server = FakeServer()
 
-    def _server_factory(address, use_ssl=True, get_info=None):
+    def _server_factory(address, get_info=None, **kwargs):
         return server
 
-    def _connection_factory(srv, user=None, password=None, **kwargs):
-        return FakeConnection(srv, user=user, password=password)
+    def _connection_factory(srv, user=None, password=None, authentication=None, **kwargs):
+        return FakeConnection(srv, user=user, password=password, authentication=authentication)
 
     monkeypatch.setattr(ldap3, "Server", _server_factory)
     monkeypatch.setattr(ldap3, "Connection", _connection_factory)
@@ -239,3 +250,22 @@ def make_user(db_session):
 def bearer(user) -> dict:
     token, _ = auth_service.create_access_token(user)
     return {"Authorization": f"Bearer {token}"}
+
+
+def make_ntlm_type3_header(username: str) -> str:
+    """組出帶指定帳號的 NTLM Type-3 Authorization header（測試向量）。
+
+    格式依 skill 的 `parse_ntlm_username`：offset 8 訊息型別=3、
+    offset 36 帳號長度（<H）、offset 40 帳號位移（<I）、內容 UTF-16-LE。
+    """
+    import base64
+    import struct
+
+    name_bytes = username.encode("utf-16-le")
+    data = bytearray(64 + len(name_bytes))
+    data[0:8] = b"NTLMSSP\x00"
+    struct.pack_into("<I", data, 8, 3)  # Type-3 AUTHENTICATE
+    struct.pack_into("<H", data, 36, len(name_bytes))
+    struct.pack_into("<I", data, 40, 64)
+    data[64 : 64 + len(name_bytes)] = name_bytes
+    return "NTLM " + base64.b64encode(bytes(data)).decode("ascii")
