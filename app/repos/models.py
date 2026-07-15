@@ -37,15 +37,22 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    """使用者帳號（Phase 7 認證上線後啟用）。"""
+    """使用者帳號（Phase 7 認證上線後啟用；AD 登入見 app/services/ad_auth.py）。"""
 
     __tablename__ = "users"
-    __table_args__ = (CheckConstraint("role IN ('user','admin')", name="ck_users_role"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('user','admin')", name="ck_users_role"),
+        CheckConstraint("auth_source IN ('local','ad')", name="ck_users_auth_source"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # AD 使用者（auth_source='ad'）恆為 NULL：AD 帳密不落地，一律由 AD 驗證。
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    # 身分驗證來源：'local'（email+密碼）或 'ad'（AD JIT 供裝，見 app/services/ad_auth.py）。
+    auth_source: Mapped[str] = mapped_column(String(20), nullable=False, default="local")
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )

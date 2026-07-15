@@ -62,6 +62,33 @@ async def create_user(
     return record
 
 
+async def upsert_ad_user(
+    db: AsyncSession, *, email: str, display_name: str | None, role: str
+) -> User:
+    """AD 登入成功後的 JIT（Just-In-Time）帳號供裝。
+
+    依 email 找到既有帳號則更新（`role`／`display_name` 每次登入依 AD 現況刷新，
+    `password_hash` 清為 NULL——AD 帳密不落地）；找不到則新建。
+    """
+    user = await get_user_by_email(db, email)
+    if user is None:
+        user = User(
+            email=email,
+            password_hash=None,
+            role=role,
+            auth_source="ad",
+            display_name=display_name,
+        )
+        db.add(user)
+    else:
+        user.role = role
+        user.auth_source = "ad"
+        user.display_name = display_name
+        user.password_hash = None
+    await db.flush()
+    return user
+
+
 # -- refresh tokens -------------------------------------------------------------
 
 
