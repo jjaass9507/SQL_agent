@@ -220,3 +220,76 @@ def test_from_settings_reads_llm_config():
     )
     provider = LLMProvider.from_settings(settings)
     assert provider.model == "m"
+
+
+def _force_settings(force_json: str) -> Settings:
+    return Settings(
+        llm_base_url=BASE_URL,
+        llm_api_key="k",
+        llm_model="m",
+        llm_verify=False,
+        llm_force_profile=force_json,
+    )
+
+
+def test_force_profile_overrides_detected_capabilities():
+    """LLM_FORCE_PROFILE 非空時，from_settings 建構的 provider 採用覆蓋 profile；
+    未列出的欄位沿用預設 True。"""
+    settings = _force_settings('{"native_tools": false, "system_role": false}')
+    provider = LLMProvider.from_settings(settings)
+    assert provider.profile.native_tools is False
+    assert provider.profile.system_role is False
+    assert provider.profile.multi_turn is True  # 未列出 → 預設 True
+    assert provider.profile.json_schema is True
+
+
+def test_force_profile_takes_priority_over_passed_profile():
+    """force 優先於傳入的 profile（DB 持久化的探測結果）。"""
+    settings = _force_settings('{"native_tools": false}')
+    persisted = CapabilityProfile(native_tools=True, system_role=False)
+    provider = LLMProvider.from_settings(settings, profile=persisted)
+    assert provider.profile.native_tools is False  # force 覆蓋 DB 的 True
+    assert provider.profile.system_role is True  # force 未列出 → 預設 True，非 DB 的 False
+
+
+def test_apply_force_profile_false_ignores_force():
+    """探針路徑（apply_force_profile=False）不套用 force，維持全 True 量測基準。"""
+    settings = _force_settings('{"native_tools": false}')
+    provider = LLMProvider.from_settings(settings, apply_force_profile=False)
+    assert provider.profile.native_tools is True
+
+
+def test_force_profile_invalid_json_raises():
+    settings = _force_settings("{not json}")
+    with pytest.raises(LLMError, match="LLM_FORCE_PROFILE"):
+        LLMProvider.from_settings(settings)
+
+
+def test_force_profile_wrong_type_raises():
+    """欄位型別錯誤（非 bool）→ 明確報錯，不靜默忽略。"""
+    settings = _force_settings('{"native_tools": "nope"}')
+    with pytest.raises(LLMError, match="LLM_FORCE_PROFILE"):
+        LLMProvider.from_settings(settings)
+
+
+async def test_force_native_tools_false_sends_downgraded_request_body():
+    """驗收：force native_tools=False 後，工具呼叫走模擬工具降級路徑
+    （request body 不含原生 tools 欄位，工具目錄改注入 prompt）。"""
+    settings = _force_settings('{"native_tools": false}')
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "get_schema", "description": "取得表結構", "parameters": {}},
+        }
+    ]
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions").mock(
+            return_value=chat_completion_response(content="好的")
+        )
+        provider = LLMProvider.from_settings(settings)
+        await provider.chat([{"role": "user", "content": "查 users 表"}], tools=tools)
+
+    sent_body = json.loads(route.calls[0].request.content)
+    assert "tools" not in sent_body  # 原生 tools 欄位不送出（已降級為模擬工具）
+    # 工具目錄改以文字注入 prompt
+    assert any("get_schema" in (m.get("content") or "") for m in sent_body["messages"])

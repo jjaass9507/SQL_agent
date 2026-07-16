@@ -92,6 +92,26 @@ python -c "import os; print(os.urandom(32).hex())"
 `ADMIN_TOKEN` 是 Phase 7 正式使用者/角色系統上線前的過渡機制；上線後應視 Phase 7 進度決定
 是否保留。
 
+### LLM 能力檔（CapabilityProfile）與手動覆蓋
+
+app 依 gateway 的五項能力（`multi_turn` / `system_role` / `native_tools` / `json_schema` /
+`streaming`）決定要走原生或降級路徑。取得方式有二：
+
+1. **自動偵測**：`POST /api/v1/llm/diagnose` 實測 gateway 並把結果持久化到 `app_settings`。
+   回應同時給出 `probed`（本次實測）與 `profile`（實際生效）、`source`（`probe` / `forced`）。
+2. **手動覆蓋**：`.env` 的 `LLM_FORCE_PROFILE`（JSON 字串）非空時，其內容優先於偵測結果與
+   DB 持久化值，套用到所有 LLM 呼叫。未列出的欄位沿用預設（`true`）。用於探針因模型指令
+   遵循力不足而誤判時的維運覆蓋。格式錯誤會在建構 provider 時直接報錯（不靜默忽略）。
+
+   ```bash
+   # 例：平台確定不支援原生 tools / system role，強制走降級路徑
+   LLM_FORCE_PROFILE='{"native_tools": false, "system_role": false}'
+   ```
+
+   設有 `LLM_FORCE_PROFILE` 時，`diagnose` 仍會實測並回報 `probed`（供比對平台是否已改變），
+   但 `source` 為 `forced`、`profile` 為覆蓋值——若「改了平台卻看不到行為變化」，先確認此變數
+   是否仍在覆蓋。實測驗證通過後，建議把最終生效的 profile 與平台設定記錄於此。
+
 ## 4. Windows Server IIS 部署（AD SSO）
 
 適用情境：內網部署、需要以 Active Directory 帳號登入，且希望瀏覽器透過 IIS 的

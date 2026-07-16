@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 import openai
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.config import Settings, get_settings
 from app.llm import adapters, structured
@@ -29,6 +29,25 @@ logger = logging.getLogger(__name__)
 _RETRY_DELAYS = (2.0, 4.0, 8.0)
 
 _STRUCTURED_RETRY_PROMPT = "上一則回覆不是合法 JSON，請重新只輸出符合格式的 JSON，不要有其他文字。"
+
+
+def forced_profile(settings: Settings) -> CapabilityProfile | None:
+    """解析 `LLM_FORCE_PROFILE`（JSON）為手動覆蓋用的 CapabilityProfile。
+
+    留空 → 回傳 None（走自動偵測）。格式錯誤直接拋 `LLMError`（啟動期即發現，
+    不靜默忽略）。未列出的欄位沿用 `CapabilityProfile` 預設（True）。
+    """
+    raw = settings.llm_force_profile
+    if not raw or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LLMError(f"LLM_FORCE_PROFILE 不是合法 JSON：{exc}") from exc
+    try:
+        return CapabilityProfile.model_validate(data)
+    except ValidationError as exc:
+        raise LLMError(f"LLM_FORCE_PROFILE 內容不符合 CapabilityProfile 格式：{exc}") from exc
 
 
 class LLMProvider:
@@ -58,10 +77,23 @@ class LLMProvider:
 
     @classmethod
     def from_settings(
-        cls, settings: Settings | None = None, *, profile: CapabilityProfile | None = None
+        cls,
+        settings: Settings | None = None,
+        *,
+        profile: CapabilityProfile | None = None,
+        apply_force_profile: bool = True,
     ) -> "LLMProvider":
-        """timeout / base_url / api_key / model / verify 一律來自 Settings。"""
+        """timeout / base_url / api_key / model / verify 一律來自 Settings。
+
+        `LLM_FORCE_PROFILE` 非空時，解析出的 profile 優先於傳入的 `profile` 參數
+        （含 DB 持久化的探測結果）——這是探針誤判時的手動維運覆蓋。
+        探針本身（`apply_force_profile=False`）必須量測未覆蓋的真實能力，故略過。
+        """
         settings = settings or get_settings()
+        if apply_force_profile:
+            forced = forced_profile(settings)
+            if forced is not None:
+                profile = forced
         return cls(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
