@@ -182,10 +182,13 @@ class LLMProvider:
         kwargs["stream_options"] = {"include_usage": True}
         stream_resp = await self._call(**kwargs)
         async for event in stream_resp:
+            # 非標準 gateway 可能在串流中夾雜非 chunk 事件（例如裸 int）；沒有 choices/usage
+            # 的事件一律跳過，不假設每個事件都是格式良好的 ChatCompletionChunk。
+            choices = getattr(event, "choices", None)
             text_delta = None
             done = False
-            if event.choices:
-                choice = event.choices[0]
+            if choices:
+                choice = choices[0]
                 text_delta = choice.delta.content
                 done = choice.finish_reason is not None
             usage = None

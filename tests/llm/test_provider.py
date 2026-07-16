@@ -154,6 +154,33 @@ async def test_streaming_degraded_when_profile_streaming_false():
     assert "stream" not in sent_body  # 降級為非串流呼叫
 
 
+async def test_streaming_skips_non_chunk_events():
+    """非標準 gateway 在串流中夾雜裸 int 事件時，不崩潰（跳過），只吐出真正的文字增量。"""
+
+    class _Choice:
+        def __init__(self, content, finish=None):
+            self.delta = type("_Delta", (), {"content": content})()
+            self.finish_reason = finish
+
+    class _Chunk:
+        def __init__(self, choices):
+            self.choices = choices
+            self.usage = None
+
+    async def _fake_stream():
+        yield 5  # 平台雜訊：非 ChatCompletionChunk（重現 'int' object has no attribute 'choices'）
+        yield _Chunk([_Choice("哈")])
+        yield _Chunk([_Choice("囉")])
+        yield _Chunk([_Choice(None, finish="stop")])
+
+    provider = make_provider()
+    with patch.object(provider, "_call", new=AsyncMock(return_value=_fake_stream())):
+        stream = await provider.chat([{"role": "user", "content": "hi"}], stream=True)
+        collected = [c async for c in stream]
+
+    assert "".join(c.delta for c in collected if c.delta) == "哈囉"
+
+
 class _Draft(BaseModel):
     sql: str
     explanation: str
