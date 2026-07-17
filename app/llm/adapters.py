@@ -9,6 +9,7 @@
 """
 
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -115,14 +116,37 @@ def _inject_instruction(messages: list[Message], text: str) -> list[Message]:
 
 
 def _build_tool_prompt_injection(tools: list[ToolDef]) -> str:
-    """native_tools 缺失：把工具目錄轉成 system prompt 文字，要求輸出單一 JSON 區塊。"""
-    catalog = json.dumps([t.get("function", t) for t in tools], ensure_ascii=False, indent=2)
+    """native_tools 缺失：把工具目錄轉成散文，並要求以自訂單行格式輸出工具呼叫。
+
+    刻意**不**使用標準 function-calling 的 JSON 目錄（`[{name,description,parameters}]`）與
+    `{"tool_call":...}` 輸出格式：部分 OpenAI 相容平台會偵測到這種格式就主動接手執行工具
+    （回報 `No ToolCallback found` 並逾時），破壞本地執行的模擬工具協定。
+    改用散文目錄 + 「執行動作》<名稱>｜參數》<JSON>」單行格式，平台認不出來即不攔截
+    （解析見 parse_tool_call_from_text）。
+    """
+    lines = []
+    for t in tools:
+        func = t.get("function", t)
+        params = func.get("parameters", {}) or {}
+        props = params.get("properties", {}) or {}
+        required = set(params.get("required", []) or [])
+        if props:
+            param_desc = "；".join(
+                f"{name}（{spec.get('type', '值')}，{'必填' if name in required else '選填'}）"
+                for name, spec in props.items()
+            )
+        else:
+            param_desc = "無"
+        lines.append(f"● {func.get('name')} — {func.get('description', '')}｜參數：{param_desc}")
+    catalog = "\n".join(lines)
     return (
-        "你可以使用以下工具（JSON 描述，欄位為 name/description/parameters）：\n"
+        "以下是你可以請外部系統代為執行的資料庫動作（每項為：動作代號 — 說明｜參數）：\n"
         f"{catalog}\n\n"
-        "若需要呼叫工具，請只回覆一個 JSON 物件（不要有其他文字、不要使用 markdown code fence），"
-        '格式為 {"tool_call": {"name": "<工具名稱>", "arguments": {...}}}。\n'
-        "若不需要呼叫工具，請直接以一般文字回覆使用者。"
+        "當你需要外部系統代為執行某個動作時，請「只輸出一行純文字」，格式如下：\n"
+        "執行動作》<動作代號>｜參數》<一段 JSON 物件>\n"
+        '範例：執行動作》get_schema｜參數》{"db": "CIM"}\n'
+        "外部系統會讀取這行、代為執行，再把結果以文字貼回給你，你再據此繼續。\n"
+        "若不需要外部動作，直接以一般文字回覆使用者。不要使用 markdown code fence。"
     )
 
 
@@ -136,22 +160,28 @@ def _build_schema_prompt_injection(response_model: type[BaseModel]) -> str:
     )
 
 
+# 模型輸出的自訂工具呼叫格式：`執行動作》<名稱>｜參數》<JSON>`（見 _build_tool_prompt_injection）。
+# 參數 JSON 以貪婪 `\{.*\}` 抓到最後一個 `}`，容許其中含換行（如 DDL）；｜ 亦容許半形 |。
+_TOOL_CALL_RE = re.compile(
+    r"執行動作》\s*(?P<name>[A-Za-z_]\w*)\s*[｜|]\s*參數》\s*(?P<args>\{.*\})",
+    re.DOTALL,
+)
+
+
 def parse_tool_call_from_text(text: str) -> ToolCall | None:
-    """從降級轉接要求模型輸出的單一 JSON 區塊中解析出 ToolCall；解析失敗回傳 None。"""
+    """從模型輸出的自訂單行工具呼叫格式解析出 ToolCall；解析失敗回傳 None。"""
     if not text:
         return None
-    candidate = strip_code_fence(text)
+    match = _TOOL_CALL_RE.search(strip_code_fence(text))
+    if match is None:
+        return None
     try:
-        payload = json.loads(candidate)
+        arguments = json.loads(match.group("args"))
     except json.JSONDecodeError:
-        return None
-    call = payload.get("tool_call") if isinstance(payload, dict) else None
-    if not isinstance(call, dict) or "name" not in call:
-        return None
-    arguments = call.get("arguments")
+        arguments = {}
     if not isinstance(arguments, dict):
         arguments = {}
-    return ToolCall(id="adapter-call-0", name=call["name"], arguments=arguments)
+    return ToolCall(id="adapter-call-0", name=match.group("name"), arguments=arguments)
 
 
 async def single_chunk_stream(result: ChatResult) -> AsyncIterator[ChatChunk]:

@@ -141,24 +141,32 @@ def test_apply_system_role_and_multi_turn_off_applies_system_role_first():
     assert "[系統指示]" not in content  # system 已於前一步併入 user，不會被貼上系統標籤
 
 
-def test_parse_tool_call_from_text_valid_json():
-    text = '{"tool_call": {"name": "get_schema", "arguments": {"table": "users"}}}'
+def test_parse_tool_call_from_text_valid():
+    text = '執行動作》get_schema｜參數》{"table": "users"}'
     call = parse_tool_call_from_text(text)
     assert call is not None
     assert call.name == "get_schema"
     assert call.arguments == {"table": "users"}
 
 
+def test_parse_tool_call_from_text_no_args():
+    call = parse_tool_call_from_text("執行動作》list_databases｜參數》{}")
+    assert call is not None
+    assert call.name == "list_databases"
+    assert call.arguments == {}
+
+
 def test_parse_tool_call_from_text_strips_markdown_fence():
-    text = '```json\n{"tool_call": {"name": "get_schema", "arguments": {}}}\n```'
+    text = '```\n執行動作》get_schema｜參數》{"db": "CIM"}\n```'
     call = parse_tool_call_from_text(text)
     assert call is not None
     assert call.name == "get_schema"
+    assert call.arguments == {"db": "CIM"}
 
 
 def test_parse_tool_call_from_text_invalid_returns_none():
     assert parse_tool_call_from_text("我不需要呼叫工具") is None
-    assert parse_tool_call_from_text('{"foo": "bar"}') is None
+    assert parse_tool_call_from_text('{"tool_call": {"name": "get_schema"}}') is None
     assert parse_tool_call_from_text("") is None
 
 
@@ -169,7 +177,7 @@ async def test_provider_native_tools_degraded_end_to_end():
     with respx.mock(base_url=BASE_URL) as mock:
         route = mock.post("/chat/completions").mock(
             return_value=chat_completion_response(
-                content='{"tool_call": {"name": "get_schema", "arguments": {"table": "orders"}}}'
+                content='執行動作》get_schema｜參數》{"table": "orders"}'
             )
         )
         provider = LLMProvider(

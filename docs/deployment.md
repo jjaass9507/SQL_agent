@@ -112,6 +112,18 @@ app 依 gateway 的五項能力（`multi_turn` / `system_role` / `native_tools` 
    但 `source` 為 `forced`、`profile` 為覆蓋值——若「改了平台卻看不到行為變化」，先確認此變數
    是否仍在覆蓋。實測驗證通過後，建議把最終生效的 profile 與平台設定記錄於此。
 
+### 模擬工具的線路格式（`native_tools=false` 平台相容性）
+
+`native_tools=false` 時，工具目錄與工具呼叫改以文字注入 prompt、由 app 本地執行
+（見 `app/llm/adapters.py`）。此處**刻意不用**標準 function-calling 的 JSON 格式
+（`[{name,description,parameters}]` 目錄 + `{"tool_call":...}` 輸出），改用散文目錄 +
+`執行動作》<名稱>｜參數》<JSON>` 的自訂單行格式。
+
+原因：部分 OpenAI 相容平台（尤其自帶 bot/skill 框架者）會**偵測**標準 function-calling
+格式並主動接手執行工具，回報 `No ToolCallback found for tool name: ...` 並以
+`database_timeout`（504）逾時，破壞 app 本地執行的模擬工具協定。改用非標準格式即可規避。
+若日後換到不會攔截的平台，這層規避不影響正確性（模型仍照格式輸出、app 仍能解析）。
+
 ## 4. Windows Server IIS 部署（AD SSO）
 
 適用情境：內網部署、需要以 Active Directory 帳號登入，且希望瀏覽器透過 IIS 的
