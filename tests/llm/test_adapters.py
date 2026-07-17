@@ -82,6 +82,74 @@ def test_apply_json_schema_off_injects_schema_and_drops_response_format():
     assert "sql" in adapted.messages[0]["content"]
 
 
+def test_apply_native_tools_off_converts_tool_history_to_text():
+    """native_tools 缺失時，歷史中的 assistant.tool_calls / role:tool 應轉成純文字，
+    不遺失工具呼叫軌跡（否則攤平會變成字面 'None'、模型失去 ReAct 脈絡）。"""
+    messages = [
+        {"role": "user", "content": "查一下 CIM 有哪些表"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "get_schema", "arguments": '{"db": "CIM"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "device_master, activity_log"},
+    ]
+    adapted = apply(
+        messages,
+        _TOOLS,
+        None,
+        multi_turn=True,
+        system_role=True,
+        native_tools=False,
+        json_schema=True,
+    )
+
+    blob = "\n".join(m["content"] for m in adapted.messages)
+    assert "執行動作》get_schema｜參數》{\"db\": \"CIM\"}" in blob
+    assert "device_master, activity_log" in blob
+    assert "None" not in blob  # tool_calls 的 content=None 不應洩漏成字面 None
+
+
+def test_apply_native_tools_off_tool_history_survives_multi_turn_flatten():
+    """native_tools + multi_turn 同時缺失（此平台實況）：攤平後工具呼叫內容仍在。"""
+    messages = [
+        {"role": "user", "content": "查資料"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "run_query", "arguments": '{"sql": "SELECT 1"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "1 筆"},
+    ]
+    adapted = apply(
+        messages,
+        _TOOLS,
+        None,
+        multi_turn=False,
+        system_role=True,
+        native_tools=False,
+        json_schema=True,
+    )
+
+    assert len(adapted.messages) == 1
+    content = adapted.messages[0]["content"]
+    assert "run_query" in content
+    assert "SELECT 1" in content
+    assert "\nNone" not in content
+
+
 def test_apply_system_role_off_merges_into_first_user_message():
     messages = [{"role": "system", "content": "你是助理"}, {"role": "user", "content": "你好"}]
     adapted = apply(

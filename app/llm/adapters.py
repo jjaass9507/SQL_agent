@@ -50,6 +50,9 @@ def apply(
     """依 CapabilityProfile 四項旗標（streaming 由 provider 另外處理）套用降級轉接。"""
     result_messages = [dict(m) for m in messages]
 
+    if not native_tools:
+        result_messages = _adapt_native_tool_history(result_messages)
+
     if not system_role:
         result_messages = _adapt_system_role(result_messages)
 
@@ -94,12 +97,37 @@ def _adapt_system_role(messages: list[Message]) -> list[Message]:
     return [{"role": "user", "content": system_content}, *rest]
 
 
+def _adapt_native_tool_history(messages: list[Message]) -> list[Message]:
+    """native_tools 缺失：把歷史中的原生工具訊息轉成與注入格式一致的純文字。
+
+    否則 `assistant.tool_calls`（content 為 None）與 `role:"tool"` 訊息在攤平/送出時
+    會遺失工具呼叫軌跡（content=None 變成字面 "None"），模型第二輪失去 ReAct 脈絡、
+    可能不再實際呼叫工具而直接編造答案。轉成文字後 transcript 連貫，多步推理才可靠。
+    """
+    adapted: list[Message] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            calls = "\n".join(
+                f"執行動作》{tc.get('function', {}).get('name', '')}"
+                f"｜參數》{tc.get('function', {}).get('arguments', '') or '{}'}"
+                for tc in m["tool_calls"]
+            )
+            text = m.get("content") or calls
+            adapted.append({"role": "assistant", "content": text})
+        elif role == "tool":
+            adapted.append({"role": "user", "content": f"（工具結果）\n{m.get('content', '')}"})
+        else:
+            adapted.append(m)
+    return adapted
+
+
 def _adapt_multi_turn(messages: list[Message]) -> list[Message]:
     """multi_turn 缺失（最後手段）：整段歷史攤平成單一則 user 訊息。"""
-    lines = [
-        f"{_ROLE_LABELS.get(m.get('role'), '[' + str(m.get('role')) + ']')}\n{m.get('content', '')}"
-        for m in messages
-    ]
+    lines = []
+    for m in messages:
+        label = _ROLE_LABELS.get(m.get("role"), f"[{m.get('role')}]")
+        lines.append(f"{label}\n{m.get('content') or ''}")
     return [{"role": "user", "content": "\n\n".join(lines)}]
 
 
