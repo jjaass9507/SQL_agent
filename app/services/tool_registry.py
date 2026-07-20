@@ -119,14 +119,41 @@ async def _tool_list_databases(args: dict, ctx: ToolContext) -> dict:
     return {"databases": [d.get("name") for d in databases]}
 
 
+def _compact_table(table) -> dict:
+    """精簡 schema 表達：表名 + 欄位（名稱、型態、PK/FK 標記）+ 選填說明。
+
+    完整 metadata（每欄含 nullable/unique/indexed/default 等）過於冗長，多張表會超過
+    observation 上限被截斷，導致模型漏看部分資料表。精簡後多張表也能完整呈現。
+    """
+    cols = []
+    for c in table.columns:
+        marks = []
+        if c.is_primary_key:
+            marks.append("PK")
+        if c.is_foreign_key and c.references:
+            marks.append(f"FK->{c.references}")
+        suffix = f" [{', '.join(marks)}]" if marks else ""
+        cols.append(f"{c.name} {c.data_type}{suffix}")
+    line = {"table": table.table_name, "columns": cols}
+    if table.description:
+        line["description"] = table.description
+    return line
+
+
 async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
     url, err = await _resolve_db_url(ctx, args)
     if err:
         return {"error": err}
-    tables, err = await dbops.schema_tree(url)
+    name = args.get("db") or ctx.db_name
+    schema = args.get("schema") or await change_service.get_default_schema(ctx.db, name)
+    tables, available, err = await dbops.schema_overview(url, schema)
     if err and not tables:
         return {"error": err}
-    return {"tables": [spec_models.asdict(t) for t in tables]}
+    return {
+        "schema": schema,
+        "available_schemas": available,
+        "tables": [_compact_table(t) for t in tables],
+    }
 
 
 async def _tool_get_table_ddl(args: dict, ctx: ToolContext) -> dict:
@@ -258,8 +285,20 @@ _register(Tool(
 ))
 _register(Tool(
     name="get_schema",
-    description="取得指定資料庫的完整結構（資料表、欄位、型態、PK/FK、註解）。",
-    parameters={"type": "object", "properties": {"db": _DB_PARAM}},
+    description=(
+        "取得指定資料庫某個 schema 的結構（資料表、欄位、PK/FK）。回傳同時列出資料庫裡"
+        "所有可用的 schema（available_schemas），需要查別的 schema 時以 schema 參數指定。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "db": _DB_PARAM,
+            "schema": {
+                "type": "string",
+                "description": "PostgreSQL schema 名稱（可省略，預設為該資料庫設定的預設 schema）",
+            },
+        },
+    },
     handler=_tool_get_schema,
 ))
 _register(Tool(

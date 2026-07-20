@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 
 from app.rules import sql_safety
-from app.rules.db_introspect import extract_schema
+from app.rules.db_introspect import _list_user_schemas, extract_schema
 from app.rules.spec_models import TableSpec
 
 MAX_ROWS = 200
@@ -69,5 +69,18 @@ async def explain_query(db_url: str, sql: str) -> dict[str, Any]:
 
 
 async def schema_tree(db_url: str) -> tuple[list[TableSpec], str]:
-    """擷取業務資料庫結構（委派 rules.db_introspect.extract_schema）。"""
+    """擷取業務資料庫結構（委派 rules.db_introspect.extract_schema，預設 public schema）。"""
     return await asyncio.to_thread(extract_schema, db_url)
+
+
+async def schema_overview(
+    db_url: str, schema: str = "public"
+) -> tuple[list[TableSpec], list[str], str]:
+    """擷取指定 schema 的結構，並一併回傳資料庫裡所有可用 user schema 名稱。
+
+    回傳 (tables, available_schemas, error)。供 DB Agent 的 get_schema 工具使用：
+    讓模型/使用者看得到「還有哪些 schema」，並能以 schema 參數切換。
+    """
+    tables, err = await asyncio.to_thread(extract_schema, db_url, schema)
+    available = await asyncio.to_thread(_list_user_schemas, db_url)
+    return tables, available, err

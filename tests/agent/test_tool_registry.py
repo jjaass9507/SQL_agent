@@ -98,16 +98,40 @@ async def test_get_schema_unknown_db_name(db_session):
 # -- check_table_docs：都透過 dbops.schema_tree（monkeypatch）---------------
 
 
-async def test_get_schema_returns_tables(db_session, monkeypatch):
+async def test_get_schema_returns_compact_tables_and_available_schemas(db_session, monkeypatch):
     await seed_business_db(db_session, "shop", "sqlite://")
 
-    async def _fake_schema_tree(url):
-        return _existing_tables(), ""
+    async def _fake_overview(url, schema):
+        return _existing_tables(), ["public", "sales"], ""
 
-    monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)
+    monkeypatch.setattr(tool_registry.dbops, "schema_overview", _fake_overview)
     result = await tool_registry.dispatch("get_schema", {"db": "shop"}, _ctx(db_session))
-    assert "tables" in result
-    assert result["tables"][0]["table_name"] == "users"
+    assert result["schema"] == "public"  # 未設定預設 → public
+    assert result["available_schemas"] == ["public", "sales"]  # 讓使用者看到其他 schema
+    assert result["tables"][0]["table"] == "users"
+    assert "id integer [PK]" in result["tables"][0]["columns"]  # 精簡格式，PK 有標記
+
+
+async def test_get_schema_uses_configured_default_and_schema_arg(db_session, monkeypatch):
+    await seed_business_db(db_session, "shop", "sqlite://", default_schema="warehouse")
+    captured = {}
+
+    async def _fake_overview(url, schema):
+        captured["schema"] = schema
+        return _existing_tables(), ["public", "warehouse"], ""
+
+    monkeypatch.setattr(tool_registry.dbops, "schema_overview", _fake_overview)
+
+    # 未帶 schema → 用設定的預設 schema
+    await tool_registry.dispatch("get_schema", {"db": "shop"}, _ctx(db_session))
+    assert captured["schema"] == "warehouse"
+
+    # 明確帶 schema 參數 → 覆蓋預設
+    result = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "schema": "public"}, _ctx(db_session)
+    )
+    assert captured["schema"] == "public"
+    assert result["schema"] == "public"
 
 
 async def test_analyze_schema_returns_warnings(db_session, monkeypatch):

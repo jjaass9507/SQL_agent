@@ -52,7 +52,25 @@ async def test_add_business_db_success_never_leaks_password(client, monkeypatch)
     assert "hunter2" not in resp.text
     dbs = body["business_databases"]
     assert len(dbs) == 1
-    assert dbs[0] == {"name": "biz", "masked_url": "postgresql://user:***@host/db"}
+    assert dbs[0] == {
+        "name": "biz",
+        "masked_url": "postgresql://user:***@host/db",
+        "default_schema": None,
+    }
+
+
+async def test_add_business_db_stores_default_schema(client, monkeypatch):
+    monkeypatch.setattr("app.services.dbops.execute_query", _fake_execute_query_ok)
+    resp = await client.post(
+        "/api/v1/settings/business-db",
+        json={
+            "name": "biz",
+            "url": "postgresql://user:pass@host/db",
+            "default_schema": "warehouse",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["business_databases"][0]["default_schema"] == "warehouse"
 
 
 async def test_add_business_db_replaces_same_name(client, monkeypatch):

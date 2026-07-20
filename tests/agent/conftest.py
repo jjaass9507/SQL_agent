@@ -118,11 +118,16 @@ async def seed_db(session_factory):
         yield session
 
 
-async def seed_business_db(db_session, name: str, db_url: str) -> None:
+async def seed_business_db(
+    db_session, name: str, db_url: str, default_schema: str | None = None
+) -> None:
     """在 app_settings 的 "business_databases" 清單中加入一筆（含加密連線字串）。"""
     setting = await settings_repo.get_setting(db_session, BUSINESS_DATABASES_KEY)
     databases = list(setting.value_json) if setting and setting.value_json else []
-    databases.append({"name": name, "db_url_encrypted": encrypt_db_url(db_url)})
+    entry = {"name": name, "db_url_encrypted": encrypt_db_url(db_url)}
+    if default_schema:
+        entry["default_schema"] = default_schema
+    databases.append(entry)
     await settings_repo.set_setting(db_session, BUSINESS_DATABASES_KEY, databases)
 
 

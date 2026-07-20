@@ -45,6 +45,18 @@ async def test_resolve_business_db_defaults_to_first(db_session):
     assert url == "postgresql://x/y"
 
 
+async def test_get_default_schema_falls_back_to_public(db_session):
+    await seed_business_db(db_session, "shop", "postgresql://x/y")
+    assert await change_service.get_default_schema(db_session, "shop") == "public"
+
+
+async def test_get_default_schema_returns_configured(db_session):
+    await seed_business_db(db_session, "shop", "postgresql://x/y", default_schema="warehouse")
+    assert await change_service.get_default_schema(db_session, "shop") == "warehouse"
+    # name 省略時取第一筆
+    assert await change_service.get_default_schema(db_session, None) == "warehouse"
+
+
 # -- create_change_request -----------------------------------------------------
 
 

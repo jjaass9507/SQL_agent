@@ -30,7 +30,10 @@ async def _load_business_dbs(db: AsyncSession) -> list[dict]:
 
 def _mask_entry(entry: dict) -> dict:
     url = decrypt_db_url(entry["db_url_encrypted"])
-    return {"name": entry["name"], "masked_url": mask_db_url(url)}
+    masked = {"name": entry["name"], "masked_url": mask_db_url(url)}
+    if entry.get("default_schema"):
+        masked["default_schema"] = entry["default_schema"]
+    return masked
 
 
 async def get_settings_overview(db: AsyncSession) -> dict:
@@ -47,8 +50,14 @@ async def get_settings_overview(db: AsyncSession) -> dict:
     }
 
 
-async def upsert_business_database(db: AsyncSession, name: str, url: str) -> list[dict]:
-    """新增或更新一筆業務資料庫連線：先測試連線成功才加密存入。"""
+async def upsert_business_database(
+    db: AsyncSession, name: str, url: str, default_schema: str | None = None
+) -> list[dict]:
+    """新增或更新一筆業務資料庫連線：先測試連線成功才加密存入。
+
+    default_schema：DB Agent 的 get_schema 未指定 schema 時預設掃描的 schema（省略為 public）。
+    未提供時保留該筆原本已設定的 default_schema，避免純更新連線字串時被清掉。
+    """
     if not url.startswith(_ALLOWED_SCHEMES):
         raise ValueError("僅支援 PostgreSQL 連線字串（postgresql://...）")
     try:
@@ -56,8 +65,14 @@ async def upsert_business_database(db: AsyncSession, name: str, url: str) -> lis
     except Exception as exc:
         raise ConnectionTestFailed(sanitize_db_error(str(exc))) from exc
 
-    entries = [e for e in await _load_business_dbs(db) if e["name"] != name]
-    entries.append({"name": name, "db_url_encrypted": encrypt_db_url(url)})
+    existing = await _load_business_dbs(db)
+    prior = next((e for e in existing if e["name"] == name), None)
+    entries = [e for e in existing if e["name"] != name]
+    entry = {"name": name, "db_url_encrypted": encrypt_db_url(url)}
+    schema = default_schema or (prior or {}).get("default_schema")
+    if schema:
+        entry["default_schema"] = schema
+    entries.append(entry)
     await settings_repo.set_setting(db, _BUSINESS_DB_KEY, entries)
     await activity.log_activity(
         db, "business_db_configured", {"name": name, "masked_url": mask_db_url(url)}

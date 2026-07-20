@@ -22,6 +22,7 @@ DbDep = Annotated[AsyncSession, Depends(get_db)]
 class BusinessDatabaseOut(BaseModel):
     name: str
     masked_url: str
+    default_schema: str | None = None
 
 
 class SettingsOut(BaseModel):
@@ -34,6 +35,7 @@ class SettingsOut(BaseModel):
 class BusinessDatabaseIn(BaseModel):
     name: str
     url: str
+    default_schema: str | None = None
 
 
 class BusinessDatabasesOut(BaseModel):
@@ -61,7 +63,9 @@ async def add_business_db(body: BusinessDatabaseIn, db: DbDep):
     if not url:
         raise HTTPException(status_code=400, detail="請填入連線字串")
     try:
-        entries = await svc.upsert_business_database(db, name, url)
+        entries = await svc.upsert_business_database(
+            db, name, url, default_schema=(body.default_schema or "").strip() or None
+        )
     except svc.ConnectionTestFailed as exc:
         raise HTTPException(status_code=400, detail=f"連線失敗：{exc}") from None
     except ValueError as exc:

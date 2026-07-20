@@ -57,6 +57,22 @@ async def resolve_business_db(
     return resolved_name, url, None
 
 
+async def get_default_schema(db: AsyncSession, name: str | None) -> str:
+    """取得某業務資料庫設定的預設 schema（未設定時為 public）。
+
+    name 為 None 時取第一個已設定的資料庫（對齊 resolve_business_db 的行為）。
+    """
+    setting = await settings_repo.get_setting(db, BUSINESS_DATABASES_KEY)
+    databases: list[dict] = setting.value_json if setting and setting.value_json else []
+    if not databases:
+        return "public"
+    if name:
+        entry = next((d for d in databases if d.get("name") == name), None)
+    else:
+        entry = databases[0]
+    return (entry or {}).get("default_schema") or "public"
+
+
 async def create_change_request(
     db: AsyncSession, db_name: str | None, ddl: str, reason: str = ""
 ) -> dict:
