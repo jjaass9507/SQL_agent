@@ -42,6 +42,19 @@
 | [`go_live_checklist.md`](docs/go_live_checklist.md) | 上線檢查清單 |
 | `v05/` | v0.5 舊實作的架構/部署/維運文件（歷史參考，不適用於 v2） |
 
+## 開發輔助 Skills（`.claude/skills/`）
+
+專案層級的 Claude Code skills，開啟本 repo 的 session 會自動載入。完整使用說明見
+[`.claude/skills/README.md`](.claude/skills/README.md)。
+
+| Skill | 觸發方式 | 做什麼 |
+|---|---|---|
+| `cost-aware-orchestration` | 自動 | 決定任務要主模型直接做、派子代理、還是進 plan mode |
+| `styleseed` | 自動 | 前端 UI／設計系統的資深設計判斷 |
+| `ponytail` | `/ponytail [lite\|full\|ultra]` | 懶惰資深工程師模式，強制最短可動解法 |
+| `i-have-adhd` | `/i-have-adhd` | 把回應排版成 ADHD 讀者可直接行動的形式 |
+| `ponytail-review` / `-audit` / `-debt` / `-gain` / `-help` | 同名指令 | 過度設計檢查、技術債帳本、速查卡（只讀不寫） |
+
 ## 分支說明
 
 | 分支 | 內容 |
