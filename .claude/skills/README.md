@@ -1,22 +1,91 @@
-# Claude Code Skills
+# Claude Code Skills 使用說明
 
 專案層級的 Claude Code skills。放在 `.claude/skills/<name>/SKILL.md`，開啟本 repo 的
 Claude Code session（含 web session）會自動載入，用 `/<skill-name>` 呼叫。
+不需安裝、不需網路、不需 Node.js — 檔案本身就是全部。
+
+## 快速上手
+
+| 指令 | 類型 | 做什麼 |
+|------|------|--------|
+| `/ponytail [lite\|full\|ultra]` | 持續模式 | 懶惰資深工程師模式，強制最短可動解法 |
+| `/i-have-adhd` | 持續模式 | 把回應排版成 ADHD 讀者可直接行動的形式 |
+| `/ponytail-review` | 一次性 | 針對目前 diff 找過度設計 |
+| `/ponytail-audit` | 一次性 | 全 repo 過度設計盤點 |
+| `/ponytail-debt` | 一次性 | 收集 `ponytail:` 註記成技術債帳本 |
+| `/ponytail-gain` | 一次性 | ponytail 的 benchmark 成效卡 |
+| `/ponytail-help` | 一次性 | ponytail 指令速查卡 |
+
+**持續模式**：打一次，效力持續到 session 結束或你手動關閉。
+**一次性**：跑完出報告就結束，不改變後續行為，也不會動到程式碼。
+
+### 開與關
+
+```
+/ponytail            # 開啟（預設 full 強度）
+/ponytail ultra      # 切換強度，不需先關閉
+stop ponytail        # 關閉，回到預設行為
+
+/i-have-adhd         # 開啟
+stop adhd mode       # 關閉
+```
+
+「normal mode」可以一次關掉兩個。session 重開後兩者都是關閉狀態。
 
 ## ponytail
 
-「懶惰資深工程師」模式：強制最短、最簡單、可動的解法（YAGNI → stdlib → 平台原生
-→ 一行 → 最小實作）。與本專案 `CLAUDE.md` 的 §2 Simplicity First / §3 Surgical
-Changes 方向一致，ponytail 提供的是可隨時開關的強化版與幾個一次性報告指令。
+「懶惰資深工程師」模式：強制最短、最簡單、可動的解法。核心是一道階梯，停在第一個
+成立的階：
 
-| Skill | 用途 |
-|-------|------|
-| `/ponytail [lite\|full\|ultra]` | 開啟懶惰模式（預設 `full`），持續到 session 結束或說「stop ponytail」 |
-| `/ponytail-review` | 針對 diff 找過度設計，逐行列出可刪除的部分 |
-| `/ponytail-audit` | 全 repo 過度設計盤點，依可刪除量排序 |
-| `/ponytail-debt` | 收集程式碼中的 `ponytail:` 註記，彙整成技術債帳本 |
-| `/ponytail-gain` | 顯示 ponytail 的 benchmark 成效卡（上游數據，非本 repo 實測） |
-| `/ponytail-help` | 指令速查卡 |
+1. 這東西需要存在嗎？（YAGNI）
+2. 這個 codebase 裡已經有了嗎？
+3. 標準函式庫做得到嗎？
+4. 平台原生功能覆蓋得了嗎？（DB constraint 優於 app code、CSS 優於 JS）
+5. 已安裝的套件解得掉嗎？
+6. 能不能一行？
+7. 到這裡才寫：能動的最小實作。
+
+### 三種強度
+
+| 強度 | 行為 |
+|------|------|
+| `lite` | 照你要的做，另外用一行點出更懶的替代方案，你自己選 |
+| `full` | 階梯全程執行，最短 diff、最短說明。**預設** |
+| `ultra` | YAGNI 極端派，先刪再加，直接質疑需求本身該不該存在 |
+
+範例（「幫 API 回應加個快取」）：
+
+- `lite`：加好了。順帶一提 `functools.lru_cache` 一行就能覆蓋這個情境。
+- `full`：`@lru_cache(maxsize=1000)` 掛在 fetch function 上。略過自訂快取類別，等 lru_cache 明顯不夠用再加。
+- `ultra`：在 profiler 說話之前不要快取。真的要時就 `@lru_cache`。手刻 TTL 快取類別是個附帶命中率的 bug 農場。
+
+### 幾個不會被簡化掉的東西
+
+信任邊界的輸入驗證、防止資料遺失的錯誤處理、安全措施、無障礙基本要求、以及你明確
+要求的東西 — 這些 ponytail 不會動。另外非 trivial 的邏輯（分支、迴圈、parser、
+金流／安全路徑）它會留一個最小的可執行檢查，不會裸奔。
+
+### `ponytail:` 註記
+
+ponytail 刻意走捷徑時會留下註記，寫明「天花板」和「什麼時候該升級」：
+
+```python
+# ponytail: 全域鎖，吞吐量成為瓶頸時改成 per-account 鎖
+```
+
+`/ponytail-debt` 就是把這些註記掃出來變成帳本，避免「之後再說」變成「永遠不做」。
+
+### 一次性報告指令
+
+- **`/ponytail-review`** — 看目前的 diff，逐行列出可刪的部分，格式是
+  `L42: yagni: 只有一個實作的 factory。直接 inline。`，結尾給 `net: -N lines possible.`
+- **`/ponytail-audit`** — 同樣的事情但掃全 repo，依可刪除量由大到小排序。
+- **`/ponytail-debt`** — 掃 `ponytail:` 註記，沒寫升級條件的會標 `no-trigger`（最容易爛掉的那種）。
+- **`/ponytail-gain`** — 上游 benchmark 中位數，**不是**本 repo 的實測數字。
+
+這四個都只讀不寫，不會改任何檔案。`/ponytail-review` 和 `/ponytail-audit` 的範圍
+限定在「過度設計」，正確性 bug、安全漏洞、效能問題明確不在範圍內 — 那些要走一般
+的 review。
 
 ### 來源與授權
 
@@ -41,19 +110,30 @@ cp -r /tmp/ponytail/skills/. .claude/skills/
 
 ## i-have-adhd
 
-把輸出排版成 ADHD 讀者可以直接行動的形式：第一行就是下一個動作、多步驟一律編號、
-每回合重述目前進度、抑制岔題、給具體時間估計、明確列出已完成的成果。開頭寒暄、
-結尾客套、事後總結一律省略。
+把輸出排版成 ADHD 讀者可以直接行動的形式。十條規則，重點是：
 
-| Skill | 用途 |
-|-------|------|
-| `/i-have-adhd` | 開啟 ADHD 輸出模式，持續到 session 結束或說「stop adhd mode」 |
+- **第一行就是可執行的動作**，不是鋪陳、不是計畫。指令、路徑、程式碼片段擺最前面。
+- **多步驟一律編號**，一步一個有邊界的動作。
+- **每回合重述進度**（「5 步中的第 3 步完成：schema 已更新。下一步：回填新欄位。」），
+  因為上一則訊息的狀態記不住。
+- **抑制岔題**，先把手上的做完，第二件事另外問。
+- **具體時間估計**（「如果測試已經涵蓋大概 15 分鐘，沒有的話要一個下午」），不是「要花點時間」。
+- **明確列出現在能動的東西**，不要把成果埋在總結裡。
+- **錯誤用平舖直敘**，不要「糟糕」「似乎有點問題」，直接講原因和修法。
+- **清單上限 5 項**，超過就切成「現在做／之後做」。
+- **沒有開場白、沒有事後總結、沒有結尾客套**。
+
+### 會自動破例的情況
+
+要求「解釋一下」「帶我走過一遍」時會完整說明；有破壞性操作（`rm -rf`、force push、
+schema migration、drop table）時會先確認；連續三回合都「還是壞的」時會停下來講出
+可能錯誤的假設；請求真的有歧義時會問一個問題；以及規則本身會把答案砍掉時（例如
+問「我有哪些選項」，選項就是答案）以任務為準。
+
+### 只能手動啟用
 
 skill 標了 `disable-model-invocation: true`，所以**只有**明確打 `/i-have-adhd`
 才會啟用，不會被自動觸發。
-
-與 ponytail 可並用，兩者管的層面不同：ponytail 管「寫出什麼程式碼」，
-i-have-adhd 管「回應怎麼排版」。
 
 ### 來源與授權
 
@@ -74,3 +154,29 @@ git clone --depth 1 https://github.com/ayghri/i-have-adhd /tmp/i-have-adhd
 cp /tmp/i-have-adhd/skills/i-have-adhd/SKILL.md .claude/skills/i-have-adhd/
 # 更新本檔的 commit 記錄
 ```
+
+## 搭配使用
+
+兩個持續模式管的層面不同，可以同時開：ponytail 管「寫出什麼程式碼」，
+i-have-adhd 管「回應怎麼排版」。ponytail 自己的 SKILL.md 也明說它不管講話方式。
+
+在本專案的典型組合：
+
+| 情境 | 建議 |
+|------|------|
+| 新增一個 writer / route | `/ponytail` 再描述需求，避免長出不必要的抽象層 |
+| 送出 PR 前自我檢查 | `/ponytail-review` |
+| 覺得某個模組膨脹了 | `/ponytail-audit`，看排序最前面的幾項 |
+| 想知道之前留了哪些捷徑 | `/ponytail-debt` |
+| 要一步步跟著做的操作指引 | `/i-have-adhd` |
+
+## 與 `CLAUDE.md` 的關係
+
+專案根目錄的 `CLAUDE.md` 是一直生效的基準規範，skills 是可開關的疊加層。
+兩處已知的張力：
+
+- **`CLAUDE.md` §2 Simplicity First / §3 Surgical Changes 與 ponytail 方向一致**，
+  ponytail 開啟時較強勢（`full` 以上會主動質疑需求該不該存在）。
+- **`CLAUDE.md` §1 要求先講清楚假設與取捨，i-have-adhd 要求砍掉前言**。
+  實際使用時若覺得該講的被砍掉了，明確說「解釋一下」即可觸發 i-have-adhd
+  的破例條款。
