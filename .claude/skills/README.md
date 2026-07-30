@@ -38,3 +38,39 @@ git clone --depth 1 https://github.com/DietrichGebert/ponytail /tmp/ponytail
 cp -r /tmp/ponytail/skills/. .claude/skills/
 # 重新套用上述兩處差異，並更新本檔的 commit 記錄
 ```
+
+## i-have-adhd
+
+把輸出排版成 ADHD 讀者可以直接行動的形式：第一行就是下一個動作、多步驟一律編號、
+每回合重述目前進度、抑制岔題、給具體時間估計、明確列出已完成的成果。開頭寒暄、
+結尾客套、事後總結一律省略。
+
+| Skill | 用途 |
+|-------|------|
+| `/i-have-adhd` | 開啟 ADHD 輸出模式，持續到 session 結束或說「stop adhd mode」 |
+
+skill 標了 `disable-model-invocation: true`，所以**只有**明確打 `/i-have-adhd`
+才會啟用，不會被自動觸發。
+
+與 ponytail 可並用，兩者管的層面不同：ponytail 管「寫出什麼程式碼」，
+i-have-adhd 管「回應怎麼排版」。
+
+### 來源與授權
+
+- 上游：https://github.com/ayghri/i-have-adhd
+- 版本：v0.1.0（commit `07684c4`）
+- 授權：MIT，全文見 `I-HAVE-ADHD-LICENSE`
+
+### 與上游的差異
+
+`SKILL.md` 與上游逐字一致。未引入上游的 `hooks/`（SessionStart 的 always-on
+旗標腳本），也未複製 `skills/i-have-adhd/agents/`（Gemini / OpenAI 平台專用設定，
+Claude Code 用不到）。
+
+### 更新方式
+
+```bash
+git clone --depth 1 https://github.com/ayghri/i-have-adhd /tmp/i-have-adhd
+cp /tmp/i-have-adhd/skills/i-have-adhd/SKILL.md .claude/skills/i-have-adhd/
+# 更新本檔的 commit 記錄
+```
