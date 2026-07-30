@@ -399,6 +399,9 @@ SQL_agent/
 │   ├── fixtures/sample_spec.json
 │   └── test_*.py
 │
+├── .claude/skills/              # 專案層級 Claude Code skills
+│   └── ponytail*/SKILL.md       # ponytail 懶惰模式（vendored，MIT，見該目錄 README）
+│
 ├── data/                        # Session 資料（git ignored）
 └── output/                      # CLI 產出目錄（git ignored）
 ```
