@@ -121,7 +121,7 @@ uvicorn 直跑／Docker Compose 部署互斥——選這條路徑時，對外服
 
 > **權威參考**：本章是針對本專案（FastAPI/uvicorn）的摘要；完整的 IIS + AD
 > 建置細節（IIS 角色安裝、AD 認證程式碼範式、離線 wheel、疑難排解全集）以
-> 使用者提供的實戰 skill 為準，全文收錄於 [`docs/iis_ad_deploy/`](iis_ad_deploy/SKILL.md)。
+> `python-iis-ad-deploy` skill 為準（Claude Code 中執行 `/python-iis-ad-deploy`）。
 
 ### 4-1 前置需求
 
