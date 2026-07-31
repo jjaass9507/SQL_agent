@@ -4,8 +4,9 @@ dbml/plantuml/jsonschema/datadict（純模板，零 API）。"""
 import pytest
 import respx
 
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
 from app.services import generation_service
+from tests.specs import col
 from tests.workers.conftest import BASE_URL, chat_completion_response, make_provider
 
 
@@ -14,7 +15,7 @@ def _tables() -> list[TableSpec]:
         TableSpec(
             table_name="users",
             description="使用者",
-            columns=[ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True)],
+            columns=[col("id", "uuid", False, "主鍵", is_primary_key=True)],
         )
     ]
 
@@ -95,8 +96,8 @@ async def test_incremental_calls_llm_when_diff_exists():
             table_name="users",
             description="使用者",
             columns=[
-                ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True),
-                ColumnSpec("legacy_col", "text", True, "舊欄位（設計已移除）"),
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("legacy_col", "text", True, "舊欄位（設計已移除）"),
             ],
         )
     ]

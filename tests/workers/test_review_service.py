@@ -8,8 +8,9 @@ import respx
 from app.repos import jobs as jobs_repo
 from app.repos import outputs as outputs_repo
 from app.repos import sessions as sessions_repo
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
 from app.services import review_service
+from tests.specs import col
 from tests.workers.conftest import BASE_URL, chat_completion_response, make_provider
 
 
@@ -19,8 +20,8 @@ def _existing_tables() -> list[TableSpec]:
             table_name="users",
             description="使用者",
             columns=[
-                ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True),
-                ColumnSpec("password", "varchar", False, "密碼", length=100),
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("password", "varchar", False, "密碼", length=100),
             ],
         )
     ]

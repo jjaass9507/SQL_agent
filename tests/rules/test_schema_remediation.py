@@ -1,7 +1,8 @@
 """Tests for schema_advisor warning codes and deterministic remediation SQL."""
 from app.rules.schema_advisor import analyze
 from app.rules.schema_remediation import build_remediation_sql
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import ColumnSpec
+from tests.specs import table
 
 
 def _col(name, dtype="UUID", **kw):
@@ -12,7 +13,7 @@ def _col(name, dtype="UUID", **kw):
 # ── advisor codes ────────────────────────────────────────
 
 def test_advisor_emits_codes():
-    t = TableSpec("orders", "", [
+    t = table("orders", "", [
         _col("id", is_primary_key=True),
         _col("user_id", is_foreign_key=True, references="users.id"),  # fk_no_index
         _col("email", "varchar"),  # likely_unique + varchar_no_length
@@ -26,7 +27,7 @@ def test_advisor_emits_codes():
 
 
 def test_advisor_missing_audit_and_no_pk():
-    t = TableSpec("logs", "", [_col("msg", "text")])
+    t = table("logs", "", [_col("msg", "text")])
     codes = {w["code"] for w in analyze([t])}
     assert "no_pk" in codes
     assert "missing_audit" in codes

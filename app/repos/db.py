@@ -4,7 +4,6 @@
 正式環境設定為 PostgreSQL 連線字串即可，程式碼不需變動。
 """
 
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 from sqlalchemy.engine import make_url
@@ -16,7 +15,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import get_settings
-from app.repos.models import Base
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -45,16 +43,3 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     if _session_factory is None:
         _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
     return _session_factory
-
-
-async def get_session() -> AsyncIterator[AsyncSession]:
-    """依賴注入風格的 session 產生器：yield 一個 AsyncSession，離開時自動關閉。"""
-    async with get_session_factory()() as session:
-        yield session
-
-
-async def init_db(engine: AsyncEngine | None = None) -> None:
-    """建立所有資料表（供測試或本機開發快速起手；正式環境一律用 Alembic migration）。"""
-    target = engine or get_engine()
-    async with target.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)

@@ -48,7 +48,7 @@ uvicorn。
 
 ### 資料庫 migration
 
-正式環境一律用 Alembic 管理 schema，不使用 `app.repos.db.init_db()`（那只是給測試/本機快速起手用）：
+schema 一律用 Alembic 管理（測試自行以 `Base.metadata.create_all` 起表，不走這條路）：
 
 ```bash
 alembic upgrade head

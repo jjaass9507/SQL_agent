@@ -2,26 +2,12 @@
 
 Field names, ordering, and defaults are unchanged from the original
 ``ColumnSpec`` / ``TableSpec`` dataclasses so every module ported into
-``app/rules/`` can keep using them without any logic changes. A small
-``__init__`` override restores positional-argument construction (e.g.
-``ColumnSpec("id", "uuid", False, "PK", is_primary_key=True)``), which the
-ported v0.5 tests rely on and which Pydantic ``BaseModel`` does not support
-out of the box.
+``app/rules/`` can keep using them without any logic changes.
 """
 from pydantic import BaseModel, Field
 
 
-class _PositionalModel(BaseModel):
-    """BaseModel that also accepts positional args, in field-declaration order."""
-
-    def __init__(self, *args, **kwargs):
-        field_names = list(self.__class__.model_fields.keys())
-        for field_name, value in zip(field_names, args, strict=False):
-            kwargs.setdefault(field_name, value)
-        super().__init__(**kwargs)
-
-
-class ColumnSpec(_PositionalModel):
+class ColumnSpec(BaseModel):
     name: str
     data_type: str
     nullable: bool
@@ -35,7 +21,7 @@ class ColumnSpec(_PositionalModel):
     default: str | None = None
 
 
-class TableSpec(_PositionalModel):
+class TableSpec(BaseModel):
     table_name: str
     description: str
     columns: list[ColumnSpec]

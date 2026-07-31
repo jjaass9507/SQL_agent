@@ -1,22 +1,22 @@
 """Tests for pure-template export writers (DBML / PlantUML / JSON Schema / CSV)."""
 import json
 
-from app.rules.spec_models import ColumnSpec, TableSpec
 from app.rules.writers.data_dict_writer import DataDictWriter
 from app.rules.writers.dbml_writer import DBMLWriter
 from app.rules.writers.json_schema_writer import JSONSchemaWriter
 from app.rules.writers.plantuml_writer import PlantUMLWriter
+from tests.specs import col, table
 
 
 def _schema():
-    users = TableSpec("users", "使用者", [
-        ColumnSpec("id", "uuid", False, "PK", is_primary_key=True),
-        ColumnSpec("email", "varchar", False, "信箱", is_unique=True, length=255),
+    users = table("users", "使用者", [
+        col("id", "uuid", False, "PK", is_primary_key=True),
+        col("email", "varchar", False, "信箱", is_unique=True, length=255),
     ])
-    orders = TableSpec("orders", "訂單", [
-        ColumnSpec("id", "uuid", False, "PK", is_primary_key=True),
-        ColumnSpec("user_id", "uuid", False, "下單者", is_foreign_key=True, references="users.id"),
-        ColumnSpec("amount", "integer", True, "金額"),
+    orders = table("orders", "訂單", [
+        col("id", "uuid", False, "PK", is_primary_key=True),
+        col("user_id", "uuid", False, "下單者", is_foreign_key=True, references="users.id"),
+        col("amount", "integer", True, "金額"),
     ])
     return [users, orders]
 
