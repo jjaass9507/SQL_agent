@@ -1,4 +1,4 @@
-"""審查服務：context_tables → Reviewer（LLM 四維度報告 + 評分）+ 規則式紅旗與修復 SQL。"""
+"""審查服務：context_tables → writers.review（LLM 四維度報告 + 評分）+ 規則式紅旗與修復 SQL。"""
 
 import logging
 
@@ -10,7 +10,7 @@ from app.repos import sessions as sessions_repo
 from app.repos.models import Job
 from app.rules import schema_advisor, schema_remediation
 from app.rules.spec_models import tables_from_json
-from app.services.writers.reviewer import Reviewer
+from app.services import writers
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def run_review(db: AsyncSession, job: Job, *, provider: LLMProvider | None = None) -> None:
     """執行審查 job：
     - context_tables 取自 session.context_tables_json（匯入現有 DB 時已存入）。
-    - Reviewer（LLM 單發）寫 05_review_report.md。
+    - writers.review（LLM 單發）寫 05_review_report.md。
     - schema_advisor 紅旗 + schema_remediation 產 06_review_fix.sql（零 API）。
     - 完成後 session.phase → review_done。
     """
@@ -31,7 +31,7 @@ async def run_review(db: AsyncSession, job: Job, *, provider: LLMProvider | None
         raise ValueError("session 缺少 context_tables，無法執行審查")
 
     provider = provider or LLMProvider.from_settings()
-    report = await Reviewer(provider).review(context_tables)
+    report = await writers.review(provider, context_tables)
     await outputs_repo.upsert_output(db, job.session_id, "05_review_report.md", report)
 
     warnings = schema_advisor.analyze(context_tables)
