@@ -22,6 +22,7 @@ export const ENDPOINTS = {
   sessionExtraGenerate: (id, kind) => `${API_PREFIX}/sessions/${id}/extras/${kind}/generate`,
   ddlImport: () => `${API_PREFIX}/ddl-import`,
   agentChat: () => `${API_PREFIX}/agent/chat`,
+  agentNewConversation: () => `${API_PREFIX}/agent/conversations`,
   llmHealth: () => `${API_PREFIX}/llm/health`,
   llmDiagnose: () => `${API_PREFIX}/llm/diagnose`,
   workbenchQuery: (sessionId) => `${API_PREFIX}/sessions/${sessionId}/query`,

@@ -59,6 +59,18 @@ async def _get_or_create_agent_session_id(db: AsyncSession) -> uuid.UUID:
     return record.id
 
 
+async def start_new_conversation(db: AsyncSession) -> uuid.UUID:
+    """開一條新的 DB Agent 對話：清掉 app_settings 記的 session id，下次呼叫會重建。
+
+    舊 session 連同它的 transcript 保留在資料庫裡（稽核用），只是不再被沿用。
+    這是「單一全域對話」下唯一能切乾淨上下文的手段——多人共用時前一個人的
+    表名與查詢結果會一直留在 transcript 裡影響後續回答，而 `_trim_to_budget`
+    只是從最舊的開始丟，不會依對話主題切分。
+    """
+    await settings_repo.delete_setting(db, _AGENT_SESSION_SETTING_KEY)
+    return await _get_or_create_agent_session_id(db)
+
+
 async def _build_provider(db: AsyncSession) -> LLMProvider:
     setting = await settings_repo.get_setting(db, _CAPABILITY_SETTING_KEY)
     profile = CapabilityProfile(**setting.value_json) if setting and setting.value_json else None

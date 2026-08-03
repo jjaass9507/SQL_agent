@@ -186,11 +186,23 @@ document.addEventListener("submit", async (event) => {
   if (form.matches('[data-action="submit-design"]')) {
     event.preventDefault();
     const title = form.querySelector('[data-target="design-title"]').value.trim();
+    const dbUrl = form.querySelector('[data-target="design-db-url"]').value.trim();
     try {
       const session = await api.post(ENDPOINTS.sessions(), {
         mode: "design",
         ...(title ? { title } : {}),
       });
+      // 匯入現有結構是加分項，失敗不該讓使用者連對話都進不去
+      if (dbUrl) {
+        try {
+          const imported = await api.post(ENDPOINTS.sessionImportDb(session.id), {
+            db_url: dbUrl,
+          });
+          showToast(`已讀取現有資料庫的 ${imported.table_count} 張資料表`, "success");
+        } catch {
+          showToast("讀取現有資料庫失敗，將以全新設計繼續（可稍後再匯入）", "warning");
+        }
+      }
       window.location.href = `/chat/${session.id}`;
     } catch {
       // apiFetch 已 toast

@@ -29,6 +29,17 @@
              maxlength="200" data-target="design-title" placeholder="例如：訂單系統、員工訓練紀錄">
       <p class="form-hint">取個名字方便之後在清單裡找到它；留白會叫「未命名設計」。</p>
     </div>
+    {# 選填現有 DB：填了之後 AI 會知道既有的資料表，避免重複建表、命名不一致，
+       確認頁也會列出與現有結構的差異（US-04）。後端 import-db 早已就緒。 #}
+    <div class="form-field">
+      <label class="form-label" for="design-db-url">現有資料庫連線字串（選填）</label>
+      <input class="form-input" type="password" id="design-db-url" name="db_url"
+             data-target="design-db-url" placeholder="postgresql://user:password@host:5432/dbname">
+      <p class="form-hint">
+        如果這次是要在現有系統上加東西，填了之後 AI 會先看過現有的資料表，
+        避免重複建表或命名不一致，確認頁也會標出跟現況的差異。沒有的話留白即可。
+      </p>
+    </div>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" data-action="cancel-form">取消</button>
       <button type="submit" class="btn btn-primary" data-action="submit-design-btn">開始對話</button>

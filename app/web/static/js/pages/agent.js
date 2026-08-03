@@ -251,6 +251,28 @@ document.addEventListener("click", async (event) => {
     }
   }
 
+  if (action === "new-agent-conversation") {
+    const ok = await confirmDialog({
+      title: "要開一條新對話嗎？",
+      lead: "AI 會忘掉目前這串對話的內容，從頭開始。",
+      facts: [
+        { label: "舊對話會不見嗎", value: "不會，紀錄仍保留在系統裡，只是 AI 不再參考它。" },
+        { label: "什麼時候該開", value: "換一個不相關的主題時。舊內容留著會影響 AI 的回答。" },
+      ],
+      confirmText: "開新對話",
+    });
+    if (!ok) return;
+    try {
+      await api.post(ENDPOINTS.agentNewConversation());
+      if (messagesEl) messagesEl.textContent = "";
+      if (traceListEl) traceListEl.textContent = "";
+      showToast("已開新對話", "success");
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
+
   if (action === "save-admin-token") {
     const input = document.querySelector('[data-target="agent-admin-token"]');
     if (input && input.value.trim()) {

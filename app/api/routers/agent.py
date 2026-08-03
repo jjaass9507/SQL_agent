@@ -58,3 +58,10 @@ async def chat(body: ChatBody, request: Request, db: AsyncSession = _DbDep):
 
     final = next((e["data"] for e in events if e["event"] == "turn_done"), None)
     return final
+
+
+@router.post("/conversations", status_code=201, dependencies=[_AuthDep])
+async def new_conversation(db: AsyncSession = _DbDep) -> dict:
+    """開一條新的 Agent 對話（切乾淨上下文）。舊對話保留於資料庫，只是不再沿用。"""
+    session_id = await agent_service.start_new_conversation(db)
+    return {"session_id": str(session_id)}
