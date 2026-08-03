@@ -1,5 +1,6 @@
 // pages/index.js — 首頁：session 列表（狀態篩選）、建立設計/審查 session、DDL 匯入
 import { ENDPOINTS, api } from "../lib/api.js";
+import { confirmDialog } from "../lib/confirm-dialog.js";
 import { showToast } from "../lib/toast.js";
 
 // phase → 篩選群組（篩選按鈕的 data-status）
@@ -37,22 +38,27 @@ function sessionUrl(session) {
 
 let allSessions = [];
 let currentFilter = "all";
+let searchTerm = "";
 
 function renderSessions() {
   const list = document.querySelector('[data-target="session-list"]');
   if (!list) return;
 
-  const visible =
-    currentFilter === "all"
-      ? allSessions
-      : allSessions.filter((s) => PHASE_GROUP[s.phase] === currentFilter);
+  const needle = searchTerm.trim().toLowerCase();
+  const visible = allSessions.filter(
+    (s) =>
+      (currentFilter === "all" || PHASE_GROUP[s.phase] === currentFilter) &&
+      (!needle || (s.title || "").toLowerCase().includes(needle))
+  );
 
   list.textContent = "";
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "form-hint";
     empty.dataset.target = "session-list-empty";
-    empty.textContent = "沒有符合條件的紀錄。";
+    empty.textContent = allSessions.length
+      ? "沒有符合條件的紀錄。"
+      : "還沒有任何紀錄。點上方「開始新的資料表設計」，用聊天描述你要的資料就可以開始。";
     list.appendChild(empty);
     return;
   }
@@ -79,8 +85,17 @@ function renderSessions() {
     pill.className = `status-pill status-pill-${pillClass}`;
     pill.textContent = pillText;
 
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-ghost btn-sm";
+    remove.textContent = "刪除";
+    remove.dataset.action = "delete-session";
+    remove.dataset.target = session.id;
+    remove.dataset.title = session.title;
+
     card.appendChild(meta);
     card.appendChild(pill);
+    card.appendChild(remove);
     list.appendChild(card);
   }
 }
@@ -109,12 +124,7 @@ document.addEventListener("click", async (event) => {
   if (action === "create-session") {
     const mode = target.dataset.mode;
     if (mode === "design") {
-      try {
-        const session = await api.post(ENDPOINTS.sessions(), { mode: "design" });
-        window.location.href = `/chat/${session.id}`;
-      } catch {
-        // apiFetch 已 toast
-      }
+      toggleForm("design");
     } else if (mode === "review") {
       toggleForm("review");
     } else if (mode === "ddl-import") {
@@ -130,6 +140,30 @@ document.addEventListener("click", async (event) => {
     renderSessions();
   }
 
+  if (action === "delete-session") {
+    event.stopPropagation();  // 卡片本身是 open-session，不要順便打開
+    const ok = await confirmDialog({
+      title: "要刪除這筆紀錄嗎？",
+      lead: `「${target.dataset.title}」以及它的對話、版本紀錄與已產出的文件都會一起刪除。`,
+      facts: [
+        { label: "可以復原嗎", value: "不行，刪掉就沒了。需要保留的文件請先下載。", tone: "warn" },
+        { label: "會影響資料庫嗎", value: "不會。這裡刪的只是平台上的設計紀錄。" },
+      ],
+      confirmText: "刪除",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(ENDPOINTS.session(target.dataset.target));
+      allSessions = allSessions.filter((s) => s.id !== target.dataset.target);
+      renderSessions();
+      showToast("已刪除", "success");
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
+
   if (action === "open-session") {
     const session = allSessions.find((s) => s.id === target.dataset.target);
     if (session) window.location.href = sessionUrl(session);
@@ -140,8 +174,29 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  if (!event.target.matches('[data-target="session-search"]')) return;
+  searchTerm = event.target.value;
+  renderSessions();
+});
+
 document.addEventListener("submit", async (event) => {
   const form = event.target;
+
+  if (form.matches('[data-action="submit-design"]')) {
+    event.preventDefault();
+    const title = form.querySelector('[data-target="design-title"]').value.trim();
+    try {
+      const session = await api.post(ENDPOINTS.sessions(), {
+        mode: "design",
+        ...(title ? { title } : {}),
+      });
+      window.location.href = `/chat/${session.id}`;
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
 
   if (form.matches('[data-action="submit-review-import"]')) {
     event.preventDefault();

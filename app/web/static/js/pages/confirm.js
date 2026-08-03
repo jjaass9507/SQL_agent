@@ -14,6 +14,14 @@ function el(tag, className, text) {
 
 // ── 結構化 Schema 表格 ──────────────────────────────────────────────────
 
+// 表頭 → 滑鼠移上去顯示的白話說明（null 代表不需要解釋）
+const HEAD_LABELS = [
+  ["欄位", "這張表要記錄的每一項資料。🔑 代表這一欄用來辨識每一筆資料，不會重複。"],
+  ["型態", "這一欄放什麼樣的內容：文字、數字、日期等等。括號裡的數字是最多幾個字。"],
+  ["NULL", "這一欄可不可以留空。「否」代表每一筆都必須填。"],
+  ["說明", null],
+];
+
 function renderTables(tables) {
   const container = document.querySelector('[data-target="schema-tables-container"]');
   if (!container) return;
@@ -32,8 +40,14 @@ function renderTables(tables) {
     const tbl = el("table", "data-table");
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    for (const label of ["欄位", "型態", "NULL", "說明"]) {
-      headRow.appendChild(el("th", null, label));
+    // 術語旁掛白話解釋：不懂技術的使用者看不懂 NULL / 🔑，會不敢確認
+    for (const [label, explain] of HEAD_LABELS) {
+      const th = el("th", null, label);
+      if (explain) {
+        th.title = explain;
+        th.appendChild(el("span", "th-help", "?"));
+      }
+      headRow.appendChild(th);
     }
     thead.appendChild(headRow);
     tbl.appendChild(thead);

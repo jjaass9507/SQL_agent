@@ -778,3 +778,18 @@ h6.md-heading {
   font-size: var(--font-size-sm);
   color: var(--color-text-900);
 }
+
+/* 表頭術語的白話說明提示（滑鼠移上去看 title） */
+.th-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-left: var(--space-1);
+  border: var(--border-width-thin) solid var(--border-color);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-500);
+  cursor: help;
+}

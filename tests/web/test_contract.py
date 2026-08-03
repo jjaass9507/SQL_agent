@@ -473,3 +473,23 @@ def test_ddl_impact_warns_about_what_dry_run_cannot_catch():
     source = _js("lib", "ddl-impact.js")
     assert "CONCURRENTLY" in source, "大表建索引會鎖寫入，dry-run 在空表上測不到"
     assert "NOT\\s+NULL" in source or "NOT\\\\s+NULL" in source or "NOT" in source
+
+
+def test_index_entry_buttons_explain_what_they_need_in_plain_language():
+    """三個入口有兩個需要使用者先準備東西（連線字串／CREATE TABLE 語法），
+    不說清楚的話不懂技術的人會選了才發現走不下去。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    html = (root / "app" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert html.count("btn-entry-desc") == 3, "三個入口都要有一句白話說明"
+    assert "向 IT 索取" in html
+    assert "CREATE TABLE" in html
+
+
+def test_chat_tells_the_user_why_the_confirm_button_is_disabled():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    html = (root / "app" / "web" / "templates" / "chat.html").read_text(encoding="utf-8")
+    assert 'data-target="confirm-cta-hint"' in html

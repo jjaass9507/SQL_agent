@@ -3,16 +3,37 @@
 {% block page_title %}首頁 / 工作台{% endblock %}
 
 {% block content %}
+{# 三個入口的行為要一致（都是先展開表單再送出），而且各自附一句白話說明：
+   實測顯示不懂技術的使用者看到「DB」「DDL」會直接愣住不敢選。 #}
 <section class="page-index-actions">
-  <button type="button" class="btn btn-primary" data-action="create-session" data-mode="design">
-    ＋ 開始新的資料表設計
+  <button type="button" class="btn btn-primary btn-entry" data-action="create-session" data-mode="design">
+    <span class="btn-entry-title">＋ 開始新的資料表設計</span>
+    <span class="btn-entry-desc">用聊天描述你要的資料，我幫你整理成文件。不需要準備任何東西。</span>
   </button>
-  <button type="button" class="btn btn-ghost" data-action="create-session" data-mode="review">
-    匯入 DB 進行審查
+  <button type="button" class="btn btn-ghost btn-entry" data-action="create-session" data-mode="review">
+    <span class="btn-entry-title">匯入現有資料庫做健檢</span>
+    <span class="btn-entry-desc">需要資料庫連線字串（向 IT 索取），AI 會檢查結構並給改善建議。</span>
   </button>
-  <button type="button" class="btn btn-ghost" data-action="create-session" data-mode="ddl-import">
-    貼上 DDL 建立
+  <button type="button" class="btn btn-ghost btn-entry" data-action="create-session" data-mode="ddl-import">
+    <span class="btn-entry-title">貼上建表語法直接建立</span>
+    <span class="btn-entry-desc">已經有 CREATE TABLE 語法時用這個，貼進來就能產文件。</span>
   </button>
+</section>
+
+<section class="card" data-target="design-form-card" hidden>
+  <h2 class="card-title">開始新的資料表設計</h2>
+  <form data-action="submit-design">
+    <div class="form-field">
+      <label class="form-label" for="design-title">這次要設計什麼？</label>
+      <input class="form-input" type="text" id="design-title" name="title"
+             maxlength="200" data-target="design-title" placeholder="例如：訂單系統、員工訓練紀錄">
+      <p class="form-hint">取個名字方便之後在清單裡找到它；留白會叫「未命名設計」。</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-action="cancel-form">取消</button>
+      <button type="submit" class="btn btn-primary" data-action="submit-design-btn">開始對話</button>
+    </div>
+  </form>
 </section>
 
 <section class="card" data-target="review-form-card" hidden>
@@ -54,6 +75,12 @@
       <button type="submit" class="btn btn-primary" data-action="submit-ddl-import-btn">匯入</button>
     </div>
   </form>
+</section>
+
+<section class="form-field page-index-search">
+  <label class="form-label" for="session-search">搜尋名稱</label>
+  <input class="form-input" type="search" id="session-search" data-target="session-search"
+         placeholder="輸入關鍵字，例如「訂單」">
 </section>
 
 <section class="page-index-filters" role="group" aria-label="狀態篩選">

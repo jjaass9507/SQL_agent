@@ -31,6 +31,10 @@
     <button type="button" class="btn btn-accent btn-sm progress-panel-cta" data-action="go-to-confirm" disabled>
       需求已收集完成，前往確認 →
     </button>
+    {# 按鈕是灰的時候使用者不知道還缺什麼，會以為系統卡住 #}
+    <p class="form-hint" data-target="confirm-cta-hint">
+      繼續跟 AI 說明你要記錄哪些資料，等它整理出資料表結構後，這個按鈕就會亮起來。
+    </p>
   </aside>
 </div>
 {% endblock %}

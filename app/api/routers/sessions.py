@@ -27,6 +27,7 @@ from app.api.schemas.sessions import (
 )
 from app.config import get_settings
 from app.llm.provider import LLMProvider
+from app.repos import activity as activity_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
@@ -158,6 +159,17 @@ async def list_sessions(db: DbDep, current_user: CurrentUserDep) -> list[Session
     if settings.auth_enabled and current_user is not None and current_user.role != "admin":
         sessions = [s for s in sessions if s.user_id == current_user.id]
     return [_to_summary(s) for s in sessions]
+
+
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> None:
+    """刪除 session 及其訊息／版本／產出（models.py 的外鍵皆為 ON DELETE CASCADE）。"""
+    record = await sessions_repo.get_session(db, session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, record, current_user)
+    await sessions_repo.delete_session(db, session_id)
+    await activity_repo.log_activity(db, "session.delete", {"session_id": str(session_id)})
 
 
 @router.get("/{session_id}", response_model=SessionDetail)

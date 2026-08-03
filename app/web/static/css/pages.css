@@ -429,3 +429,27 @@ body {
     background: transparent;
   }
 }
+
+/* ══════════════ 首頁入口按鈕（標題 + 白話說明兩行） ══════════════ */
+.btn-entry {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  max-width: 320px;
+}
+.btn-entry-title {
+  font-weight: var(--font-weight-semibold);
+}
+.btn-entry-desc {
+  font-size: var(--font-size-xs);
+  opacity: 0.85;
+  line-height: var(--line-height-normal);
+  white-space: normal;
+}
+
+.page-index-search {
+  max-width: 320px;
+  margin-bottom: var(--space-3);
+}
