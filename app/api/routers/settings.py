@@ -11,12 +11,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_admin_role
 from app.services import settings_service as svc
 
 router = APIRouter(tags=["settings"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+# 業務資料庫連線的增刪＝變更平台指向哪個正式庫，比照 change-requests 的審批門檻。
+# AUTH_ENABLED=false 時走 ADMIN_TOKEN（未設定即 403，fail-closed）；true 時要求 JWT role=admin。
+_AdminDep = Depends(require_admin_role)
 
 
 class BusinessDatabaseOut(BaseModel):
@@ -52,7 +55,9 @@ async def get_settings_route(db: DbDep):
     return await svc.get_settings_overview(db)
 
 
-@router.post("/settings/business-db", response_model=BusinessDatabasesOut)
+@router.post(
+    "/settings/business-db", response_model=BusinessDatabasesOut, dependencies=[_AdminDep]
+)
 async def add_business_db(body: BusinessDatabaseIn, db: DbDep):
     name = body.name.strip()
     url = body.url.strip()
@@ -69,7 +74,9 @@ async def add_business_db(body: BusinessDatabaseIn, db: DbDep):
     return {"business_databases": entries}
 
 
-@router.delete("/settings/business-db", response_model=BusinessDatabasesOut)
+@router.delete(
+    "/settings/business-db", response_model=BusinessDatabasesOut, dependencies=[_AdminDep]
+)
 async def remove_business_db(db: DbDep, name: str = Query(...)):
     name = name.strip()
     if not name:

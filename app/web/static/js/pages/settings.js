@@ -1,5 +1,5 @@
 // pages/settings.js — 設定頁：業務 DB 增刪（遮罩顯示）、LLM health/diagnose、activity 列表
-import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, api } from "../lib/api.js";
+import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, adminHeaders, api } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 
 function el(tag, className, text) {
@@ -145,7 +145,11 @@ document.addEventListener("submit", async (event) => {
     return;
   }
   try {
-    const result = await api.post(ENDPOINTS.settingsBusinessDb(), { name, url });
+    const result = await api.post(
+      ENDPOINTS.settingsBusinessDb(),
+      { name, url },
+      { headers: adminHeaders() }
+    );
     renderBusinessDbs(result.business_databases);
     showToast("已新增業務資料庫", "success");
     form.reset();
@@ -167,7 +171,8 @@ document.addEventListener("click", async (event) => {
     target.disabled = true;
     try {
       const result = await api.delete(
-        `${ENDPOINTS.settingsBusinessDb()}?name=${encodeURIComponent(target.dataset.target)}`
+        `${ENDPOINTS.settingsBusinessDb()}?name=${encodeURIComponent(target.dataset.target)}`,
+        { headers: adminHeaders() }
       );
       renderBusinessDbs(result.business_databases);
       showToast("已刪除", "success");
