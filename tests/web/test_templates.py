@@ -90,6 +90,10 @@ PAGE_BINDINGS = [
             'data-target="review-flags-performance"',
             'data-target="review-flags-security"',
             'data-target="review-red-flags-list"',
+            # 解析失敗時的降級顯示（review.js setSectionsVisible / renderReport）
+            'data-target="review-section"',
+            'data-target="review-raw"',
+            'data-target="review-raw-body"',
             'data-action="download-report"',
         ],
     ),

@@ -51,36 +51,49 @@ function parseSections(markdown) {
   return sections;
 }
 
+// 四維度區塊的顯示/隱藏；降級時整組收起來，避免留下空殼標題。
+function setSectionsVisible(visible) {
+  for (const section of document.querySelectorAll('[data-target="review-section"]')) {
+    section.hidden = !visible;
+  }
+  const raw = document.querySelector('[data-target="review-raw"]');
+  if (raw) raw.hidden = visible;
+}
+
 function renderReport(markdown) {
+  const sections = parseSections(markdown);
+  const parsed = SECTION_KEYS.some(([, key]) => sections[key] && sections[key].length);
+
+  // 分數抓不到時要說「未提供」，不能停在模板預設的 —/10——使用者分不出
+  // 「AI 沒給分」和「我們沒抓到」，會把沒讀到的報告當成沒問題。
   const score = parseScore(markdown);
   const scoreEl = document.querySelector('[data-target="review-score-value"]');
-  if (scoreEl && score !== null) scoreEl.textContent = `${score}/10`;
+  if (scoreEl) scoreEl.textContent = score !== null ? `${score}/10` : "未提供評分";
 
   const summaryEl = document.querySelector('[data-target="review-summary"]');
-  if (summaryEl) summaryEl.textContent = "審查完成，可下載完整報告。";
+  if (summaryEl) {
+    summaryEl.textContent = parsed
+      ? "審查完成，可下載完整報告。"
+      : "審查完成，但報告格式與預期不同，已改為顯示全文，請自行閱讀下方內容。";
+  }
 
-  const sections = parseSections(markdown);
-  let anyRendered = false;
+  setSectionsVisible(parsed);
+
+  if (!parsed) {
+    const body = document.querySelector('[data-target="review-raw-body"]');
+    if (body) body.textContent = markdown;
+    return;
+  }
+
   for (const [, key] of SECTION_KEYS) {
     const list = document.querySelector(`[data-target="review-flags-${key}"]`);
     if (!list) continue;
-    const items = sections[key];
-    if (!items || !items.length) continue;
-    anyRendered = true;
     list.textContent = "";
-    for (const item of items) {
-      list.appendChild(el("li", null, item));
-    }
-  }
-
-  // 報告格式不符預期時降級：整份原文顯示在第一段
-  if (!anyRendered) {
-    const fallback = document.querySelector('[data-target="review-flags-consistency"]');
-    if (fallback) {
-      fallback.textContent = "";
-      const raw = el("li");
-      raw.appendChild(el("div", "doc-markdown", markdown));
-      fallback.appendChild(raw);
+    const items = sections[key];
+    if (items && items.length) {
+      for (const item of items) list.appendChild(el("li", null, item));
+    } else {
+      list.appendChild(el("li", "form-hint", "這個維度報告中沒有提到。"));
     }
   }
 }
