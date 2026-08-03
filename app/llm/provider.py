@@ -28,7 +28,18 @@ logger = logging.getLogger(__name__)
 # 429/5xx 重試等待秒數：最多 3 次重試（共 4 次嘗試）。
 _RETRY_DELAYS = (2.0, 4.0, 8.0)
 
-_STRUCTURED_RETRY_PROMPT = "上一則回覆不是合法 JSON，請重新只輸出符合格式的 JSON，不要有其他文字。"
+# structured output 解析失敗後重新呼叫 LLM 的次數。
+_STRUCTURED_RETRIES = 2
+
+
+def _structured_retry_prompt(model: type[BaseModel]) -> str:
+    """重試指示同時附上 schema：不支援多輪的 gateway 會把歷史攤平成單一則訊息，
+    只講「上一則不是 JSON」等於什麼格式資訊都沒給。"""
+    return (
+        "上一則回覆不是合法 JSON。請重新回答，且**只**輸出一個符合以下 JSON Schema 的 "
+        "JSON 物件，不要有任何說明文字、不要使用 markdown code fence：\n"
+        f"{json.dumps(model.model_json_schema(), ensure_ascii=False)}"
+    )
 
 
 def forced_profile(settings: Settings) -> CapabilityProfile | None:
@@ -159,20 +170,35 @@ class LLMProvider:
         result: ChatResult,
         target_model: type[BaseModel],
     ) -> ChatResult:
-        """寬鬆解析 structured output；失敗時自動重試一次（重新呼叫 LLM）。"""
+        """寬鬆解析 structured output；失敗時自動重試（重新呼叫 LLM）。
+
+        重試訊息在尾端補上 assistant/user 兩則，故 `multi_turn=False` 時必須再攤平
+        一次——否則 gateway 只會看到最後那則重試指示，原始問題與注入的 schema 全部
+        遺失，重試必定再失敗。
+        """
         parsed = structured.parse_lenient(result.text or "", target_model)
-        if parsed is None:
+        attempt = 0
+        while parsed is None and attempt < _STRUCTURED_RETRIES:
+            attempt += 1
+            logger.warning(
+                "llm_structured_parse_failed",
+                extra={"attempt": attempt, "schema": target_model.__name__},
+            )
             retry_messages = [
                 *messages,
                 {"role": "assistant", "content": result.text or ""},
-                {"role": "user", "content": _STRUCTURED_RETRY_PROMPT},
+                {"role": "user", "content": _structured_retry_prompt(target_model)},
             ]
-            retry_kwargs = {**kwargs, "messages": retry_messages}
-            resp2 = await self._call(**retry_kwargs)
-            result = self._build_chat_result(resp2)
+            if not self.profile.multi_turn:
+                retry_messages = adapters.flatten_history(retry_messages)
+            resp = await self._call(**{**kwargs, "messages": retry_messages})
+            result = self._build_chat_result(resp)
             parsed = structured.parse_lenient(result.text or "", target_model)
-            if parsed is None:
-                raise LLMError("structured output 解析失敗（已自動重試一次仍無法解析為合法 JSON）")
+        if parsed is None:
+            raise LLMError(
+                f"structured output 解析失敗（已自動重試 {_STRUCTURED_RETRIES} 次"
+                "仍無法解析為合法 JSON）"
+            )
         result.parsed = parsed
         return result
 

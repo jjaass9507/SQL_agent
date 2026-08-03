@@ -69,7 +69,7 @@ def apply(
         emulate_schema = response_model
 
     if not multi_turn:
-        result_messages = _adapt_multi_turn(result_messages)
+        result_messages = flatten_history(result_messages)
 
     return AdaptedRequest(
         messages=result_messages,
@@ -93,8 +93,13 @@ def _adapt_system_role(messages: list[Message]) -> list[Message]:
     return [{"role": "user", "content": system_content}, *rest]
 
 
-def _adapt_multi_turn(messages: list[Message]) -> list[Message]:
-    """multi_turn 缺失（最後手段）：整段歷史攤平成單一則 user 訊息。"""
+def flatten_history(messages: list[Message]) -> list[Message]:
+    """multi_turn 缺失（最後手段）：整段歷史攤平成單一則 user 訊息。
+
+    公開給 provider 的 structured 重試路徑重複使用——重試會在訊息尾端補上
+    assistant/user 兩則，那段也必須攤平，否則不支援多輪的 gateway 只會看到
+    最後一則重試指示，原始問題整個遺失。
+    """
     lines = [
         f"{_ROLE_LABELS.get(m.get('role'), '[' + str(m.get('role')) + ']')}\n{m.get('content', '')}"
         for m in messages

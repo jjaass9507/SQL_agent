@@ -186,7 +186,7 @@ class ChatResult:
 | 能力缺失 | 降級行為 | 對應 v0.5 的舊機制 |
 |---|---|---|
 | `native_tools=false` | 工具目錄改注入 system prompt，要求模型輸出 JSON 格式的工具呼叫（單一 JSON 區塊，非 XML 標籤），provider 解析後包裝成 `ToolCall` 回傳 | `<TOOL>` 標籤協定（簡化重寫） |
-| `json_schema=false` | 在 prompt 中附上 schema 說明要求輸出 JSON，回應以 Pydantic 寬鬆解析（含 markdown code fence 剝除、一次自動重試） | `<TABLE_SPECS>` 標籤解析 |
+| `json_schema=false` | 在 prompt 中附上 schema 說明要求輸出 JSON，回應以 Pydantic 寬鬆解析（剝除 `<think>` 區塊與 markdown code fence、抽出夾在說明文字中的 JSON 區塊、修補結尾多餘逗號；仍失敗則附上 schema 自動重試兩次） | `<TABLE_SPECS>` 標籤解析 |
 | `system_role=false` | system 內容併入第一則 user 訊息開頭 | `LLM_SYSTEM_MODE=inline` |
 | `streaming=false` | 非串流呼叫後一次性回傳（SSE 端仍照常推一個完整 event，前端無感） | —（新功能） |
 | `multi_turn=false` | **最後手段**：整段歷史攤平成單一 user 訊息 | `LLM_SYSTEM_MODE=single_turn` |
@@ -361,7 +361,7 @@ app/web/
 - `llm/capabilities.py`：五項能力探針 + profile 持久化
 - `llm/adapters.py`：五個降級轉接器（表格見 4-3）
 - **驗證**：單元測試涵蓋——標準路徑、429 退避、每個能力缺失時的降級行為、
-  串流分塊、structured output 解析失敗自動重試一次；
+  串流分塊、structured output 解析失敗自動重試（重試訊息同樣套用 multi_turn 降級）；
   `pytest tests/llm/ -v` 全綠
 
 ### Phase 2 — 資料層（1.5 天）

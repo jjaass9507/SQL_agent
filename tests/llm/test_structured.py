@@ -53,3 +53,35 @@ def test_parse_lenient_missing_field_returns_none():
 
 def test_parse_lenient_empty_text_returns_none():
     assert parse_lenient("", _Draft) is None
+
+
+def test_parse_lenient_ignores_surrounding_prose():
+    text = '好的，以下是查詢：\n{"sql": "SELECT 1", "explanation": "ok"}\n希望有幫助！'
+    assert parse_lenient(text, _Draft).sql == "SELECT 1"
+
+
+def test_parse_lenient_ignores_think_block():
+    text = '<think>使用者要一段 SQL，我先想想</think>\n{"sql": "SELECT 1", "explanation": "ok"}'
+    assert parse_lenient(text, _Draft).sql == "SELECT 1"
+
+
+def test_parse_lenient_handles_fence_embedded_in_prose():
+    text = '這是結果：\n```json\n{"sql": "SELECT 1", "explanation": "ok"}\n```\n以上。'
+    assert parse_lenient(text, _Draft).sql == "SELECT 1"
+
+
+def test_parse_lenient_repairs_trailing_comma():
+    assert parse_lenient('{"sql": "SELECT 1", "explanation": "ok",}', _Draft).sql == "SELECT 1"
+
+
+def test_parse_lenient_keeps_braces_inside_strings():
+    """字串內的括號不能被誤判為結構括號（否則會切出殘缺片段）。"""
+    text = '前言 {"sql": "SELECT \'{a}\'", "explanation": "有 } 符號"} 後語'
+    result = parse_lenient(text, _Draft)
+    assert result.sql == "SELECT '{a}'"
+
+
+def test_parse_lenient_skips_unrelated_leading_object():
+    """先出現但不符 schema 的 JSON 區塊不應讓整體解析失敗。"""
+    text = '{"note": "以下才是答案"}\n{"sql": "SELECT 1", "explanation": "ok"}'
+    assert parse_lenient(text, _Draft).sql == "SELECT 1"

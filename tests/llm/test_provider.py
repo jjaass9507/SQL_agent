@@ -189,7 +189,7 @@ async def test_structured_output_parse_failure_retries_once_then_succeeds():
     assert result.parsed.sql == "SELECT 1"
 
 
-async def test_structured_output_parse_failure_twice_raises_llm_error():
+async def test_structured_output_parse_failure_exhausts_retries_then_raises_llm_error():
     with respx.mock(base_url=BASE_URL) as mock:
         route = mock.post("/chat/completions").mock(
             return_value=chat_completion_response(content="還是不是 JSON")
@@ -198,7 +198,42 @@ async def test_structured_output_parse_failure_twice_raises_llm_error():
         with pytest.raises(LLMError):
             await provider.chat([{"role": "user", "content": "sql?"}], response_model=_Draft)
 
-    assert route.call_count == 2  # 原始一次 + 自動重試一次
+    assert route.call_count == 3  # 原始一次 + 自動重試兩次
+
+
+async def test_structured_retry_prompt_includes_schema():
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions")
+        route.side_effect = [
+            chat_completion_response(content="這不是 JSON"),
+            chat_completion_response(content='{"sql": "SELECT 1", "explanation": "ok"}'),
+        ]
+        provider = make_provider()
+        await provider.chat([{"role": "user", "content": "sql?"}], response_model=_Draft)
+
+    retry_body = json.loads(route.calls[1].request.content)
+    assert "explanation" in retry_body["messages"][-1]["content"]  # 重試指示帶上 schema
+
+
+async def test_structured_retry_flattens_history_when_multi_turn_unsupported():
+    """multi_turn=False 時，重試訊息必須再攤平成單一則，且仍含原始問題——
+    否則 gateway 只會看到重試指示，原始問題遺失，重試必定再失敗。"""
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions")
+        route.side_effect = [
+            chat_completion_response(content="這不是 JSON"),
+            chat_completion_response(content='{"sql": "SELECT 1", "explanation": "ok"}'),
+        ]
+        provider = make_provider(profile=CapabilityProfile(multi_turn=False))
+        result = await provider.chat(
+            [{"role": "user", "content": "請給我查詢語法"}], response_model=_Draft
+        )
+
+    retry_body = json.loads(route.calls[1].request.content)
+    assert len(retry_body["messages"]) == 1
+    assert retry_body["messages"][0]["role"] == "user"
+    assert "請給我查詢語法" in retry_body["messages"][0]["content"]
+    assert result.parsed.sql == "SELECT 1"
 
 
 async def test_structured_output_strips_markdown_fence():
