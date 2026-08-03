@@ -128,4 +128,9 @@
   --z-dropdown: 100;
   --z-modal: 200;
   --z-toast: 300;
+
+  /* ── 列印（@media print 用；深色介面直接印會整頁黑底吃掉碳粉） ── */
+  --color-print-bg: #ffffff;
+  --color-print-text: #111111;
+  --color-print-border: #999999;
 }

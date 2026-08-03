@@ -1,5 +1,6 @@
 // pages/docs.js — 文件查閱頁：outputs 分頁預覽、下載、extras 觸發、events SSE 生成進度
 import { ENDPOINTS, api } from "../lib/api.js";
+import { highlightSql, renderMarkdown } from "../lib/doc-render.js";
 import { connectSSE } from "../lib/sse.js";
 import { showToast } from "../lib/toast.js";
 
@@ -88,7 +89,8 @@ function renderMarkdownPanel(target, content) {
   const panel = document.querySelector(`[data-target="doc-content-${target}"]`);
   if (!panel) return;
   panel.textContent = "";
-  const body = el("div", "doc-markdown", content);
+  const body = el("div", "doc-markdown");
+  renderMarkdown(body, content);
   panel.appendChild(body);
 }
 
@@ -113,12 +115,16 @@ async function renderErDiagramPanel(content) {
     // mermaid 未載入（static/vendor/mermaid.min.js 缺檔或載入失敗）時降級顯示原始碼
     panel.appendChild(el("pre", "code-block", mermaidCode));
   }
-  if (rest) panel.appendChild(el("div", "doc-markdown", rest));
+  if (rest) {
+    const prose = el("div", "doc-markdown");
+    renderMarkdown(prose, rest);
+    panel.appendChild(prose);
+  }
 }
 
 function renderDdlPanel(content) {
   const pre = document.querySelector('[data-target="doc-content-ddl"]');
-  if (pre) pre.textContent = content;
+  if (pre) highlightSql(pre, content);
 }
 
 // 非四份核心文件的產出（extras）→ 延伸產出清單

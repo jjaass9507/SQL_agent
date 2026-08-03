@@ -369,3 +369,61 @@ def test_mermaid_is_vendored_locally():
     root = Path(__file__).resolve().parents[2]
     vendored = root / "app" / "web" / "static" / "vendor" / "mermaid.min.js"
     assert vendored.is_file(), "缺少本地 mermaid，ER 圖在離線環境會渲染不出來"
+
+
+# ── 文件渲染契約（app/web/static/js/lib/doc-render.js）────────────────────────
+#
+# 渲染器是自己寫的，只支援 # 標題 / | 表格 / - 與 1. 條列 / ``` 區塊 /
+# **粗體** / `行內 code`。writer 若哪天開始輸出其他語法（引言、連結、圖片、
+# 分隔線、巢狀清單），畫面會直接顯示原始符號而沒有任何錯誤——本測試先攔下來。
+
+_UNSUPPORTED_MARKDOWN = {
+    ">": "引言（blockquote）",
+    "![": "圖片",
+    "---": "分隔線",
+    "===": "setext 標題",
+}
+
+
+def test_spec_writer_output_only_uses_supported_markdown():
+    from app.rules.writers.spec_writer import SpecWriter
+    from tests.specs import col, table
+
+    tables = [
+        table(
+            "orders",
+            "訂單主檔",
+            [
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("amount", "numeric", True, "金額", length=12),
+            ],
+            constraints=["CHECK (amount >= 0)"],
+        )
+    ]
+    markdown = SpecWriter().generate(tables)
+
+    offenders = []
+    for lineno, line in enumerate(markdown.splitlines(), 1):
+        stripped = line.strip()
+        for marker, name in _UNSUPPORTED_MARKDOWN.items():
+            if stripped.startswith(marker):
+                offenders.append(f"{lineno}: {name} → {stripped[:40]}")
+        # 巢狀清單（前導空白 + 條列符號）渲染器只當成同一層
+        if line.startswith(("  -", "  *", "\t-")):
+            offenders.append(f"{lineno}: 巢狀清單 → {stripped[:40]}")
+
+    assert not offenders, (
+        "spec_writer 產出了 doc-render.js 不支援的 Markdown 語法：\n" + "\n".join(offenders)
+    )
+
+
+def test_doc_render_never_uses_innerhtml():
+    """渲染的是 LLM 產出的內容，必須全程 createElement + textContent。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "app" / "web" / "static" / "js" / "lib" / "doc-render.js").read_text(
+        encoding="utf-8"
+    )
+    assert "innerHTML" not in source
+    assert "insertAdjacentHTML" not in source

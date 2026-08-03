@@ -351,3 +351,81 @@ body {
 .page-login-sso {
   width: 100%;
 }
+
+/* ══════════════ 列印 / 另存 PDF ══════════════
+   取代「匯出 Word / PDF」：使用者在文件產出頁按瀏覽器列印即可得到可交付的
+   PDF，不需要引入 python-docx / weasyprint 那類卡離線 wheel 部署的相依。
+   深色介面直接列印會整頁黑底，故在此翻成淺色並收掉所有導覽與操作元件。 */
+@media print {
+  body {
+    background: var(--color-print-bg);
+    color: var(--color-print-text);
+  }
+
+  /* 導覽、側欄、按鈕、進度卡、分頁列一律不印 */
+  .app-sidebar,
+  .app-topbar,
+  .btn,
+  .toast-stack,
+  .docs-tabs,
+  .docs-progress,
+  .docs-extras,
+  [data-target="extras-list"] {
+    display: none !important;
+  }
+
+  .app-main,
+  .app-content {
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  /* 分頁內容平常只顯示 is-active 的那一份；列印時四份全部依序印出 */
+  [data-target="doc-panel"] {
+    display: block !important;
+    page-break-after: always;
+  }
+
+  .card,
+  .doc-markdown,
+  .md-paragraph,
+  .md-list,
+  .md-table td {
+    background: var(--color-print-bg);
+    color: var(--color-print-text);
+    border-color: var(--color-print-border);
+    box-shadow: none;
+  }
+
+  .md-table th {
+    background: var(--color-print-bg);
+    color: var(--color-print-text);
+    border-color: var(--color-print-border);
+  }
+
+  .md-table,
+  .md-table th,
+  .md-table td {
+    border: var(--border-width-thin) solid var(--color-print-border);
+  }
+
+  /* 表格與程式碼不要被切在跨頁處 */
+  .md-table,
+  .code-block,
+  pre {
+    page-break-inside: avoid;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* 語法上色在紙上一律轉黑，省碳粉也比較清楚 */
+  .sql-kw,
+  .sql-string,
+  .sql-comment,
+  .sql-num,
+  .md-code {
+    color: var(--color-print-text);
+    background: transparent;
+  }
+}

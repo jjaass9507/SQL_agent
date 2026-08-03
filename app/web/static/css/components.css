@@ -558,11 +558,13 @@
 }
 
 /* ══════════════ Markdown 文件內容 ══════════════ */
-.doc-markdown {
+/* 未渲染的原始文字（例如審查報告解析失敗時的全文降級）才需要 pre-wrap；
+   .doc-markdown 的內容由 lib/doc-render.js 渲染成真正的 DOM，不可 pre-wrap。 */
+.doc-raw {
   white-space: pre-wrap;
   font-size: var(--font-size-base);
   line-height: var(--line-height-normal);
-  color: var(--color-text-900);
+  color: var(--color-text-700);
 }
 
 /* ══════════════ 待審變更請求項目 ══════════════ */
@@ -632,4 +634,101 @@
   color: var(--color-primary-300);
   padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-4);
+}
+
+/* ══════════════ Markdown 渲染（lib/doc-render.js 產出的結構） ══════════════ */
+/* .doc-markdown 不再是 pre-wrap 純文字容器——內容已渲染成真正的 DOM。 */
+.doc-markdown {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-900);
+}
+
+.md-heading {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-900);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.md-heading:first-child {
+  margin-top: 0;
+}
+h2.md-heading {
+  font-size: var(--font-size-xl);
+}
+h3.md-heading {
+  font-size: var(--font-size-lg);
+}
+h4.md-heading,
+h5.md-heading,
+h6.md-heading {
+  font-size: var(--font-size-md);
+}
+
+.md-paragraph {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-700);
+}
+
+.md-list {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+  color: var(--color-text-700);
+}
+.md-list li {
+  margin-bottom: var(--space-1);
+}
+
+.md-code {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  background: var(--color-surface-100);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+/* 寬表格自己捲，不要把整頁撐出橫向捲軸 */
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 var(--space-4);
+}
+
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--font-size-sm);
+}
+.md-table th,
+.md-table td {
+  border: var(--border-width-thin) solid var(--border-color);
+  padding: var(--space-2);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.md-table th {
+  background: var(--color-surface-100);
+  color: var(--color-text-900);
+  font-weight: var(--font-weight-semibold);
+}
+.md-table td {
+  color: var(--color-text-700);
+}
+.md-table tbody tr:nth-child(even) td {
+  background: var(--color-surface-50);
+}
+
+/* ══════════════ SQL 語法上色（lib/doc-render.js highlightSql） ══════════════ */
+.sql-kw {
+  color: var(--color-accent-400);
+  font-weight: var(--font-weight-medium);
+}
+.sql-string {
+  color: var(--color-success-500);
+}
+.sql-comment {
+  color: var(--color-text-400);
+  font-style: italic;
+}
+.sql-num {
+  color: var(--color-warning-500);
 }
