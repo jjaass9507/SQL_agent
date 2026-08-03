@@ -135,10 +135,20 @@ def _apply_table_constraints(body_parts: list[str], cols: dict[str, ColumnSpec])
                 cols[cname].is_indexed = True
 
 
+# 先移除註解再解析：真實世界貼進來的 DDL 常帶欄位註解，行尾 `--` 會把同一個
+# 逗號區段內的下一行整個吃掉。字串常值（如 DEFAULT 'x'）要保留，故一併比對。
+_COMMENT_RE = re.compile(r"('(?:''|[^'])*')|--[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+def _strip_comments(sql: str) -> str:
+    return _COMMENT_RE.sub(lambda m: m.group(1) or "", sql)
+
+
 def parse_ddl(sql: str) -> list[TableSpec]:
     """Parse one or more CREATE TABLE statements into TableSpec objects."""
     if not sql or not sql.strip():
         return []
+    sql = _strip_comments(sql)
     tables: list[TableSpec] = []
     for match in _TABLE_RE.finditer(sql):
         body_parts = _split_top_level(match.group("body"))
@@ -161,3 +171,52 @@ def parse_ddl(sql: str) -> list[TableSpec]:
             related_tables=related,
         ))
     return tables
+
+
+# ── 反向：TableSpec → CREATE TABLE 文字 ─────────────────────────────────────
+#
+# 給「確認頁以 DDL 編輯」用：把目前的設計轉成可讀可改的建表語法，使用者改完
+# 再走 parse_ddl() 解回 TableSpec。因此本函式只能輸出 parse_ddl 認得的語法，
+# 兩者必須成對維護（tests/rules/test_ddl_parser.py 有往返測試盯著）。
+#
+# 說明文字（description）以 `-- ` 註解帶出，parse_ddl 會忽略它——那是刻意的：
+# 欄位說明對使用者有意義，但不屬於 CREATE TABLE 的語法。
+
+
+def _column_ddl(col: ColumnSpec) -> str:
+    parts = [f'  {col.name} {col.data_type}' + (f"({col.length})" if col.length else "")]
+    if col.is_primary_key:
+        parts.append("PRIMARY KEY")
+    if not col.nullable and not col.is_primary_key:
+        parts.append("NOT NULL")
+    if col.is_unique and not col.is_primary_key:
+        parts.append("UNIQUE")
+    if col.default:
+        parts.append(f"DEFAULT {col.default}")
+    if col.is_foreign_key and col.references:
+        table, _, column = col.references.partition(".")
+        parts.append(f"REFERENCES {table}({column})" if column else f"REFERENCES {table}")
+    return " ".join(parts)
+
+
+def to_ddl(tables: list[TableSpec]) -> str:
+    """把 TableSpec 列表輸出成 CREATE TABLE 文字（可被 parse_ddl 解回）。"""
+    blocks = []
+    for table in tables:
+        lines = []
+        if table.description:
+            lines.append(f"-- {table.description}")
+        lines.append(f"CREATE TABLE {table.table_name} (")
+        # 逗號要放在註解之前，否則整行會被 `--` 吃掉
+        rendered = []
+        for i, col in enumerate(table.columns):
+            body = _column_ddl(col)
+            if i < len(table.columns) - 1:
+                body += ","
+            if col.description:
+                body += f"  -- {col.description}"
+            rendered.append(body)
+        lines.extend(rendered)
+        lines.append(");")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + ("\n" if blocks else "")

@@ -58,6 +58,11 @@
 | `POST /api/change-requests/<id>/approve` | ❌（已實作 `ADMIN_TOKEN`）| ❌ | ❌ | ✅（`X-Admin-Token`）|
 | `POST /api/change-requests/<id>/reject` | ❌（已實作 `ADMIN_TOKEN`）| ❌ | ❌ | ✅（`X-Admin-Token`）|
 | `DELETE /api/sessions/<id>` | ✅ | ✅ | ❌ | ✅ |
+| `GET /api/sessions/<id>/messages` | ✅ | ✅ | ❌ | ✅ |
+| `GET|PUT /api/sessions/<id>/tables-ddl` | ✅ | ✅ | ❌ | ✅ |
+| `POST /api/agent/chat` | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/agent/conversations` | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/activity` | ✅ | ✅ | ✅ | ✅ |
 | `GET /api/settings` | ✅ | ✅ | ✅ | ✅ |
 | `POST /api/settings/business-db` | ❌（已實作 `ADMIN_TOKEN`）| ❌ | ❌ | ✅（`X-Admin-Token`）|
 | `DELETE /api/settings/business-db` | ❌（已實作 `ADMIN_TOKEN`）| ❌ | ❌ | ✅（`X-Admin-Token`）|

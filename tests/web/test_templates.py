@@ -52,6 +52,9 @@ PAGE_BINDINGS = [
             'data-target="requirement-summary-list"',
             'data-target="schema-diff"',
             'data-target="schema-tables-container"',
+            'data-action="toggle-ddl-editor"',
+            'data-target="ddl-editor-text"',
+            'data-action="save-ddl-editor"',
         ],
     ),
     (

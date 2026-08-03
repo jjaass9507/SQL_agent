@@ -23,6 +23,7 @@ from app.api.schemas.sessions import (
     SendMessageRequest,
     SessionDetail,
     SessionSummary,
+    TablesDdlRequest,
     TurnResponse,
     VersionOut,
 )
@@ -33,6 +34,7 @@ from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
+from app.rules import ddl_parser
 from app.rules.schema_diff import compute_diff
 from app.rules.spec_models import tables_from_json
 from app.services import agent_service, interview_service, session_service
@@ -204,6 +206,39 @@ async def list_messages(
         for r in records
         if agent_service.decode_ai_content(r.content) is None
     ]
+
+
+@router.get("/{session_id}/tables-ddl")
+async def get_tables_ddl(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> dict:
+    """把目前的設計輸出成可編輯的 CREATE TABLE 文字（確認頁的「以 DDL 編輯」）。"""
+    detail = await session_service.get_session_detail(db, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, detail.session, current_user)
+
+    version = detail.latest_version
+    tables = tables_from_json(version.tables_json) if version and version.tables_json else []
+    return {"ddl": ddl_parser.to_ddl(tables)}
+
+
+@router.put("/{session_id}/tables-ddl", response_model=VersionOut)
+async def put_tables_ddl(
+    session_id: UUID, payload: TablesDdlRequest, db: DbDep, current_user: CurrentUserDep
+) -> VersionOut:
+    """以手改後的 DDL 取代目前設計，存成新版本（不覆寫，版本歷史保留）。"""
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, session, current_user)
+
+    try:
+        version = await session_service.replace_tables_from_ddl(db, session_id, payload.ddl)
+    except session_service.EmptyDdlError:
+        raise HTTPException(
+            status_code=422,
+            detail="沒有解析出任何資料表，請確認每個區塊都是完整的 CREATE TABLE ... ( ... );",
+        ) from None
+    return _to_version_out(version)
 
 
 @router.post("/{session_id}/messages")

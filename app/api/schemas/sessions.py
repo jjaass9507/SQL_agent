@@ -41,6 +41,12 @@ class SendMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
 
 
+class TablesDdlRequest(BaseModel):
+    """PUT /sessions/{id}/tables-ddl 請求（確認頁的手動編輯）。"""
+
+    ddl: str = Field(min_length=1, max_length=100_000)
+
+
 class ImportDbRequest(BaseModel):
     """POST /sessions/{id}/import-db 請求。"""
 

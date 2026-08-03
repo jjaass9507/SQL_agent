@@ -161,6 +161,17 @@ async function loadDetail() {
   }
 }
 
+// ── 以 DDL 直接編輯結構 ──────────────────────────────────────────────────
+
+function setDdlEditorOpen(open) {
+  const editor = document.querySelector('[data-target="ddl-editor"]');
+  const tables = document.querySelector('[data-target="schema-tables-container"]');
+  const toggle = document.querySelector('[data-action="toggle-ddl-editor"]');
+  if (editor) editor.hidden = !open;
+  if (tables) tables.hidden = open;
+  if (toggle) toggle.textContent = open ? "回到表格檢視" : "直接編輯結構";
+}
+
 document.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
@@ -174,6 +185,50 @@ document.addEventListener("click", async (event) => {
     } catch {
       target.disabled = false;
     }
+  }
+
+  if (action === "toggle-ddl-editor") {
+    const editor = document.querySelector('[data-target="ddl-editor"]');
+    if (editor && !editor.hidden) {
+      setDdlEditorOpen(false);
+      return;
+    }
+    try {
+      const { ddl } = await api.get(ENDPOINTS.sessionTablesDdl(sessionId));
+      const textarea = document.querySelector('[data-target="ddl-editor-text"]');
+      if (textarea) textarea.value = ddl;
+      setDdlEditorOpen(true);
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
+
+  if (action === "cancel-ddl-editor") {
+    setDdlEditorOpen(false);
+    return;
+  }
+
+  if (action === "save-ddl-editor") {
+    const textarea = document.querySelector('[data-target="ddl-editor-text"]');
+    if (!textarea || !textarea.value.trim()) {
+      showToast("請先填入建表語法", "warning");
+      return;
+    }
+    target.disabled = true;
+    try {
+      const version = await api.put(ENDPOINTS.sessionTablesDdl(sessionId), {
+        ddl: textarea.value,
+      });
+      showToast(`已儲存為 v${version.version_num}`, "success");
+      setDdlEditorOpen(false);
+      await Promise.all([loadDetail(), loadVersions()]);
+    } catch {
+      // apiFetch 已 toast（含解析失敗的說明）
+    } finally {
+      target.disabled = false;
+    }
+    return;
   }
 
   if (action === "restore-version") {

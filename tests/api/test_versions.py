@@ -67,3 +67,59 @@ async def test_versions_list_session_not_found_returns_404(client):
     )
 
     assert resp.status_code == 404
+
+
+# ── 確認頁「直接編輯結構」（以 DDL 往返）─────────────────────────────────
+
+
+async def _confirming_session_with_tables(client) -> str:
+    """建一個已有 tables 的 session（走 DDL 匯入這條最短路徑）。"""
+    resp = await client.post(
+        "/api/v1/ddl-import",
+        json={
+            "title": "編輯測試",
+            "ddl": "CREATE TABLE users (id uuid PRIMARY KEY, email varchar(50) NOT NULL);",
+        },
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+async def test_get_tables_ddl_returns_editable_create_table_text(client):
+    session_id = await _confirming_session_with_tables(client)
+
+    ddl = (await client.get(f"/api/v1/sessions/{session_id}/tables-ddl")).json()["ddl"]
+
+    assert "CREATE TABLE users (" in ddl
+    assert "id uuid PRIMARY KEY" in ddl
+    assert "email varchar(50) NOT NULL" in ddl
+
+
+async def test_put_tables_ddl_saves_a_new_version_without_overwriting(client):
+    """存成新版本而非覆寫——改壞了還能從版本清單還原回去。"""
+    session_id = await _confirming_session_with_tables(client)
+    before = len((await client.get(f"/api/v1/sessions/{session_id}/versions")).json())
+
+    resp = await client.put(
+        f"/api/v1/sessions/{session_id}/tables-ddl",
+        json={"ddl": "CREATE TABLE users (id uuid PRIMARY KEY, email varchar(255) NOT NULL);"},
+    )
+    assert resp.status_code == 200
+
+    versions = (await client.get(f"/api/v1/sessions/{session_id}/versions")).json()
+    assert len(versions) == before + 1
+
+    detail = (await client.get(f"/api/v1/sessions/{session_id}")).json()
+    email = next(c for c in detail["latest_tables"][0]["columns"] if c["name"] == "email")
+    assert email["length"] == 255, "改過的長度要生效"
+    assert detail["phase"] == "confirming"
+
+
+async def test_put_tables_ddl_rejects_unparseable_input_with_a_helpful_message(client):
+    session_id = await _confirming_session_with_tables(client)
+
+    resp = await client.put(
+        f"/api/v1/sessions/{session_id}/tables-ddl", json={"ddl": "這不是建表語法"}
+    )
+    assert resp.status_code == 422
+    assert "CREATE TABLE" in resp.json()["detail"]
