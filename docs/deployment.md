@@ -92,6 +92,14 @@ python -c "import os; print(os.urandom(32).hex())"
 `ADMIN_TOKEN` 是 Phase 7 正式使用者/角色系統上線前的過渡機制；上線後應視 Phase 7 進度決定
 是否保留。
 
+它保護兩組端點：**變更提案的核准/駁回**，以及**業務資料庫連線的新增/刪除**
+（`POST|DELETE /api/v1/settings/business-db`）。後者代表「平台要連到哪個正式庫」，
+在 `AUTH_ENABLED=false` 的匿名模式下若不保護，任何能連到內網的人都能改掉或刪掉它。
+
+未設定 `ADMIN_TOKEN` 時這些端點一律回 `403`（fail-closed，不是放行）——也就是說
+**不設這個變數，設定頁就無法新增業務資料庫**。`AUTH_ENABLED=true` 時改以 JWT
+`role=admin` 判定，不再需要 header。
+
 ### LLM 能力檔（CapabilityProfile）與手動覆蓋
 
 app 依 gateway 的五項能力（`multi_turn` / `system_role` / `native_tools` / `json_schema` /

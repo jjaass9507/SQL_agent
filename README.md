@@ -14,6 +14,13 @@
 > Phase 9 部署（Dockerfile / docker-compose）。
 > v0.5 完整實作保留在 `main` 分支。
 >
+> **上線前可用性強化（依使用者訪談與功能盤點）：** 業務資料庫連線的增刪改由
+> `ADMIN_TOKEN`/admin 角色保護（見 `docs/permission_matrix.md`）、核准 DDL 前
+> 加上帶影響評估的確認對話框、文件頁真正渲染 Markdown 與 SQL 並支援瀏覽器列印
+> 另存 PDF、外部 CDN 資產全部落地（內網可離線運作）、差異比對改由後端計算
+> （會標出型態與長度變更）、session 可命名/刪除/搜尋。
+> `DELETE /api/v1/sessions/{id}` 為本階段新增的端點。
+>
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
 
 ---
