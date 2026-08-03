@@ -75,19 +75,19 @@ function renderKeyPoints(keyPoints) {
   }
 }
 
-// ── 與現有 DB 差異（前端就 latest_tables vs context_tables 做表層比對） ──
+// ── 與現有 DB 差異（後端 app/rules/schema_diff.py 算好，前端只負責呈現） ──
+//
+// 不要在這裡重寫比對邏輯：後端會比對型態／NULL／UNIQUE／索引，前端自己用欄位
+// 名稱做集合差集會把 VARCHAR(20)→VARCHAR(10) 這種會截斷資料的變更判成「不變」。
 
-function renderDiff(designed, existing) {
+function renderDiff(diff) {
   const container = document.querySelector('[data-target="schema-diff"]');
   if (!container) return;
   container.textContent = "";
-  if (!existing || !existing.length) {
+  if (!diff) {
     container.appendChild(el("p", "form-hint", "此 session 未匯入現有 DB，無差異比對。"));
     return;
   }
-
-  const designedNames = new Set((designed || []).map((t) => t.table_name));
-  const existingMap = new Map(existing.map((t) => [t.table_name, t]));
 
   function addItem(tagClass, tagText, description) {
     const item = el("div", "diff-item");
@@ -96,28 +96,24 @@ function renderDiff(designed, existing) {
     container.appendChild(item);
   }
 
-  for (const table of designed || []) {
-    const old = existingMap.get(table.table_name);
-    if (!old) {
-      addItem("new", "新增", table.table_name);
-      continue;
+  for (const name of diff.new_tables || []) addItem("new", "新增", name);
+
+  for (const [name, detail] of Object.entries(diff.modified_tables || {})) {
+    const parts = [];
+    if (detail.added_columns?.length) {
+      parts.push(`新增欄位：${detail.added_columns.map((c) => c.name).join(", ")}`);
     }
-    const oldCols = new Set(old.columns.map((c) => c.name));
-    const newCols = new Set(table.columns.map((c) => c.name));
-    const added = [...newCols].filter((c) => !oldCols.has(c));
-    const removed = [...oldCols].filter((c) => !newCols.has(c));
-    if (added.length || removed.length) {
-      const parts = [];
-      if (added.length) parts.push(`新增欄位：${added.join(", ")}`);
-      if (removed.length) parts.push(`移除欄位：${removed.join(", ")}`);
-      addItem("modified", "變更", `${table.table_name}（${parts.join("；")}）`);
-    } else {
-      addItem("same", "不變", table.table_name);
+    if (detail.removed_columns?.length) {
+      parts.push(`移除欄位：${detail.removed_columns.map((c) => c.name).join(", ")}`);
     }
+    for (const col of detail.changed_columns || []) {
+      parts.push(`${col.name}：${col.diffs.join("、")}`);
+    }
+    addItem("modified", "變更", `${name}（${parts.join("；")}）`);
   }
-  for (const name of existingMap.keys()) {
-    if (!designedNames.has(name)) addItem("dropped", "移除", name);
-  }
+
+  for (const name of diff.unchanged_tables || []) addItem("same", "不變", name);
+  for (const name of diff.dropped_tables || []) addItem("dropped", "移除", name);
 }
 
 // ── 版本列表／還原 ──────────────────────────────────────────────────────
@@ -145,7 +141,7 @@ async function loadDetail() {
     const detail = await api.get(ENDPOINTS.session(sessionId));
     renderTables(detail.latest_tables);
     renderKeyPoints(detail.latest_key_points);
-    renderDiff(detail.latest_tables, detail.context_tables);
+    renderDiff(detail.schema_diff);
   } catch {
     // apiFetch 已 toast
   }

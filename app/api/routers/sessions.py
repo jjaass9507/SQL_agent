@@ -30,6 +30,7 @@ from app.llm.provider import LLMProvider
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
+from app.rules.schema_diff import compute_diff
 from app.rules.spec_models import tables_from_json
 from app.services import interview_service, session_service
 from app.services.auth_service import CurrentUser
@@ -81,6 +82,12 @@ def _to_detail(data: session_service.SessionDetailData) -> SessionDetail:
             latest_tables = tables_from_json(data.latest_version.tables_json)
         latest_key_points = data.latest_version.key_points_json
 
+    # 差異比對一律在後端算：schema_diff 會比對型態／NULL／UNIQUE／索引，
+    # 前端自行比對只看得出欄位有無，會把 VARCHAR(20)→VARCHAR(10) 判成「不變」。
+    schema_diff = (
+        compute_diff(latest_tables, context_tables) if latest_tables and context_tables else None
+    )
+
     return SessionDetail(
         id=session.id,
         title=session.title,
@@ -91,6 +98,7 @@ def _to_detail(data: session_service.SessionDetailData) -> SessionDetail:
         latest_version=latest_version_num,
         latest_tables=latest_tables,
         latest_key_points=latest_key_points,
+        schema_diff=schema_diff,
         jobs=[_to_job_summary(j) for j in data.jobs],
     )
 

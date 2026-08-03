@@ -34,6 +34,11 @@ def compute_diff(designed: list[TableSpec], existing: list[TableSpec]) -> dict |
             diffs = []
             if dc.data_type != ec.data_type:
                 diffs.append(f"型態：{ec.data_type} → {dc.data_type}")
+            # 長度單獨比：varchar(20) → varchar(10) 的 data_type 兩邊都是 varchar，
+            # 只看 data_type 會判成「不變」，但縮短長度會截斷既有資料。
+            if dc.length != ec.length:
+                diffs.append(f"長度：{ec.length if ec.length else '未指定'} → "
+                             f"{dc.length if dc.length else '未指定'}")
             if dc.nullable != ec.nullable:
                 before = "允許 NULL" if ec.nullable else "NOT NULL"
                 after = "允許 NULL" if dc.nullable else "NOT NULL"
