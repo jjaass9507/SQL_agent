@@ -7,6 +7,7 @@ import json
 
 import httpx
 import pytest
+import respx
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -14,6 +15,7 @@ from app.api import deps
 from app.config import get_settings
 from app.main import app
 from app.repos.models import Base
+from tests.llm.conftest import chat_completion_response
 
 BASE_URL = "http://mock-gateway.test/v1"
 
@@ -67,10 +69,46 @@ async def client(db_engine):
 
 
 def interview_turn_payload(
-    reply: str, tables: list[dict] | None = None, summary: list[str] | None = None
+    reply: str,
+    tables: list[dict] | None = None,
+    summary: list[str] | None = None,
+    user_confirmed: bool = False,
 ) -> str:
     """組一個符合 `interview_service.InterviewTurn` json_schema 的 LLM 回應內容（字串）。"""
-    return json.dumps({"reply": reply, "tables": tables, "summary": summary}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "reply": reply,
+            "tables": tables,
+            "summary": summary,
+            "user_confirmed": user_confirmed,
+        },
+        ensure_ascii=False,
+    )
+
+
+async def drive_to_confirming(
+    client, session_id: str, tables: list[dict], summary: list[str] | None = None
+):
+    """跑「提案 → 使用者同意」兩輪，讓 session 進入 confirming。
+
+    interview_service 的閘門要求先提案、使用者同意後才落版本（見
+    `_may_finalize`），所以測試無法用單一輪把 session 推到 confirming。
+    """
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").side_effect = [
+            chat_completion_response(content=interview_turn_payload("我的規劃如下", tables=tables)),
+            chat_completion_response(
+                content=interview_turn_payload(
+                    "設計完成", tables=tables, summary=summary, user_confirmed=True
+                )
+            ),
+        ]
+        await client.post(
+            f"/api/v1/sessions/{session_id}/messages", json={"content": "我要一張使用者表"}
+        )
+        return await client.post(
+            f"/api/v1/sessions/{session_id}/messages", json={"content": "可以"}
+        )
 
 
 def sample_table(name: str = "users") -> dict:

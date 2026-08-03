@@ -1,24 +1,11 @@
 """POST /sessions/{id}/confirm：原子防重複轉換 phase + 建立 generate job。"""
 
-import respx
-
-from tests.api.conftest import BASE_URL, interview_turn_payload, sample_table
-from tests.llm.conftest import chat_completion_response
+from tests.api.conftest import drive_to_confirming, sample_table
 
 
 async def _create_confirming_session(client) -> dict:
     session = (await client.post("/api/v1/sessions", json={})).json()
-    tables = [sample_table("users")]
-    with respx.mock(base_url=BASE_URL) as mock:
-        mock.post("/chat/completions").mock(
-            return_value=chat_completion_response(
-                content=interview_turn_payload("設計完成", tables=tables, summary=["需求"])
-            )
-        )
-        await client.post(
-            f"/api/v1/sessions/{session['id']}/messages",
-            json={"content": "我要一張使用者表"},
-        )
+    await drive_to_confirming(client, session["id"], [sample_table("users")], summary=["需求"])
     return session
 
 

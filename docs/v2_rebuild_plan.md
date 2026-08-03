@@ -199,12 +199,28 @@ class ChatResult:
 
 | 功能 | v0.5 作法 | v2 作法 |
 |---|---|---|
-| Interviewer 需求收集 | 每輪把回覆丟給 XML 標籤解析找 `<TABLE_SPECS>` | 多輪 messages + `response_model=InterviewTurn`（Pydantic：`reply: str`、`tables: list[TableSpec] | None`、`summary: list[str] | None`）——一次呼叫同時拿到回覆文字與結構化 schema |
+| Interviewer 需求收集 | 每輪把回覆丟給 XML 標籤解析找 `<TABLE_SPECS>` | 多輪 messages + `response_model=InterviewTurn`（Pydantic：`reply: str`、`tables: list[TableSpec] | None`、`summary: list[str] | None`、`user_confirmed: bool`）——一次呼叫同時拿到回覆文字與結構化 schema。tables 要**先提案、使用者明確同意**才會定案（見 4-5） |
 | DB Agent 工具迴圈 | `<TOOL>`/`<OBSERVATION>` 文字協定，人肉重建 transcript | 原生 function calling 迴圈：`tools=registry.tool_defs()` → 收到 `tool_calls` → 執行 → 以 `role:"tool"` 訊息回填 → 續呼叫（上限 8 步不變；`propose_ddl` 仍為 terminal） |
-| Writers（DDL/Diagram/Security） | 單發 `chat(system, human)` | 不變（單發呼叫），但走 provider 統一出口；DiagramWriter 的 Mermaid 仍**確定性產生**、SpecWriter 仍零 API |
+| Writers（DDL/Diagram/Security） | 單發 `chat(system, human)` | 不變（單發呼叫），但走 provider 統一出口；DiagramWriter 的 Mermaid 仍**確定性產生**、SpecWriter 仍零 API。**任務指示寫在 human 訊息**（system 只留角色設定）——只放 system 的話，gateway 一忽略 system role，模型收到的就只有一串資料表 JSON |
 | Reviewer | 單發呼叫 | 不變 |
 | NL2SQL | 單發呼叫 | `response_model=SQLDraft`（`sql: str`、`explanation: str`），杜絕從自由文字撈 SQL |
 | 對話串流 | 無 | Interviewer 與 DB Agent 的文字回覆改走 streaming → SSE |
+
+### 4-5 Interviewer 的提案／同意閘門
+
+模型常常使用者一句「我要一張設備主檔」就直接吐出完整設計，跳過整個訪談。
+「什麼時候算蒐集夠了」交給模型判斷不可靠，改成由 `interview_service` 把關：
+
+1. 模型給出 tables 時，若**尚未提過案**，本輪一律降級成提案——不落版本、
+   不轉 phase，並由我們自己把結構排版成文字附在 `reply` 後面（模型常把設計
+   只放進 tables 欄位、reply 只寫一句「設計完成」，擋掉 tables 後使用者會
+   什麼都看不到）。
+2. 提過案之後，模型回報 `user_confirmed=true`（使用者說「可以」「就這樣」）
+   的那一輪才定案。
+3. 保險：提案累積到 2 次就直接放行，避免模型始終不回報同意、使用者卡在
+   永遠進不了確認頁的迴圈。
+
+「已提過幾次案」不另外存狀態，數對話歷史裡帶提案標記的 AI 訊息即可。
 
 ---
 

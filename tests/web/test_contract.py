@@ -15,7 +15,7 @@ from app.api.routers import outputs as outputs_router
 from app.repos import jobs as jobs_repo
 from app.repos import sessions as sessions_repo
 from app.workers.runner import poll_once
-from tests.api.conftest import interview_turn_payload, sample_table
+from tests.api.conftest import drive_to_confirming, interview_turn_payload, sample_table
 from tests.llm.conftest import chat_completion_response
 from tests.web.conftest import BASE_URL
 from tests.workers.conftest import dispatch_by_marker
@@ -31,20 +31,11 @@ _WRITER_MARKERS = {
 
 
 async def _create_confirming_session(client) -> dict:
-    """建 session 並用 mock LLM 跑到 tables 就緒（phase=confirming）。"""
+    """建 session 並用 mock LLM 跑到 tables 就緒（提案 → 同意兩輪，phase=confirming）。"""
     session = (await client.post("/api/v1/sessions", json={})).json()
-    with respx.mock(base_url=BASE_URL) as mock:
-        mock.post("/chat/completions").mock(
-            return_value=chat_completion_response(
-                content=interview_turn_payload(
-                    "設計完成", tables=[sample_table("users")], summary=["需要使用者表"]
-                )
-            )
-        )
-        await client.post(
-            f"/api/v1/sessions/{session['id']}/messages",
-            json={"content": "我要一張使用者表"},
-        )
+    await drive_to_confirming(
+        client, session["id"], [sample_table("users")], summary=["需要使用者表"]
+    )
     return session
 
 
@@ -69,17 +60,22 @@ async def test_session_list_has_fields_index_page_depends_on(client):
 async def test_message_sse_payload_keys_chat_page_depends_on(client):
     session = (await client.post("/api/v1/sessions", json={})).json()
 
+    tables = [sample_table("users")]
     with respx.mock(base_url=BASE_URL) as mock:
-        mock.post("/chat/completions").mock(
-            return_value=chat_completion_response(
+        mock.post("/chat/completions").side_effect = [
+            chat_completion_response(content=interview_turn_payload("我的規劃如下", tables=tables)),
+            chat_completion_response(
                 content=interview_turn_payload(
-                    "好的，已整理出資料表。", tables=[sample_table("users")], summary=["摘要"]
+                    "好的，已整理出資料表。", tables=tables, summary=["摘要"], user_confirmed=True
                 )
-            )
+            ),
+        ]
+        await client.post(
+            f"/api/v1/sessions/{session['id']}/messages", json={"content": "我要使用者表"}
         )
         resp = await client.post(
             f"/api/v1/sessions/{session['id']}/messages",
-            json={"content": "我要使用者表"},
+            json={"content": "可以"},
             headers={"Accept": "text/event-stream"},
         )
 
