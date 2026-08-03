@@ -427,3 +427,49 @@ def test_doc_render_never_uses_innerhtml():
     )
     assert "innerHTML" not in source
     assert "insertAdjacentHTML" not in source
+
+
+# ── 破壞性操作的確認流程 ──────────────────────────────────────────────────
+#
+# 核准變更是全平台唯一不可逆的操作：app/services/change_service.py 會對正式
+# 業務資料庫執行 DDL 並 commit。兩位受測使用者都把「怕誤按這顆」列為第一名。
+
+
+def _js(*parts) -> str:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    return (root / "app" / "web" / "static" / "js" / Path(*parts)).read_text(encoding="utf-8")
+
+
+def test_approve_change_request_is_gated_by_a_confirm_dialog():
+    source = _js("pages", "agent.js")
+    assert "confirmApprove" in source
+    assert 'if (decision === "approve" && !(await confirmApprove(' in source, (
+        "核准路徑必須先經過確認對話框"
+    )
+
+
+def test_confirm_dialog_requires_an_explicit_acknowledgement_for_approval():
+    """使用者明說「按一個按鈕就過」不夠，要多一個動作才會停下來想一秒。"""
+    source = _js("pages", "agent.js")
+    assert "ackLabel:" in source, "核准對話框必須有必勾的確認框"
+
+
+def test_removing_a_business_db_connection_is_confirmed():
+    source = _js("pages", "settings.js")
+    assert "confirmDialog" in source
+    assert "資料庫本身" in source, "刪除連線的文案要講明不會影響資料庫本身"
+
+
+def test_restore_version_has_no_dialog_because_it_is_not_destructive():
+    """還原版本是把目標版本複製成新版本（session_service.restore_version），
+    歷史完整保留，不該用對話框增加摩擦。這個測試防止之後有人「順手也加一個」。"""
+    source = _js("pages", "confirm.js")
+    assert "confirmDialog" not in source
+
+
+def test_ddl_impact_warns_about_what_dry_run_cannot_catch():
+    source = _js("lib", "ddl-impact.js")
+    assert "CONCURRENTLY" in source, "大表建索引會鎖寫入，dry-run 在空表上測不到"
+    assert "NOT\\s+NULL" in source or "NOT\\\\s+NULL" in source or "NOT" in source

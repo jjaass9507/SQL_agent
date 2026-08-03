@@ -732,3 +732,49 @@ h6.md-heading {
 .sql-num {
   color: var(--color-warning-500);
 }
+
+/* ══════════════ 確認對話框（lib/confirm-dialog.js） ══════════════ */
+.confirm-modal {
+  max-width: 640px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.confirm-lead {
+  color: var(--color-text-900);
+  font-size: var(--font-size-md);
+  margin-bottom: var(--space-4);
+}
+
+.confirm-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+.confirm-facts dt {
+  color: var(--color-text-500);
+  white-space: nowrap;
+}
+.confirm-facts dd {
+  margin: 0;
+  color: var(--color-text-700);
+}
+.confirm-facts dd.is-warn {
+  color: var(--color-warning-500);
+}
+
+.confirm-code {
+  max-height: 220px;
+  overflow: auto;
+  margin-bottom: var(--space-4);
+}
+
+.confirm-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-900);
+}
