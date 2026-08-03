@@ -306,3 +306,41 @@ async def test_ddl_import_payload_keys(client):
     detail = (await client.get(f"/api/v1/sessions/{body['id']}")).json()
     assert detail["phase"] == "confirming"
     assert detail["latest_tables"][0]["table_name"] == "users"
+
+
+# ── 錯誤訊息覆蓋率（app/web/static/js/lib/api.js 的 STATUS_MESSAGE）────────────
+#
+# 後端拋出的每一個 4xx 都要有對應的中文說明，否則使用者只會看到通用句子。
+# 5xx 由 api.js 的 `status >= 500` 分支統一兜底，不需逐碼列出。
+
+_STATUS_CODE_RE = re.compile(r"status_code=(\d{3})")
+_JS_STATUS_KEY_RE = re.compile(r"^\s*(\d{3}):", re.MULTILINE)
+
+
+def _api_js_source() -> str:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    return (root / "app" / "web" / "static" / "js" / "lib" / "api.js").read_text(encoding="utf-8")
+
+
+def test_every_backend_4xx_has_a_friendly_message():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    raised = set()
+    for path in (root / "app" / "api").rglob("*.py"):
+        raised.update(_STATUS_CODE_RE.findall(path.read_text(encoding="utf-8")))
+
+    backend_4xx = {int(code) for code in raised if 400 <= int(code) < 500}
+    covered = {int(code) for code in _JS_STATUS_KEY_RE.findall(_api_js_source())}
+
+    missing = sorted(backend_4xx - covered)
+    assert not missing, f"api.js 的 STATUS_MESSAGE 缺少這些狀態碼的中文說明：{missing}"
+
+
+def test_api_js_does_not_dump_raw_detail_into_the_toast():
+    """422 的 detail 是物件陣列，直接 JSON.stringify 會把整包丟到使用者臉上。"""
+    source = _api_js_source()
+    assert "friendlyMessage(response.status, detail)" in source
+    assert "showToast(`操作失敗（${response.status}）${detail}`" not in source
