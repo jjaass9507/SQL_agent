@@ -18,13 +18,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.services import agent_service
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 # 模組層級單例：避免 B008（Depends() 直接寫在參數預設值會被 lint 擋下）。
 _DbDep = Depends(get_db)
+# AUTH_ENABLED=false 時 get_current_user 恆回 None、不擋任何請求（匿名模式行為不變）；
+# true 時缺少或無效憑證一律 401。Agent 能透過工具讀取業務資料庫的真實資料，
+# 不該是未登入即可呼叫的端點。
+_AuthDep = Depends(get_current_user)
 
 
 class ChatBody(BaseModel):
@@ -36,7 +40,7 @@ def _format_sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[_AuthDep])
 async def chat(body: ChatBody, request: Request, db: AsyncSession = _DbDep):
     events = [
         event

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, require_admin_role
+from app.api.deps import get_current_user, get_db, require_admin_role
 from app.services import settings_service as svc
 
 router = APIRouter(tags=["settings"])
@@ -20,6 +20,9 @@ DbDep = Annotated[AsyncSession, Depends(get_db)]
 # 業務資料庫連線的增刪＝變更平台指向哪個正式庫，比照 change-requests 的審批門檻。
 # AUTH_ENABLED=false 時走 ADMIN_TOKEN（未設定即 403，fail-closed）；true 時要求 JWT role=admin。
 _AdminDep = Depends(require_admin_role)
+# 讀取類端點：匿名模式維持開放（get_current_user 回 None 不擋），
+# AUTH_ENABLED=true 時要求已登入——稽核紀錄與平台設定不該任人讀。
+_AuthDep = Depends(get_current_user)
 
 
 class BusinessDatabaseOut(BaseModel):
@@ -50,7 +53,7 @@ class ActivityEntry(BaseModel):
     created_at: str
 
 
-@router.get("/settings", response_model=SettingsOut)
+@router.get("/settings", response_model=SettingsOut, dependencies=[_AuthDep])
 async def get_settings_route(db: DbDep):
     return await svc.get_settings_overview(db)
 
@@ -85,7 +88,7 @@ async def remove_business_db(db: DbDep, name: str = Query(...)):
     return {"business_databases": entries}
 
 
-@router.get("/activity", response_model=list[ActivityEntry])
+@router.get("/activity", response_model=list[ActivityEntry], dependencies=[_AuthDep])
 async def get_activity(db: DbDep, limit: int = Query(default=100, ge=1, le=500)):
     records = await svc.list_activity(db, limit=limit)
     return [
