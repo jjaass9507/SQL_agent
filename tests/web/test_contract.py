@@ -493,3 +493,15 @@ def test_chat_tells_the_user_why_the_confirm_button_is_disabled():
     root = Path(__file__).resolve().parents[2]
     html = (root / "app" / "web" / "templates" / "chat.html").read_text(encoding="utf-8")
     assert 'data-target="confirm-cta-hint"' in html
+
+
+def test_extras_are_collapsed_and_labelled_as_optional():
+    """八顆延伸產出按鈕平鋪會讓不懂技術的使用者「一個都不敢按」。
+    不減量（各有真實使用者），但要收摺並標明選用，每顆講清楚用途。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    html = (root / "app" / "web" / "templates" / "docs.html").read_text(encoding="utf-8")
+    assert "<details" in html, "延伸產出區要預設收摺"
+    assert "選用" in html, "標題要標明選用，否則使用者以為是必要步驟"
+    assert html.count("btn-entry-desc") == 8, "八顆按鈕都要有一句用途說明"

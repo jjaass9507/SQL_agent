@@ -453,3 +453,37 @@ body {
   max-width: 320px;
   margin-bottom: var(--space-3);
 }
+
+/* ══════════════ 延伸產出（預設收摺的進階區） ══════════════ */
+.extras-summary {
+  cursor: pointer;
+  margin-bottom: 0;
+  list-style: none;
+}
+.extras-summary::-webkit-details-marker {
+  display: none;
+}
+.extras-summary::before {
+  content: "▸ ";
+  color: var(--color-text-500);
+}
+.extras-details[open] .extras-summary::before {
+  content: "▾ ";
+}
+.extras-details[open] .extras-summary {
+  margin-bottom: var(--space-4);
+}
+
+.extras-group-title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-500);
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.extras-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}

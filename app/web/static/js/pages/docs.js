@@ -66,14 +66,34 @@ function watchGenerationJob(jobId) {
       if (data.status === "done" || data.status === "failed") {
         eventsSource.close();
         eventsSource = null;
-        if (data.status === "failed" && data.error) {
-          showToast(`產出失敗：${data.error}`, "error");
-        }
+        showRetry(data.status, data.progress);
         loadOutputs();
       }
     },
     onGiveUp: () => showToast("連線中斷，請重新整理", "error"),
   });
+}
+
+// 產出結束後開放「重新產出」：完成也可以重跑（例如某一份內容不理想），
+// 失敗時再多說一句哪幾份沒成功，不要只丟一個會消失的 toast。
+function showRetry(status, progress) {
+  const button = document.querySelector('[data-action="retry-generation"]');
+  const hint = document.querySelector('[data-target="generation-retry-hint"]');
+  if (!button || !hint) return;
+
+  const failed = Object.entries(progress || {})
+    .filter(([, state]) => state === "failed")
+    .map(([filename]) => filename);
+
+  button.hidden = false;
+  hint.hidden = false;
+  if (status === "failed" || failed.length) {
+    hint.textContent = failed.length
+      ? `這幾份沒有產出成功：${failed.join("、")}。可以直接按下方按鈕重跑一次。`
+      : "產出沒有完成，可以按下方按鈕重跑一次。";
+  } else {
+    hint.textContent = "文件已全部產出。若內容不理想，可以重跑一次。";
+  }
 }
 
 // ── 文件內容渲染 ────────────────────────────────────────────────────────
@@ -217,6 +237,23 @@ document.addEventListener("click", async (event) => {
 
   if (action === "download-extra") {
     downloadFile(target.dataset.target);
+  }
+
+  if (action === "retry-generation") {
+    target.disabled = true;
+    try {
+      const result = await api.post(ENDPOINTS.sessionConfirm(sessionId));
+      target.hidden = true;
+      const hint = document.querySelector('[data-target="generation-retry-hint"]');
+      if (hint) hint.hidden = true;
+      showToast("已重新開始產出", "success");
+      watchGenerationJob(result.job_id);
+    } catch {
+      // apiFetch 已 toast
+    } finally {
+      target.disabled = false;
+    }
+    return;
   }
 
   if (action === "download-all") {

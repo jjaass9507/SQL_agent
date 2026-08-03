@@ -81,6 +81,8 @@ PAGE_BINDINGS = [
             'data-kind="jsonschema"',
             'data-kind="datadict"',
             'data-target="extras-list"',
+            'data-action="retry-generation"',
+            'data-target="generation-retry-hint"',
         ],
     ),
     (

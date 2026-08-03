@@ -10,6 +10,11 @@
 <div data-session-id="{{ session_id }}">
   <section class="card" data-target="generation-progress">
     <h2 class="card-title">產出進度</h2>
+    {# 產出失敗時原本只有一個 toast，唯一出路是「還原版本→再按確認」，沒人猜得到 #}
+    <p class="form-hint" data-target="generation-retry-hint" hidden></p>
+    <button type="button" class="btn btn-ghost btn-sm" data-action="retry-generation" hidden>
+      重新產出
+    </button>
     <div class="progress-step-list" id="generation-progress-list" data-target="generation-progress-list">
       <div class="progress-step is-waiting" data-target="progress-item" data-file="01_specification.md">
         <span class="progress-step-icon">○</span>
@@ -64,22 +69,57 @@
     </div>
   </section>
 
-  <section class="card card-title-spaced" data-target="extras-section">
-    <h2 class="card-title">延伸產出（on-demand）</h2>
-    <div class="page-index-actions">
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="orm">ORM 模型</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="migration">Alembic Migration</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="query">查詢範例</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="incremental">增量 Migration</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="dbml">DBML</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="plantuml">PlantUML</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="jsonschema">JSON Schema</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-action="generate-extra" data-kind="datadict">資料字典 CSV</button>
+  {# 八顆按鈕平鋪會讓不懂技術的使用者「一個都不敢按」。不減量（各有真實使用者），
+     改成預設收摺 + 分兩組 + 每顆一句用途；標題的「選用」兩個字負責解除焦慮。 #}
+  <details class="card card-title-spaced extras-details" data-target="extras-section">
+    <summary class="card-title extras-summary">
+      進階：其他格式（選用，不影響上面四份主要文件）
+    </summary>
+
+    <h3 class="extras-group-title">給工程師接手用</h3>
+    <div class="extras-grid">
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="orm">
+        <span class="btn-entry-title">ORM 模型</span>
+        <span class="btn-entry-desc">後端工程師可直接貼進專案的 SQLAlchemy 程式碼</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="migration">
+        <span class="btn-entry-title">Alembic Migration</span>
+        <span class="btn-entry-desc">用來把這份設計實際建到資料庫的變更腳本</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="query">
+        <span class="btn-entry-title">查詢範例</span>
+        <span class="btn-entry-desc">常見問題的 SQL 寫法，可拿來驗證設計撐不撐得住</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="incremental">
+        <span class="btn-entry-title">增量 Migration</span>
+        <span class="btn-entry-desc">只列出跟現有資料庫的差異；需先匯入現有 DB</span>
+      </button>
     </div>
+
+    <h3 class="extras-group-title">匯出給其他工具</h3>
+    <div class="extras-grid">
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="datadict">
+        <span class="btn-entry-title">資料字典 CSV</span>
+        <span class="btn-entry-desc">可以用 Excel 打開，適合傳給業務單位存查</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="dbml">
+        <span class="btn-entry-title">DBML</span>
+        <span class="btn-entry-desc">貼進 dbdiagram.io 可以看互動式關聯圖</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="plantuml">
+        <span class="btn-entry-title">PlantUML</span>
+        <span class="btn-entry-desc">給有在用 PlantUML 畫圖的團隊</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm btn-entry" data-action="generate-extra" data-kind="jsonschema">
+        <span class="btn-entry-title">JSON Schema</span>
+        <span class="btn-entry-desc">給前後端做欄位驗證用的格式定義</span>
+      </button>
+    </div>
+
     <div data-target="extras-list">
       <p class="form-hint">尚無延伸產出，點上方按鈕觸發。</p>
     </div>
-  </section>
+  </details>
 </div>
 {% endblock %}
 

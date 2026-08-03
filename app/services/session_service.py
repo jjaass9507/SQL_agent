@@ -125,10 +125,14 @@ async def import_db(db: AsyncSession, session_id: UUID, db_url: str) -> SessionR
 
 
 async def confirm_session(db: AsyncSession, session_id: UUID) -> Job:
-    """原子轉換 phase：confirming → generating，並建立 generate job。
+    """原子轉換 phase → generating，並建立 generate job。
 
-    非 confirming 狀態（尚未產出 tables、或已 confirm 過）以帶 WHERE 條件的
-    UPDATE 保證只有一個呼叫方能成功轉換；rowcount 為 0 時視為衝突（409）。
+    可觸發的狀態是 `confirming`（首次產出）與 `done`（重新產出／失敗後重試）。
+    以帶 WHERE 條件的 UPDATE 保證併發時只有一個呼叫方能成功轉換；rowcount 為 0
+    代表狀態不符（例如正在產出中，或還沒收集到 tables），視為衝突（409）。
+
+    允許從 `done` 再次觸發，是因為產出失敗時使用者原本唯一的出路是
+    「還原某個版本 → phase 回到 confirming → 再按確認」，沒人猜得到這條路。
     """
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
@@ -138,7 +142,10 @@ async def confirm_session(db: AsyncSession, session_id: UUID) -> Job:
 
     stmt = (
         update(SessionRecord)
-        .where(SessionRecord.id == session_id, SessionRecord.phase == "confirming")
+        .where(
+            SessionRecord.id == session_id,
+            SessionRecord.phase.in_(("confirming", "done")),
+        )
         .values(phase="generating")
     )
     result = await db.execute(stmt)
