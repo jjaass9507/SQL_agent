@@ -4,7 +4,7 @@ import re
 
 from app.llm.provider import LLMProvider
 from app.rules.spec_models import TableSpec
-from app.services.writers._common import BASE_PROMPT, ask, load_prompt, tables_payload
+from app.services.writers._common import BASE_PROMPT, ask, load_prompt, tables_prompt
 
 _TASK_PROMPT = load_prompt("diagram")
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -57,9 +57,7 @@ class DiagramWriter:
         self._provider = provider
 
     async def generate(self, tables: list[TableSpec]) -> str:
-        system_prompt = f"{BASE_PROMPT}\n\n{_TASK_PROMPT}"
-        human_prompt = tables_payload(tables)
-        response = await ask(self._provider, system_prompt, human_prompt)
+        response = await ask(self._provider, BASE_PROMPT, tables_prompt(_TASK_PROMPT, tables))
         prose = _FENCE_RE.sub("", response).strip()
         diagram = build_mermaid_er(tables)
         return f"# 結構與關聯圖\n\n{prose}\n\n```mermaid\n{diagram}\n```\n"

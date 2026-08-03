@@ -40,7 +40,7 @@ def parse_lenient(text: str, model: type[BaseModel]) -> BaseModel | None:
 
     失敗時回傳 None（不拋例外），是否重試由呼叫端（provider.py）決定。
     """
-    for candidate in _candidates(text or ""):
+    for candidate in json_candidates(text or ""):
         try:
             return model.model_validate_json(candidate)
         except (ValidationError, ValueError):
@@ -48,11 +48,14 @@ def parse_lenient(text: str, model: type[BaseModel]) -> BaseModel | None:
     return None
 
 
-def _candidates(text: str) -> Iterator[str]:
+def json_candidates(text: str) -> Iterator[str]:
     """由「最可能正確」到「最寬鬆」列出候選 JSON 字串。
 
     對應實測常見的不合格輸出：推理模型的 `<think>` 區塊、markdown code fence、
     JSON 前後夾帶說明文字（「好的，以下是結果：{...}」）、結尾多餘逗號。
+
+    除了 structured output，`adapters.parse_tool_call_from_text`（native tools
+    降級時解析模擬工具呼叫）也共用同一套候選規則。
     """
     body = _THINK_RE.sub("", text).strip()
     if not body:

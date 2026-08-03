@@ -185,11 +185,11 @@ class ChatResult:
 
 | 能力缺失 | 降級行為 | 對應 v0.5 的舊機制 |
 |---|---|---|
-| `native_tools=false` | 工具目錄改注入 system prompt，要求模型輸出 JSON 格式的工具呼叫（單一 JSON 區塊，非 XML 標籤），provider 解析後包裝成 `ToolCall` 回傳 | `<TOOL>` 標籤協定（簡化重寫） |
+| `native_tools=false` | 工具目錄改注入 prompt，要求模型輸出 JSON 格式的工具呼叫（單一 JSON 區塊，非 XML 標籤），provider 以與 structured output 同一套寬鬆規則解析後包裝成 `ToolCall` 回傳 | `<TOOL>` 標籤協定（簡化重寫） |
 | `json_schema=false` | 在 prompt 中附上 schema 說明要求輸出 JSON，回應以 Pydantic 寬鬆解析（剝除 `<think>` 區塊與 markdown code fence、抽出夾在說明文字中的 JSON 區塊、修補結尾多餘逗號；仍失敗則附上 schema 自動重試兩次） | `<TABLE_SPECS>` 標籤解析 |
 | `system_role=false` | system 內容併入第一則 user 訊息開頭 | `LLM_SYSTEM_MODE=inline` |
 | `streaming=false` | 非串流呼叫後一次性回傳（SSE 端仍照常推一個完整 event，前端無感） | —（新功能） |
-| `multi_turn=false` | **最後手段**：整段歷史攤平成單一 user 訊息 | `LLM_SYSTEM_MODE=single_turn` |
+| `multi_turn=false` | **最後手段**：整段歷史攤平成單一 user 訊息。角色以 `[系統指示]`／`[使用者]`／`[助理]`／`[工具結果]` 標示；原生 tool call（`content` 為 None、工具在 `tool_calls` 欄位）改寫成「呼叫工具 X，參數：…」文字，工具結果標明是哪個工具回傳；注入的工具目錄與 schema 說明改放在整段文字**最後** | `LLM_SYSTEM_MODE=single_turn` |
 
 **設定介面**：只留一個選配環境變數 `LLM_FORCE_PROFILE`（JSON，覆蓋自動偵測，
 供除錯），其餘 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_VERIFY` /

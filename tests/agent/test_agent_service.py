@@ -269,6 +269,20 @@ def test_trim_to_budget_drops_oldest_messages():
     assert len(trimmed) < len(messages)
 
 
+def test_trim_to_budget_keeps_system_prompt():
+    """system prompt 永遠保留：被丟掉的話模型就不知道自己有哪些工具與限制。"""
+    big = "x" * 5_000
+    messages = [
+        {"role": "system", "content": "你是業務資料庫助手"},
+        *({"role": "user", "content": big} for _ in range(10)),
+    ]
+    trimmed = agent_service._trim_to_budget(messages)
+    total = sum(agent_service._msg_chars(m) for m in trimmed)
+    assert total <= agent_service.MAX_MESSAGES_CHARS
+    assert trimmed[0]["role"] == "system"
+    assert trimmed[0]["content"] == "你是業務資料庫助手"
+
+
 async def test_large_query_result_is_truncated_when_persisted(db_session):
     await seed_business_db(db_session, "shop", "sqlite://")
     sql = (

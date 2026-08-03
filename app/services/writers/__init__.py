@@ -16,7 +16,13 @@ from pydantic import BaseModel
 from app.llm.errors import LLMError
 from app.llm.provider import LLMProvider
 from app.rules.spec_models import TableSpec
-from app.services.writers._common import BASE_PROMPT, ask, load_prompt, tables_payload
+from app.services.writers._common import (
+    BASE_PROMPT,
+    ask,
+    load_prompt,
+    tables_payload,
+    tables_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +36,10 @@ _SINGLE_SHOT = {
 
 
 async def write(provider: LLMProvider, kind: str, tables: list[TableSpec]) -> str:
-    """單發 LLM 產出：system = base + `{kind}.txt`，human = TableSpec JSON。"""
+    """單發 LLM 產出：system = base（角色），human = TableSpec JSON + `{kind}.txt`（任務指示）。"""
     header, fallback = _SINGLE_SHOT[kind]
-    system_prompt = f"{BASE_PROMPT}\n\n{load_prompt(kind)}"
-    return header + (await ask(provider, system_prompt, tables_payload(tables)) or fallback)
+    human = tables_prompt(load_prompt(kind), tables)
+    return header + (await ask(provider, BASE_PROMPT, human) or fallback)
 
 
 class ReviewReport(BaseModel):
