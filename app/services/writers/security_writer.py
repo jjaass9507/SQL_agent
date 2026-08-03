@@ -2,9 +2,9 @@
 
 from app.llm.provider import LLMProvider
 from app.rules.spec_models import TableSpec
-from app.services.writers._common import BASE_PROMPT, ask, load_prompt, tables_prompt
+from app.services.writers._common import ask, tables_prompt, task_instructions
 
-_TASK_PROMPT = load_prompt("security")
+_TASK_PROMPT = task_instructions("security")
 
 _SENSITIVE_KEYWORDS = {
     "password", "passwd", "email", "phone", "mobile", "id_number",
@@ -33,5 +33,5 @@ class SecurityWriter:
             else "未偵測到明顯敏感欄位。"
         )
         task = _TASK_PROMPT.format(sensitive_note=sensitive_note)
-        response = await ask(self._provider, BASE_PROMPT, tables_prompt(task, tables))
+        response = await ask(self._provider, tables_prompt(task, tables))
         return f"# 效能與安全規劃書\n\n{response}\n"

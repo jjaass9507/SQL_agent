@@ -145,10 +145,10 @@ async def test_progress_json_transitions_waiting_loading_done_per_file(
         assert changes == ["waiting", "loading", "done"]
 
 
-async def test_task_instruction_travels_in_user_message(session_factory):
-    """任務指示必須寫在 user 訊息裡。
+async def test_writers_send_one_user_message_with_everything_in_it(session_factory):
+    """writers 只送一則 user 訊息，角色設定與任務指示都在裡面。
 
-    只放 system 的話，gateway 一忽略 system role，模型收到的就只有一串資料表
+    指示放 system 的話，gateway 一忽略 system role，模型收到的就只有一串資料表
     JSON，完全不知道要做什麼（實測 ER 圖說明就是這樣被產壞的）。
     """
     session_id, job_id = await _create_session_and_job(session_factory)
@@ -160,13 +160,12 @@ async def test_task_instruction_travels_in_user_message(session_factory):
             job_id, session_id, _sample_tables(), provider=provider, session_factory=session_factory
         )
 
-    user_contents = [
-        m["content"]
-        for call in route.calls
-        for m in json.loads(call.request.content)["messages"]
-        if m["role"] == "user"
-    ]
-    assert any("關聯設計決策" in c for c in user_contents)  # 02 ER 圖
-    assert any("PostgreSQL DDL 腳本" in c for c in user_contents)  # 03 DDL
-    assert any("效能與安全規劃書" in c for c in user_contents)  # 04 安全規劃
-    assert all("資料表的規格（JSON）" in c for c in user_contents)  # 資料本身也有標示
+    sent = [json.loads(call.request.content)["messages"] for call in route.calls]
+    assert all([m["role"] for m in messages] == ["user"] for messages in sent)
+
+    contents = [messages[0]["content"] for messages in sent]
+    assert any("關聯設計決策" in c for c in contents)  # 02 ER 圖的任務指示
+    assert any("PostgreSQL DDL 腳本" in c for c in contents)  # 03 DDL 的任務指示
+    assert any("效能與安全規劃書" in c for c in contents)  # 04 安全規劃的任務指示
+    assert all("你是資料庫架構師" in c for c in contents)  # 角色設定
+    assert all("資料表的規格（JSON）" in c for c in contents)  # 資料本身也有標示

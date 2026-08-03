@@ -1,5 +1,6 @@
 """review_service：context_tables → Reviewer（LLM）全流程 + 規則式紅旗/修復 SQL + phase 轉移。"""
 
+import json
 import uuid
 
 import pytest
@@ -139,3 +140,23 @@ async def test_review_report_markdown_is_rendered_by_us_not_the_llm(session_fact
     assert "- users（password）：疑似明文密碼 → 改存雜湊" in report
     # 空的維度要補一句，不能留白讓使用者以為漏掉了
     assert "未發現明顯問題。" in report
+
+
+async def test_reviewer_instructions_travel_in_the_single_user_message():
+    """reviewer.txt 同時是角色設定與四面向的內容規範，必須跟資料一起送在
+    那唯一一則 user 訊息裡——放 system 的話 gateway 一忽略就整份規範消失。"""
+    from app.services import writers
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions").mock(
+            return_value=chat_completion_response("## 1. 設計一致性\n- users：命名一致。")
+        )
+        await writers.review(make_provider(), _existing_tables())
+
+    messages = json.loads(route.calls[0].request.content)["messages"]
+    assert [m["role"] for m in messages] == ["user"]
+    content = messages[0]["content"]
+    assert "你是資深 PostgreSQL 資料庫架構師" in content
+    assert "設計一致性" in content  # 四面向規範
+    assert "資料表的規格（JSON）" in content
+    assert "password" in content  # 受審的結構本身

@@ -9,9 +9,9 @@ import json
 from app.llm.provider import LLMProvider
 from app.rules.schema_diff import compute_diff
 from app.rules.spec_models import TableSpec
-from app.services.writers._common import BASE_PROMPT, ask, human_prompt, load_prompt
+from app.services.writers._common import ask, build_prompt, task_instructions
 
-_TASK_PROMPT = load_prompt("incremental")
+_TASK_PROMPT = task_instructions("incremental")
 
 
 class IncrementalMigrationWriter:
@@ -34,11 +34,11 @@ class IncrementalMigrationWriter:
             ensure_ascii=False,
             indent=2,
         )
-        human = human_prompt(
+        prompt = build_prompt(
             _TASK_PROMPT,
             "以下是差異摘要（diff_summary）、現有資料庫結構（existing_schema）"
             "與目標設計結構（designed_schema）：",
             payload,
         )
-        response = await ask(self._provider, BASE_PROMPT, human)
+        response = await ask(self._provider, prompt)
         return response or "-- （增量 migration 產出失敗，請稍後再試）\n"
