@@ -141,11 +141,32 @@ document.addEventListener("click", (event) => {
   }
 });
 
-// 重新整理後還原收集進度（訊息歷史後端尚無查詢端點，僅還原面板與 CTA 狀態）
+// 還原歷史訊息：沒有這段的話，使用者重整或從確認頁按「返回修改」回來會看到
+// 空白對話框，以為 AI 失憶而把需求重講一遍（後端 context 其實還在）。
+function renderHistory(messages) {
+  if (!messagesEl || !messages.length) return;
+  messagesEl.textContent = "";
+  for (const message of messages) {
+    if (message.role === "user") {
+      appendUserBubble(message.content);
+      continue;
+    }
+    const row = el("div", "chat-bubble-row");
+    row.appendChild(el("div", "chat-bubble chat-bubble-ai", message.content));
+    messagesEl.appendChild(row);
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// 重新整理後還原對話歷史、收集進度與 CTA 狀態
 async function restoreState() {
   if (!sessionId) return;
   try {
-    const detail = await api.get(ENDPOINTS.session(sessionId), { silent: true });
+    const [detail, messages] = await Promise.all([
+      api.get(ENDPOINTS.session(sessionId), { silent: true }),
+      api.get(ENDPOINTS.sessionMessages(sessionId), { silent: true }).catch(() => []),
+    ]);
+    renderHistory(messages || []);
     if (detail.latest_tables) renderProgress(detail.latest_tables);
     if (detail.phase === "confirming") showTablesReady();
   } catch {

@@ -27,6 +27,14 @@ class CreateSessionRequest(BaseModel):
         return self
 
 
+class MessageOut(BaseModel):
+    """GET /sessions/{id}/messages 的一則訊息。"""
+
+    role: Literal["user", "ai"]
+    content: str
+    created_at: datetime
+
+
 class SendMessageRequest(BaseModel):
     """POST /sessions/{id}/messages 請求。"""
 

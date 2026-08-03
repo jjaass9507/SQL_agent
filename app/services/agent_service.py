@@ -90,7 +90,7 @@ def _encode_tool_result(call_id: str, name: str, observation: str) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
-def _decode_ai_content(content: str) -> dict | None:
+def decode_ai_content(content: str) -> dict | None:
     """`role="ai"` 的內容若是 `{"type": "tool_call"|"tool_result", ...}` 的 JSON 則回傳
     解析後的 dict，否則（一般文字回覆）回傳 None。"""
     try:
@@ -109,7 +109,7 @@ def _rebuild_messages(records: list[Message]) -> list[dict]:
         if record.role == "user":
             result.append({"role": "user", "content": record.content})
             continue
-        decoded = _decode_ai_content(record.content)
+        decoded = decode_ai_content(record.content)
         if decoded is None:
             result.append({"role": "assistant", "content": record.content})
         elif decoded["type"] == "tool_call":

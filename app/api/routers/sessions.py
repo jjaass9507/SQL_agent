@@ -19,6 +19,7 @@ from app.api.schemas.sessions import (
     ImportDbRequest,
     ImportDbResponse,
     JobSummary,
+    MessageOut,
     SendMessageRequest,
     SessionDetail,
     SessionSummary,
@@ -28,12 +29,13 @@ from app.api.schemas.sessions import (
 from app.config import get_settings
 from app.llm.provider import LLMProvider
 from app.repos import activity as activity_repo
+from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
 from app.rules.schema_diff import compute_diff
 from app.rules.spec_models import tables_from_json
-from app.services import interview_service, session_service
+from app.services import agent_service, interview_service, session_service
 from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -179,6 +181,29 @@ async def get_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep)
         raise HTTPException(status_code=404, detail="session not found")
     await check_session_access(db, detail.session, current_user)
     return _to_detail(detail)
+
+
+@router.get("/{session_id}/messages", response_model=list[MessageOut])
+async def list_messages(
+    session_id: UUID, db: DbDep, current_user: CurrentUserDep
+) -> list[MessageOut]:
+    """依時間由舊到新回傳對話歷史，供前端重新整理後還原畫面。
+
+    DB Agent 的 transcript 把 tool_call / tool_result 也以 role="ai" 的 JSON
+    字串存在同一張表（見 app/services/agent_service.py 的 docstring），那些不是
+    給人看的文字，這裡一律濾掉——本端點只服務需求收集對話。
+    """
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, session, current_user)
+
+    records = await messages_repo.list_messages(db, session_id)
+    return [
+        MessageOut(role=r.role, content=r.content, created_at=r.created_at)
+        for r in records
+        if agent_service.decode_ai_content(r.content) is None
+    ]
 
 
 @router.post("/{session_id}/messages")
