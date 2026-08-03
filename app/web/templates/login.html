@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
   <title>SQL Agent — 登入</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  {# 不外連字型：正式機在無法連外的內網，Google Fonts 會 timeout 拖慢每一頁。
+     tokens.css 的 --font-family-sans/mono 本來就帶系統字型 fallback，
+     有裝 Inter / JetBrains Mono 的機器仍會優先使用。 #}
   <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='css/components.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='css/pages.css') }}">

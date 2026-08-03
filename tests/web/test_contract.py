@@ -344,3 +344,28 @@ def test_api_js_does_not_dump_raw_detail_into_the_toast():
     source = _api_js_source()
     assert "friendlyMessage(response.status, detail)" in source
     assert "showToast(`操作失敗（${response.status}）${detail}`" not in source
+
+
+def test_templates_load_no_external_assets():
+    """正式機在無法連外的內網（docs/deployment.md），樣板不得依賴任何外部 CDN。
+
+    以前 ER 圖從 cdn.jsdelivr.net 載 mermaid、字型從 fonts.googleapis.com 載，
+    上線第一天圖就是壞的，且每頁都會有對外 timeout。
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for path in (root / "app" / "web" / "templates").glob("*.html"):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "http://" in line or "https://" in line:
+                offenders.append(f"{path.name}:{lineno} {line.strip()}")
+    assert not offenders, "樣板出現外部連線：\n" + "\n".join(offenders)
+
+
+def test_mermaid_is_vendored_locally():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    vendored = root / "app" / "web" / "static" / "vendor" / "mermaid.min.js"
+    assert vendored.is_file(), "缺少本地 mermaid，ER 圖在離線環境會渲染不出來"

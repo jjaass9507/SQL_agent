@@ -110,7 +110,7 @@ async function renderErDiagramPanel(content) {
       // Mermaid 語法渲染失敗時保留原始碼文字
     }
   } else if (mermaidCode) {
-    // CDN 未載入（離線環境）時降級顯示原始碼
+    // mermaid 未載入（static/vendor/mermaid.min.js 缺檔或載入失敗）時降級顯示原始碼
     panel.appendChild(el("pre", "code-block", mermaidCode));
   }
   if (rest) panel.appendChild(el("div", "doc-markdown", rest));

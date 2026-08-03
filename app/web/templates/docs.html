@@ -84,6 +84,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+{# 本地資產：正式機在無法連外的內網（見 docs/deployment.md），不可依賴 CDN。
+   來源 mermaid@10.9.6 的 dist/mermaid.min.js（UMD 單檔，自帶所有相依）。 #}
+<script src="{{ url_for('static', path='vendor/mermaid.min.js') }}" defer></script>
 <script type="module" src="{{ url_for('static', path='js/pages/docs.js') }}"></script>
 {% endblock %}
