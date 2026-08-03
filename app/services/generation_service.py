@@ -24,12 +24,9 @@ from app.rules.writers.dbml_writer import DBMLWriter
 from app.rules.writers.json_schema_writer import JSONSchemaWriter
 from app.rules.writers.plantuml_writer import PlantUMLWriter
 from app.rules.writers.spec_writer import SpecWriter
-from app.services.writers.ddl_writer import DDLWriter
+from app.services import writers
 from app.services.writers.diagram_writer import DiagramWriter
 from app.services.writers.incremental_migration_writer import IncrementalMigrationWriter
-from app.services.writers.migration_writer import MigrationWriter
-from app.services.writers.orm_writer import ORMWriter
-from app.services.writers.query_writer import QueryWriter
 from app.services.writers.security_writer import SecurityWriter
 
 logger = logging.getLogger(__name__)
@@ -138,14 +135,13 @@ async def generate_documents(
     progress_lock = asyncio.Lock()
     await _set_progress(session_factory, job_id, progress, progress_lock)
 
-    ddl_writer = DDLWriter(provider)
     diagram_writer = DiagramWriter(provider)
     security_writer = SecurityWriter(provider)
 
     generators: dict[str, Callable[[], Awaitable[str]]] = {
         "01_specification.md": lambda: _generate_spec(tables),
         "02_er_diagram.md": lambda: diagram_writer.generate(tables),
-        "03_ddl.sql": lambda: ddl_writer.generate(tables),
+        "03_ddl.sql": lambda: writers.write(provider, "ddl", tables),
         "04_security_plan.md": lambda: security_writer.generate(tables),
     }
 
@@ -189,10 +185,6 @@ async def generate_extra(
     provider = provider or LLMProvider.from_settings()
     context_tables = context_tables or []
 
-    if kind == "orm":
-        return await ORMWriter(provider).generate(tables)
-    if kind == "migration":
-        return await MigrationWriter(provider).generate(tables)
-    if kind == "query":
-        return await QueryWriter(provider).generate(tables)
-    return await IncrementalMigrationWriter(provider).generate(tables, context_tables)
+    if kind == "incremental":
+        return await IncrementalMigrationWriter(provider).generate(tables, context_tables)
+    return await writers.write(provider, kind, tables)

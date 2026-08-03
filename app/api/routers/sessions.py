@@ -19,19 +19,25 @@ from app.api.schemas.sessions import (
     ImportDbRequest,
     ImportDbResponse,
     JobSummary,
+    MessageOut,
     SendMessageRequest,
     SessionDetail,
     SessionSummary,
+    TablesDdlRequest,
     TurnResponse,
     VersionOut,
 )
 from app.config import get_settings
 from app.llm.provider import LLMProvider
+from app.repos import activity as activity_repo
+from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
+from app.rules import ddl_parser
+from app.rules.schema_diff import compute_diff
 from app.rules.spec_models import tables_from_json
-from app.services import interview_service, session_service
+from app.services import agent_service, interview_service, session_service
 from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -81,6 +87,12 @@ def _to_detail(data: session_service.SessionDetailData) -> SessionDetail:
             latest_tables = tables_from_json(data.latest_version.tables_json)
         latest_key_points = data.latest_version.key_points_json
 
+    # 差異比對一律在後端算：schema_diff 會比對型態／NULL／UNIQUE／索引，
+    # 前端自行比對只看得出欄位有無，會把 VARCHAR(20)→VARCHAR(10) 判成「不變」。
+    schema_diff = (
+        compute_diff(latest_tables, context_tables) if latest_tables and context_tables else None
+    )
+
     return SessionDetail(
         id=session.id,
         title=session.title,
@@ -91,6 +103,7 @@ def _to_detail(data: session_service.SessionDetailData) -> SessionDetail:
         latest_version=latest_version_num,
         latest_tables=latest_tables,
         latest_key_points=latest_key_points,
+        schema_diff=schema_diff,
         jobs=[_to_job_summary(j) for j in data.jobs],
     )
 
@@ -152,6 +165,17 @@ async def list_sessions(db: DbDep, current_user: CurrentUserDep) -> list[Session
     return [_to_summary(s) for s in sessions]
 
 
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> None:
+    """刪除 session 及其訊息／版本／產出（models.py 的外鍵皆為 ON DELETE CASCADE）。"""
+    record = await sessions_repo.get_session(db, session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, record, current_user)
+    await sessions_repo.delete_session(db, session_id)
+    await activity_repo.log_activity(db, "session.delete", {"session_id": str(session_id)})
+
+
 @router.get("/{session_id}", response_model=SessionDetail)
 async def get_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> SessionDetail:
     detail = await session_service.get_session_detail(db, session_id)
@@ -159,6 +183,62 @@ async def get_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep)
         raise HTTPException(status_code=404, detail="session not found")
     await check_session_access(db, detail.session, current_user)
     return _to_detail(detail)
+
+
+@router.get("/{session_id}/messages", response_model=list[MessageOut])
+async def list_messages(
+    session_id: UUID, db: DbDep, current_user: CurrentUserDep
+) -> list[MessageOut]:
+    """依時間由舊到新回傳對話歷史，供前端重新整理後還原畫面。
+
+    DB Agent 的 transcript 把 tool_call / tool_result 也以 role="ai" 的 JSON
+    字串存在同一張表（見 app/services/agent_service.py 的 docstring），那些不是
+    給人看的文字，這裡一律濾掉——本端點只服務需求收集對話。
+    """
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, session, current_user)
+
+    records = await messages_repo.list_messages(db, session_id)
+    return [
+        MessageOut(role=r.role, content=r.content, created_at=r.created_at)
+        for r in records
+        if agent_service.decode_ai_content(r.content) is None
+    ]
+
+
+@router.get("/{session_id}/tables-ddl")
+async def get_tables_ddl(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> dict:
+    """把目前的設計輸出成可編輯的 CREATE TABLE 文字（確認頁的「以 DDL 編輯」）。"""
+    detail = await session_service.get_session_detail(db, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, detail.session, current_user)
+
+    version = detail.latest_version
+    tables = tables_from_json(version.tables_json) if version and version.tables_json else []
+    return {"ddl": ddl_parser.to_ddl(tables)}
+
+
+@router.put("/{session_id}/tables-ddl", response_model=VersionOut)
+async def put_tables_ddl(
+    session_id: UUID, payload: TablesDdlRequest, db: DbDep, current_user: CurrentUserDep
+) -> VersionOut:
+    """以手改後的 DDL 取代目前設計，存成新版本（不覆寫，版本歷史保留）。"""
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, session, current_user)
+
+    try:
+        version = await session_service.replace_tables_from_ddl(db, session_id, payload.ddl)
+    except session_service.EmptyDdlError:
+        raise HTTPException(
+            status_code=422,
+            detail="沒有解析出任何資料表，請確認每個區塊都是完整的 CREATE TABLE ... ( ... );",
+        ) from None
+    return _to_version_out(version)
 
 
 @router.post("/{session_id}/messages")

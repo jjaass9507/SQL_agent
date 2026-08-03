@@ -8,8 +8,9 @@ import respx
 from app.repos import jobs as jobs_repo
 from app.repos import outputs as outputs_repo
 from app.repos import sessions as sessions_repo
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
 from app.services import review_service
+from tests.specs import col
 from tests.workers.conftest import BASE_URL, chat_completion_response, make_provider
 
 
@@ -19,14 +20,15 @@ def _existing_tables() -> list[TableSpec]:
             table_name="users",
             description="使用者",
             columns=[
-                ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True),
-                ColumnSpec("password", "varchar", False, "密碼", length=100),
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("password", "varchar", False, "密碼", length=100),
             ],
         )
     ]
 
 
 async def test_run_review_writes_report_and_fix_sql_and_updates_phase(session_factory):
+    """降級路徑：gateway 回不出合法 JSON 時，退回純文字單發仍要產出報告。"""
     tables = _existing_tables()
     async with session_factory() as db:
         session = await sessions_repo.create_session(
@@ -83,3 +85,57 @@ async def test_run_review_raises_when_session_missing(session_factory):
         job = await jobs_repo.get_job(db, job_id)
         with pytest.raises(ValueError):
             await review_service.run_review(db, job)
+
+
+async def test_review_report_markdown_is_rendered_by_us_not_the_llm(session_factory):
+    """結構化路徑：LLM 只回結構化資料，Markdown 由我們自己排。
+
+    這是重點——原本評分與分段全靠正則去撈 LLM 自由書寫的文字，模型某次沒照
+    措辭寫就會靜默失效（審查頁評分空白、內容落到錯誤的區塊）。格式改由我們
+    決定之後，前端的解析不會再因為模型措辭而壞掉。
+    """
+    import json
+
+    tables = _existing_tables()
+    async with session_factory() as db:
+        session = await sessions_repo.create_session(
+            db, mode="review", context_tables_json=[t.model_dump() for t in tables]
+        )
+        job = await jobs_repo.create_job(db, session.id, kind="review")
+        await db.commit()
+        session_id, job_id = session.id, job.id
+
+    payload = json.dumps(
+        {
+            "score": 7.5,
+            "summary": "整體結構堪用，但密碼欄位需要處理。",
+            "consistency": ["users：命名一致 → 維持現狀"],
+            "integrity": ["users（id）：缺少 NOT NULL → 補上約束"],
+            "performance": [],
+            "security": ["users（password）：疑似明文密碼 → 改存雜湊"],
+        },
+        ensure_ascii=False,
+    )
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions").mock(
+            return_value=chat_completion_response(payload)
+        )
+        provider = make_provider()
+        async with session_factory() as db:
+            job = await jobs_repo.get_job(db, job_id)
+            await review_service.run_review(db, job, provider=provider)
+            await db.commit()
+
+    assert route.call_count == 1, "結構化成功時不該有重試或降級的額外呼叫"
+
+    async with session_factory() as db:
+        report = (await outputs_repo.get_output(db, session_id, "05_review_report.md")).content
+
+    # 前端 review.js 靠這兩件事分段與取分數
+    assert "**整體評分：7.5/10**" in report
+    for heading in ("## 1. 設計一致性", "## 2. 資料完整性", "## 3. 效能考量", "## 4. 安全性"):
+        assert heading in report
+    assert "- users（password）：疑似明文密碼 → 改存雜湊" in report
+    # 空的維度要補一句，不能留白讓使用者以為漏掉了
+    assert "未發現明顯問題。" in report

@@ -42,6 +42,10 @@ v0.5 的功能已完整，但底層作法累積了大量「繞路」的設計，
 4. **DB Agent**：全域對話助手，多步驟工具推理（查 schema、跑唯讀查詢、檢查慣例/文件完整性、草擬 COMMENT、提案 DDL）
 5. **人工審批（HITL）**：所有結構變更走 change request，管理員核准後才在單一交易內執行
 6. **SQL 工作台**：結構瀏覽器 + 唯讀查詢/EXPLAIN + NL2SQL
+   —— **目前僅有 API，沒有前端頁面**（`app/api/routers/workbench.py`、
+   `app/services/workbench_service.py` 完整可用且有測試）。經使用者訪談評估後
+   刻意不做 UI：目標使用者手上已有 DBeaver / pgAdmin，平台的唯讀查詢沒有比較好用。
+   其中 `schema-tree` 與 `validate-ddl` 有被其他流程使用，不是死碼。
 7. **On-demand 延伸產出**：ORM 模型、Alembic migration、查詢範例、增量 migration、DBML/PlantUML/JSON Schema/CSV 純模板匯出
 8. **Session 管理**：列表、篩選、狀態、版本快照（最多 10 版）
 9. **非功能需求**：非 AI API P95 < 200ms、四文件並行產出 P95 < 60s、100 並發 session、結構化 JSON log、OpenAPI 3.0 文件（NFR-01～05）
@@ -285,6 +289,12 @@ app/web/
 │   ├── base.html
 │   └── index / chat / confirm / docs / review / agent / settings .html
 ├── static/js/            # ES modules：邏輯只掛 data-* attribute，不依賴視覺 class
+│   ├── lib/              #   共用：api / sse / toast / drawer / agent-chat
+│   │                     #   doc-render（Markdown→DOM + SQL 上色，不引入外部函式庫）
+│   │                     #   confirm-dialog（破壞性操作的確認）、ddl-impact（變更影響說明）
+│   └── pages/            #   各頁進入點
+├── static/vendor/        # 落地的第三方資產（mermaid.min.js）——正式機在無法連外的
+│                         # 內網，樣板不得引用任何 CDN（tests/web/test_contract.py 會擋）
 └── static/css/
     ├── tokens.css        # ★ 唯一的「皮膚」來源：CSS custom properties
     ├── components.css    # 元件樣式：只允許引用 tokens.css 的變數

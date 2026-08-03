@@ -15,7 +15,7 @@ from app.repos import jobs as jobs_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Job, SchemaVersion, SessionRecord
-from app.rules import db_introspect
+from app.rules import db_introspect, ddl_parser
 from app.rules.spec_models import TableSpec
 from app.services import dbops
 
@@ -125,10 +125,14 @@ async def import_db(db: AsyncSession, session_id: UUID, db_url: str) -> SessionR
 
 
 async def confirm_session(db: AsyncSession, session_id: UUID) -> Job:
-    """原子轉換 phase：confirming → generating，並建立 generate job。
+    """原子轉換 phase → generating，並建立 generate job。
 
-    非 confirming 狀態（尚未產出 tables、或已 confirm 過）以帶 WHERE 條件的
-    UPDATE 保證只有一個呼叫方能成功轉換；rowcount 為 0 時視為衝突（409）。
+    可觸發的狀態是 `confirming`（首次產出）與 `done`（重新產出／失敗後重試）。
+    以帶 WHERE 條件的 UPDATE 保證併發時只有一個呼叫方能成功轉換；rowcount 為 0
+    代表狀態不符（例如正在產出中，或還沒收集到 tables），視為衝突（409）。
+
+    允許從 `done` 再次觸發，是因為產出失敗時使用者原本唯一的出路是
+    「還原某個版本 → phase 回到 confirming → 再按確認」，沒人猜得到這條路。
     """
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
@@ -138,7 +142,10 @@ async def confirm_session(db: AsyncSession, session_id: UUID) -> Job:
 
     stmt = (
         update(SessionRecord)
-        .where(SessionRecord.id == session_id, SessionRecord.phase == "confirming")
+        .where(
+            SessionRecord.id == session_id,
+            SessionRecord.phase.in_(("confirming", "done")),
+        )
         .values(phase="generating")
     )
     result = await db.execute(stmt)
@@ -157,6 +164,39 @@ async def confirm_session(db: AsyncSession, session_id: UUID) -> Job:
     )
     await activity_repo.log_activity(db, "session.confirm", {"session_id": str(session_id)})
     return job
+
+
+class EmptyDdlError(Exception):
+    """送出的 DDL 解析不出任何資料表。"""
+
+
+async def replace_tables_from_ddl(
+    db: AsyncSession, session_id: UUID, ddl: str
+) -> SchemaVersion:
+    """把使用者手改的 DDL 解析回 TableSpec，存成一個新版本並把 phase 拉回 confirming。
+
+    走既有的 `ddl_parser.parse_ddl`（與「貼上 DDL 建立」同一條路徑），因此使用者
+    在確認頁改一個型態或長度，不必回對話重講一次、也不必再賭一輪 LLM 輸出。
+    存成新版本而非覆寫，版本回溯機制天生就能承接（含 10 版上限）。
+    """
+    session = await sessions_repo.get_session(db, session_id)
+    if session is None:
+        raise SessionNotFoundError()
+
+    tables = ddl_parser.parse_ddl(ddl or "")
+    if not tables:
+        raise EmptyDdlError()
+
+    version = await versions_repo.create_version(
+        db, session_id, tables_json=[t.model_dump() for t in tables]
+    )
+    await sessions_repo.update_session(db, session_id, phase="confirming")
+    await activity_repo.log_activity(
+        db,
+        "session.edit_tables",
+        {"session_id": str(session_id), "table_count": len(tables), "version": version.version_num},
+    )
+    return version
 
 
 async def restore_version(db: AsyncSession, session_id: UUID, version_num: int) -> SchemaVersion:

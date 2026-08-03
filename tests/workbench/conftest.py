@@ -20,8 +20,13 @@ from app.repos.models import Base
 
 @pytest.fixture(autouse=True)
 def _settings_env(monkeypatch):
-    """crypto.encrypt_db_url/decrypt_db_url 需要 DB_ENCRYPTION_KEY；每個測試獨立且乾淨。"""
+    """crypto.encrypt_db_url/decrypt_db_url 需要 DB_ENCRYPTION_KEY；每個測試獨立且乾淨。
+
+    另設 ADMIN_TOKEN：業務資料庫連線的增刪需要管理員權杖（未設定時端點一律 403，
+    見 app/api/deps.py::require_admin）。要驗證未設定情境的測試自行 delenv。
+    """
     monkeypatch.setenv("DB_ENCRYPTION_KEY", "ab" * 32)
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin-token")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

@@ -306,3 +306,202 @@ async def test_ddl_import_payload_keys(client):
     detail = (await client.get(f"/api/v1/sessions/{body['id']}")).json()
     assert detail["phase"] == "confirming"
     assert detail["latest_tables"][0]["table_name"] == "users"
+
+
+# ── 錯誤訊息覆蓋率（app/web/static/js/lib/api.js 的 STATUS_MESSAGE）────────────
+#
+# 後端拋出的每一個 4xx 都要有對應的中文說明，否則使用者只會看到通用句子。
+# 5xx 由 api.js 的 `status >= 500` 分支統一兜底，不需逐碼列出。
+
+_STATUS_CODE_RE = re.compile(r"status_code=(\d{3})")
+_JS_STATUS_KEY_RE = re.compile(r"^\s*(\d{3}):", re.MULTILINE)
+
+
+def _api_js_source() -> str:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    return (root / "app" / "web" / "static" / "js" / "lib" / "api.js").read_text(encoding="utf-8")
+
+
+def test_every_backend_4xx_has_a_friendly_message():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    raised = set()
+    for path in (root / "app" / "api").rglob("*.py"):
+        raised.update(_STATUS_CODE_RE.findall(path.read_text(encoding="utf-8")))
+
+    backend_4xx = {int(code) for code in raised if 400 <= int(code) < 500}
+    covered = {int(code) for code in _JS_STATUS_KEY_RE.findall(_api_js_source())}
+
+    missing = sorted(backend_4xx - covered)
+    assert not missing, f"api.js 的 STATUS_MESSAGE 缺少這些狀態碼的中文說明：{missing}"
+
+
+def test_api_js_does_not_dump_raw_detail_into_the_toast():
+    """422 的 detail 是物件陣列，直接 JSON.stringify 會把整包丟到使用者臉上。"""
+    source = _api_js_source()
+    assert "friendlyMessage(response.status, detail)" in source
+    assert "showToast(`操作失敗（${response.status}）${detail}`" not in source
+
+
+def test_templates_load_no_external_assets():
+    """正式機在無法連外的內網（docs/deployment.md），樣板不得依賴任何外部 CDN。
+
+    以前 ER 圖從 cdn.jsdelivr.net 載 mermaid、字型從 fonts.googleapis.com 載，
+    上線第一天圖就是壞的，且每頁都會有對外 timeout。
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for path in (root / "app" / "web" / "templates").glob("*.html"):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "http://" in line or "https://" in line:
+                offenders.append(f"{path.name}:{lineno} {line.strip()}")
+    assert not offenders, "樣板出現外部連線：\n" + "\n".join(offenders)
+
+
+def test_mermaid_is_vendored_locally():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    vendored = root / "app" / "web" / "static" / "vendor" / "mermaid.min.js"
+    assert vendored.is_file(), "缺少本地 mermaid，ER 圖在離線環境會渲染不出來"
+
+
+# ── 文件渲染契約（app/web/static/js/lib/doc-render.js）────────────────────────
+#
+# 渲染器是自己寫的，只支援 # 標題 / | 表格 / - 與 1. 條列 / ``` 區塊 /
+# **粗體** / `行內 code`。writer 若哪天開始輸出其他語法（引言、連結、圖片、
+# 分隔線、巢狀清單），畫面會直接顯示原始符號而沒有任何錯誤——本測試先攔下來。
+
+_UNSUPPORTED_MARKDOWN = {
+    ">": "引言（blockquote）",
+    "![": "圖片",
+    "---": "分隔線",
+    "===": "setext 標題",
+}
+
+
+def test_spec_writer_output_only_uses_supported_markdown():
+    from app.rules.writers.spec_writer import SpecWriter
+    from tests.specs import col, table
+
+    tables = [
+        table(
+            "orders",
+            "訂單主檔",
+            [
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("amount", "numeric", True, "金額", length=12),
+            ],
+            constraints=["CHECK (amount >= 0)"],
+        )
+    ]
+    markdown = SpecWriter().generate(tables)
+
+    offenders = []
+    for lineno, line in enumerate(markdown.splitlines(), 1):
+        stripped = line.strip()
+        for marker, name in _UNSUPPORTED_MARKDOWN.items():
+            if stripped.startswith(marker):
+                offenders.append(f"{lineno}: {name} → {stripped[:40]}")
+        # 巢狀清單（前導空白 + 條列符號）渲染器只當成同一層
+        if line.startswith(("  -", "  *", "\t-")):
+            offenders.append(f"{lineno}: 巢狀清單 → {stripped[:40]}")
+
+    assert not offenders, (
+        "spec_writer 產出了 doc-render.js 不支援的 Markdown 語法：\n" + "\n".join(offenders)
+    )
+
+
+def test_doc_render_never_uses_innerhtml():
+    """渲染的是 LLM 產出的內容，必須全程 createElement + textContent。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "app" / "web" / "static" / "js" / "lib" / "doc-render.js").read_text(
+        encoding="utf-8"
+    )
+    assert "innerHTML" not in source
+    assert "insertAdjacentHTML" not in source
+
+
+# ── 破壞性操作的確認流程 ──────────────────────────────────────────────────
+#
+# 核准變更是全平台唯一不可逆的操作：app/services/change_service.py 會對正式
+# 業務資料庫執行 DDL 並 commit。兩位受測使用者都把「怕誤按這顆」列為第一名。
+
+
+def _js(*parts) -> str:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    return (root / "app" / "web" / "static" / "js" / Path(*parts)).read_text(encoding="utf-8")
+
+
+def test_approve_change_request_is_gated_by_a_confirm_dialog():
+    source = _js("pages", "agent.js")
+    assert "confirmApprove" in source
+    assert 'if (decision === "approve" && !(await confirmApprove(' in source, (
+        "核准路徑必須先經過確認對話框"
+    )
+
+
+def test_confirm_dialog_requires_an_explicit_acknowledgement_for_approval():
+    """使用者明說「按一個按鈕就過」不夠，要多一個動作才會停下來想一秒。"""
+    source = _js("pages", "agent.js")
+    assert "ackLabel:" in source, "核准對話框必須有必勾的確認框"
+
+
+def test_removing_a_business_db_connection_is_confirmed():
+    source = _js("pages", "settings.js")
+    assert "confirmDialog" in source
+    assert "資料庫本身" in source, "刪除連線的文案要講明不會影響資料庫本身"
+
+
+def test_restore_version_has_no_dialog_because_it_is_not_destructive():
+    """還原版本是把目標版本複製成新版本（session_service.restore_version），
+    歷史完整保留，不該用對話框增加摩擦。這個測試防止之後有人「順手也加一個」。"""
+    source = _js("pages", "confirm.js")
+    assert "confirmDialog" not in source
+
+
+def test_ddl_impact_warns_about_what_dry_run_cannot_catch():
+    source = _js("lib", "ddl-impact.js")
+    assert "CONCURRENTLY" in source, "大表建索引會鎖寫入，dry-run 在空表上測不到"
+    assert "NOT\\s+NULL" in source or "NOT\\\\s+NULL" in source or "NOT" in source
+
+
+def test_index_entry_buttons_explain_what_they_need_in_plain_language():
+    """三個入口有兩個需要使用者先準備東西（連線字串／CREATE TABLE 語法），
+    不說清楚的話不懂技術的人會選了才發現走不下去。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    html = (root / "app" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert html.count("btn-entry-desc") == 3, "三個入口都要有一句白話說明"
+    assert "向 IT 索取" in html
+    assert "CREATE TABLE" in html
+
+
+def test_chat_tells_the_user_why_the_confirm_button_is_disabled():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    html = (root / "app" / "web" / "templates" / "chat.html").read_text(encoding="utf-8")
+    assert 'data-target="confirm-cta-hint"' in html
+
+
+def test_extras_are_collapsed_and_labelled_as_optional():
+    """八顆延伸產出按鈕平鋪會讓不懂技術的使用者「一個都不敢按」。
+    不減量（各有真實使用者），但要收摺並標明選用，每顆講清楚用途。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    html = (root / "app" / "web" / "templates" / "docs.html").read_text(encoding="utf-8")
+    assert "<details" in html, "延伸產出區要預設收摺"
+    assert "選用" in html, "標題要標明選用，否則使用者以為是必要步驟"
+    assert html.count("btn-entry-desc") == 8, "八顆按鈕都要有一句用途說明"

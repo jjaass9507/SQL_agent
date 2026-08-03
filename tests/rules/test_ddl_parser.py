@@ -64,3 +64,56 @@ def test_parse_schema_prefix_and_if_not_exists():
 def test_parse_default_value_captured():
     t = parse_ddl("CREATE TABLE t (status varchar(20) NOT NULL DEFAULT 'pending');")[0]
     assert t.columns[0].default == "'pending'"
+
+
+# ── to_ddl：確認頁「以 DDL 編輯」用，必須能被 parse_ddl 解回 ─────────────────
+
+
+def test_to_ddl_round_trips_through_parse_ddl():
+    from app.rules.ddl_parser import to_ddl
+    from tests.specs import col, table
+
+    original = [
+        table(
+            "users",
+            "使用者",
+            [
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("email", "varchar", False, "信箱", length=255, is_unique=True),
+                col("nickname", "varchar", True, "暱稱", length=50),
+            ],
+        ),
+        table(
+            "orders",
+            "訂單",
+            [
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("user_id", "uuid", False, "下單者", is_foreign_key=True,
+                    references="users.id"),
+            ],
+        ),
+    ]
+
+    parsed = parse_ddl(to_ddl(original))
+
+    assert [t.table_name for t in parsed] == ["users", "orders"]
+    users = parsed[0]
+    assert [c.name for c in users.columns] == ["id", "email", "nickname"]
+    assert users.columns[0].is_primary_key
+    assert users.columns[1].is_unique
+    assert users.columns[1].length == 255
+    assert users.columns[1].nullable is False
+    assert users.columns[2].nullable is True
+    orders = parsed[1]
+    assert orders.columns[1].is_foreign_key
+    assert orders.columns[1].references == "users.id"
+
+
+def test_to_ddl_keeps_column_descriptions_as_comments():
+    """說明文字對使用者有意義但不是 CREATE TABLE 語法，以註解帶出、解析時忽略。"""
+    from app.rules.ddl_parser import to_ddl
+    from tests.specs import col, table
+
+    ddl = to_ddl([table("t", "測試表", [col("c", "text", True, "這是說明")])])
+    assert "-- 這是說明" in ddl
+    assert parse_ddl(ddl)[0].columns[0].name == "c"

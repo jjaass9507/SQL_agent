@@ -41,6 +41,16 @@
     </ul>
   </section>
 
+  <!-- 報告格式與四維度模板不符時的降級顯示：整份原文全寬呈現，並明示原因。
+       預設隱藏，由 review.js 在解析失敗時開啟並同時隱藏上面四個維度區塊。 -->
+  <section class="card" data-target="review-raw" hidden>
+    <h2 class="card-title">審查報告全文</h2>
+    <p class="form-hint" data-target="review-raw-notice">
+      這份報告的格式與預期的四個維度標題不同，因此改為顯示完整原文，內容未經分段。
+    </p>
+    <div class="doc-raw" data-target="review-raw-body"></div>
+  </section>
+
   <section class="card" data-target="review-red-flags">
     <h2 class="card-title">規則式紅旗與修復建議</h2>
     <div id="review-red-flags-list" data-target="review-red-flags-list">

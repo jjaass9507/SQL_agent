@@ -62,3 +62,21 @@ async def test_chat_with_explicit_db_name(client, seed_db):
 
     assert resp.status_code == 200
     assert resp.json()["reply"] == "收到"
+
+
+async def test_new_conversation_switches_to_a_fresh_agent_session(client):
+    """每次開新對話都會換一個 session id——舊 transcript 不再被沿用。"""
+    first = (await client.post("/api/v1/agent/conversations")).json()["session_id"]
+    second = (await client.post("/api/v1/agent/conversations")).json()["session_id"]
+
+    assert first != second
+
+
+async def test_new_conversation_keeps_the_old_transcript_in_the_database(client):
+    """舊對話只是不再被沿用，紀錄仍留著（稽核用），不是被覆寫。"""
+    before = len((await client.get("/api/v1/sessions")).json())
+    await client.post("/api/v1/agent/conversations")
+    await client.post("/api/v1/agent/conversations")
+    after = len((await client.get("/api/v1/sessions")).json())
+
+    assert after - before == 2, "每次開新對話都應建立一個新 session，而不是覆寫舊的"

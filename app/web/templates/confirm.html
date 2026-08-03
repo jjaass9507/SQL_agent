@@ -31,8 +31,24 @@
 
     <section class="card" data-target="schema-tables">
       <h2 class="card-title">結構化 Schema</h2>
+      {# 小修正（改個長度、改個說明）不必回對話重講一次、再賭一輪 LLM 輸出 #}
+      <button type="button" class="btn btn-ghost btn-sm" data-action="toggle-ddl-editor">
+        直接編輯結構
+      </button>
       <div id="schema-tables-container" data-target="schema-tables-container">
         <p class="form-hint">尚無資料表，完成需求收集對話後將顯示於此。</p>
+      </div>
+
+      <div data-target="ddl-editor" hidden>
+        <p class="form-hint">
+          以建表語法編輯。改完按「儲存」會存成一個新版本，舊版本仍可從上方還原。
+          說明文字寫在 <code>--</code> 後面，不影響結構。
+        </p>
+        <textarea class="form-textarea" rows="16" data-target="ddl-editor-text"></textarea>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-action="cancel-ddl-editor">取消</button>
+          <button type="button" class="btn btn-primary" data-action="save-ddl-editor">儲存</button>
+        </div>
       </div>
     </section>
   </div>

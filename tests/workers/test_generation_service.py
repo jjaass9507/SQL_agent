@@ -9,8 +9,9 @@ import respx
 from app.repos import jobs as jobs_repo
 from app.repos import outputs as outputs_repo
 from app.repos import sessions as sessions_repo
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
 from app.services import generation_service
+from tests.specs import col
 from tests.workers.conftest import (
     BASE_URL,
     chat_completion_response,
@@ -31,8 +32,8 @@ def _sample_tables() -> list[TableSpec]:
             table_name="users",
             description="使用者",
             columns=[
-                ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True),
-                ColumnSpec("email", "varchar", False, "電子郵件", length=255, is_unique=True),
+                col("id", "uuid", False, "主鍵", is_primary_key=True),
+                col("email", "varchar", False, "電子郵件", length=255, is_unique=True),
             ],
         ),
     ]

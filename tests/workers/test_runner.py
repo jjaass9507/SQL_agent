@@ -7,8 +7,9 @@ from app.llm.provider import LLMProvider
 from app.repos import jobs as jobs_repo
 from app.repos import outputs as outputs_repo
 from app.repos import sessions as sessions_repo
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
 from app.workers import runner
+from tests.specs import col
 from tests.workers.conftest import BASE_URL, chat_completion_response, make_provider
 
 
@@ -17,7 +18,7 @@ def _tables_json() -> list[dict]:
         TableSpec(
             table_name="users",
             description="使用者",
-            columns=[ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True)],
+            columns=[col("id", "uuid", False, "主鍵", is_primary_key=True)],
         )
     ]
     return [t.model_dump() for t in tables]

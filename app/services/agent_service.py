@@ -59,6 +59,18 @@ async def _get_or_create_agent_session_id(db: AsyncSession) -> uuid.UUID:
     return record.id
 
 
+async def start_new_conversation(db: AsyncSession) -> uuid.UUID:
+    """開一條新的 DB Agent 對話：清掉 app_settings 記的 session id，下次呼叫會重建。
+
+    舊 session 連同它的 transcript 保留在資料庫裡（稽核用），只是不再被沿用。
+    這是「單一全域對話」下唯一能切乾淨上下文的手段——多人共用時前一個人的
+    表名與查詢結果會一直留在 transcript 裡影響後續回答，而 `_trim_to_budget`
+    只是從最舊的開始丟，不會依對話主題切分。
+    """
+    await settings_repo.delete_setting(db, _AGENT_SESSION_SETTING_KEY)
+    return await _get_or_create_agent_session_id(db)
+
+
 async def _build_provider(db: AsyncSession) -> LLMProvider:
     setting = await settings_repo.get_setting(db, _CAPABILITY_SETTING_KEY)
     profile = CapabilityProfile(**setting.value_json) if setting and setting.value_json else None
@@ -78,7 +90,7 @@ def _encode_tool_result(call_id: str, name: str, observation: str) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
-def _decode_ai_content(content: str) -> dict | None:
+def decode_ai_content(content: str) -> dict | None:
     """`role="ai"` 的內容若是 `{"type": "tool_call"|"tool_result", ...}` 的 JSON 則回傳
     解析後的 dict，否則（一般文字回覆）回傳 None。"""
     try:
@@ -97,7 +109,7 @@ def _rebuild_messages(records: list[Message]) -> list[dict]:
         if record.role == "user":
             result.append({"role": "user", "content": record.content})
             continue
-        decoded = _decode_ai_content(record.content)
+        decoded = decode_ai_content(record.content)
         if decoded is None:
             result.append({"role": "assistant", "content": record.content})
         elif decoded["type"] == "tool_call":

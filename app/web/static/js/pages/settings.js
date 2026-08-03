@@ -1,5 +1,6 @@
 // pages/settings.js — 設定頁：業務 DB 增刪（遮罩顯示）、LLM health/diagnose、activity 列表
-import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, api } from "../lib/api.js";
+import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, adminHeaders, api } from "../lib/api.js";
+import { confirmDialog } from "../lib/confirm-dialog.js";
 import { showToast } from "../lib/toast.js";
 
 function el(tag, className, text) {
@@ -145,7 +146,11 @@ document.addEventListener("submit", async (event) => {
     return;
   }
   try {
-    const result = await api.post(ENDPOINTS.settingsBusinessDb(), { name, url });
+    const result = await api.post(
+      ENDPOINTS.settingsBusinessDb(),
+      { name, url },
+      { headers: adminHeaders() }
+    );
     renderBusinessDbs(result.business_databases);
     showToast("已新增業務資料庫", "success");
     form.reset();
@@ -164,10 +169,26 @@ document.addEventListener("click", async (event) => {
   if (action === "diagnose-llm") diagnose(target);
 
   if (action === "remove-business-db") {
+    // 只是把設定從平台移除，資料庫本身完全不受影響——講明白，否則使用者不敢按。
+    const ok = await confirmDialog({
+      title: "要移除這個資料庫連線設定嗎？",
+      lead: `平台將不再連到「${target.dataset.target}」。`,
+      facts: [
+        {
+          label: "不會發生什麼",
+          value: "資料庫本身、裡面的資料表與資料完全不受影響，只是平台這邊不再記住連線方式。",
+        },
+        { label: "想加回來", value: "重新填一次連線字串即可，沒有其他後果。" },
+      ],
+      confirmText: "移除設定",
+      danger: true,
+    });
+    if (!ok) return;
     target.disabled = true;
     try {
       const result = await api.delete(
-        `${ENDPOINTS.settingsBusinessDb()}?name=${encodeURIComponent(target.dataset.target)}`
+        `${ENDPOINTS.settingsBusinessDb()}?name=${encodeURIComponent(target.dataset.target)}`,
+        { headers: adminHeaders() }
       );
       renderBusinessDbs(result.business_databases);
       showToast("已刪除", "success");

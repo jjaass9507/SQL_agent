@@ -3,7 +3,8 @@
 import uuid
 
 from app.repos import versions
-from app.rules.spec_models import ColumnSpec, TableSpec, asdict
+from app.rules.spec_models import TableSpec, asdict
+from tests.specs import col
 
 
 async def test_schema_tree_session_not_found(client):
@@ -27,8 +28,8 @@ async def test_schema_tree_design_mode_uses_latest_version(client, make_session,
         table_name="users",
         description="使用者",
         columns=[
-            ColumnSpec("id", "uuid", False, "PK", is_primary_key=True),
-            ColumnSpec("email", "varchar", False, "電子郵件", length=255),
+            col("id", "uuid", False, "PK", is_primary_key=True),
+            col("email", "varchar", False, "電子郵件", length=255),
         ],
     )
     await versions.create_version(db_session, record.id, tables_json=[asdict(table)])
@@ -51,7 +52,7 @@ async def test_schema_tree_db_mode_uses_live_introspection(client, make_session,
     live_table = TableSpec(
         table_name="orders",
         description="訂單",
-        columns=[ColumnSpec("id", "uuid", False, "PK", is_primary_key=True)],
+        columns=[col("id", "uuid", False, "PK", is_primary_key=True)],
     )
 
     def _fake_extract_schema(db_url, schema="public"):

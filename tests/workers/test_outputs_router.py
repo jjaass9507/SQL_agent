@@ -13,14 +13,15 @@ from app.repos import jobs as jobs_repo
 from app.repos import outputs as outputs_repo
 from app.repos import sessions as sessions_repo
 from app.repos import versions as versions_repo
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
+from tests.specs import col
 
 
 def _sample_table_dict() -> dict:
     table = TableSpec(
         table_name="users",
         description="使用者",
-        columns=[ColumnSpec("id", "uuid", False, "主鍵", is_primary_key=True)],
+        columns=[col("id", "uuid", False, "主鍵", is_primary_key=True)],
     )
     return table.model_dump()
 

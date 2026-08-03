@@ -27,10 +27,24 @@ class CreateSessionRequest(BaseModel):
         return self
 
 
+class MessageOut(BaseModel):
+    """GET /sessions/{id}/messages 的一則訊息。"""
+
+    role: Literal["user", "ai"]
+    content: str
+    created_at: datetime
+
+
 class SendMessageRequest(BaseModel):
     """POST /sessions/{id}/messages 請求。"""
 
     content: str = Field(min_length=1, max_length=10000)
+
+
+class TablesDdlRequest(BaseModel):
+    """PUT /sessions/{id}/tables-ddl 請求（確認頁的手動編輯）。"""
+
+    ddl: str = Field(min_length=1, max_length=100_000)
 
 
 class ImportDbRequest(BaseModel):
@@ -72,6 +86,9 @@ class SessionDetail(BaseModel):
     latest_version: int | None = None
     latest_tables: list[TableSpec] | None = None
     latest_key_points: list[str] | None = None
+    # 設計 vs 匯入的現有 DB 差異，由 app.rules.schema_diff.compute_diff 算出
+    # （含型態／NULL／UNIQUE／索引變更）。未匯入現有 DB 時為 None。
+    schema_diff: dict | None = None
     jobs: list[JobSummary] = Field(default_factory=list)
 
 

@@ -9,9 +9,10 @@
 跑，驗證唯讀護欄真的擋下 DML（不需要 mock）。
 """
 
-from app.rules.spec_models import ColumnSpec, TableSpec
+from app.rules.spec_models import TableSpec
 from app.services import tool_registry
 from tests.agent.conftest import install_fake_psycopg2, sample_table_dict, seed_business_db
+from tests.specs import col
 
 
 def _ctx(db_session, db_name: str | None = None) -> tool_registry.ToolContext:
@@ -24,8 +25,8 @@ def _existing_tables() -> list[TableSpec]:
             table_name="users",
             description="使用者",
             columns=[
-                ColumnSpec("id", "integer", False, "PK", is_primary_key=True),
-                ColumnSpec("name", "text", False, ""),
+                col("id", "integer", False, "PK", is_primary_key=True),
+                col("name", "text", False, ""),
             ],
         )
     ]
@@ -116,7 +117,7 @@ async def test_analyze_schema_returns_warnings(db_session, monkeypatch):
     async def _fake_schema_tree(url):
         # 無主鍵的表 → schema_advisor 應回報警告
         return [TableSpec(table_name="no_pk", description="", columns=[
-            ColumnSpec("x", "text", True, ""),
+            col("x", "text", True, ""),
         ])], ""
 
     monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)

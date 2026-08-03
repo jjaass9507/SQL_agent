@@ -1,11 +1,16 @@
 // pages/agent.js — DB Agent 頁：POST SSE 工具迴圈對話 + 待審變更請求面板（HITL）
 import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, api, adminHeaders } from "../lib/api.js";
 import { createAgentChat } from "../lib/agent-chat.js";
+import { confirmDialog } from "../lib/confirm-dialog.js";
+import { analyzeDdl } from "../lib/ddl-impact.js";
 import { showToast } from "../lib/toast.js";
 
 const messagesEl = document.querySelector('[data-target="agent-messages"]');
 const traceListEl = document.querySelector('[data-target="agent-tool-trace-list"]');
 const dbSelect = document.querySelector('[data-target="db-select"]');
+
+// id → 待審提案原始資料，確認對話框要用（清單只帶 id 進事件處理）
+const pendingRecords = new Map();
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -106,11 +111,13 @@ async function loadChangeRequests() {
   }
 
   list.textContent = "";
+  pendingRecords.clear();
   if (!records.length) {
     list.appendChild(el("p", "form-hint", "目前沒有待審的變更請求。"));
     return;
   }
   for (const record of records) {
+    pendingRecords.set(record.id, record);
     const item = el("div", "change-request-item");
     item.appendChild(el("div", "form-hint", `#${record.id.slice(0, 8)}・${record.db_name || "預設 DB"}・${new Date(record.created_at).toLocaleString()}`));
     item.appendChild(el("pre", "code-block", record.ddl));
@@ -129,6 +136,51 @@ async function loadChangeRequests() {
     item.appendChild(actions);
     list.appendChild(item);
   }
+}
+
+// ── 核准前的確認與影響評估 ──────────────────────────────────────────────
+
+async function confirmApprove(changeRequestId) {
+  const record = pendingRecords.get(changeRequestId);
+  if (!record) return false;
+  const impact = analyzeDdl(record.ddl);
+
+  const facts = [
+    { label: "會套用到", value: record.db_name || "預設的業務資料庫" },
+    { label: "這次會做什麼", value: impact.summary },
+    {
+      label: "不會做什麼",
+      value:
+        "不會刪除或修改任何現有資料與欄位。系統只放行新增類語句，" +
+        "DROP／TRUNCATE／DELETE／ALTER COLUMN 一律擋下，提案與核准時各檢查一次。",
+    },
+    {
+      label: "事前驗證",
+      value: record.dry_run_ok
+        ? "已在臨時環境完整試跑過一次並回滾（語法、型別、相依性皆通過）。"
+        : "尚未通過試跑，核准後很可能直接失敗。",
+      tone: record.dry_run_ok ? undefined : "warn",
+    },
+  ];
+
+  for (const warning of impact.warnings) {
+    facts.push({ label: "試跑測不到的風險", value: warning, tone: "warn" });
+  }
+
+  facts.push({
+    label: "不確定的話",
+    value: "先不要按，把這個畫面截圖給資料庫管理員確認。取消不會有任何影響。",
+  });
+
+  return confirmDialog({
+    title: "確認要套用這項結構變更？",
+    lead: "按下去會立刻對正式資料庫執行下列變更，執行後無法自動復原。",
+    facts,
+    code: record.ddl,
+    ackLabel: "我了解這會直接修改正式資料庫，且無法自動復原",
+    confirmText: "確認核准並執行",
+    danger: true,
+  });
 }
 
 // ── 資料庫下拉選單（讀設定頁維護的業務 DB 清單） ────────────────────────
@@ -180,6 +232,8 @@ document.addEventListener("click", async (event) => {
 
   if (action === "approve-change-request" || action === "reject-change-request") {
     const decision = action === "approve-change-request" ? "approve" : "reject";
+    // 核准是全平台唯一不可逆的操作：真的把 DDL 打到正式業務資料庫並 commit。
+    if (decision === "approve" && !(await confirmApprove(target.dataset.target))) return;
     const endpoint =
       decision === "approve"
         ? ENDPOINTS.changeRequestApprove(target.dataset.target)
@@ -195,6 +249,28 @@ document.addEventListener("click", async (event) => {
     } catch {
       target.disabled = false;
     }
+  }
+
+  if (action === "new-agent-conversation") {
+    const ok = await confirmDialog({
+      title: "要開一條新對話嗎？",
+      lead: "AI 會忘掉目前這串對話的內容，從頭開始。",
+      facts: [
+        { label: "舊對話會不見嗎", value: "不會，紀錄仍保留在系統裡，只是 AI 不再參考它。" },
+        { label: "什麼時候該開", value: "換一個不相關的主題時。舊內容留著會影響 AI 的回答。" },
+      ],
+      confirmText: "開新對話",
+    });
+    if (!ok) return;
+    try {
+      await api.post(ENDPOINTS.agentNewConversation());
+      if (messagesEl) messagesEl.textContent = "";
+      if (traceListEl) traceListEl.textContent = "";
+      showToast("已開新對話", "success");
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
   }
 
   if (action === "save-admin-token") {

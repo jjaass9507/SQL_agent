@@ -90,3 +90,22 @@ async def test_list_sessions_returns_newest_first(client):
     assert resp.status_code == 200
     ids = [s["id"] for s in resp.json()]
     assert ids.index(second["id"]) < ids.index(first["id"])
+
+
+async def test_delete_session_removes_it_from_the_list(client):
+    session = (await client.post("/api/v1/sessions", json={"title": "要刪的"})).json()
+
+    resp = await client.delete(f"/api/v1/sessions/{session['id']}")
+    assert resp.status_code == 204
+
+    assert (await client.get(f"/api/v1/sessions/{session['id']}")).status_code == 404
+    titles = [s["title"] for s in (await client.get("/api/v1/sessions")).json()]
+    assert "要刪的" not in titles
+
+
+async def test_delete_missing_session_returns_404_in_chinese(client):
+    import uuid
+
+    resp = await client.delete(f"/api/v1/sessions/{uuid.uuid4()}")
+    assert resp.status_code == 404
+    assert "刪除" in resp.json()["detail"]

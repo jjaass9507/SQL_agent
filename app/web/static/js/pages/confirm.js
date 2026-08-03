@@ -14,6 +14,14 @@ function el(tag, className, text) {
 
 // ── 結構化 Schema 表格 ──────────────────────────────────────────────────
 
+// 表頭 → 滑鼠移上去顯示的白話說明（null 代表不需要解釋）
+const HEAD_LABELS = [
+  ["欄位", "這張表要記錄的每一項資料。🔑 代表這一欄用來辨識每一筆資料，不會重複。"],
+  ["型態", "這一欄放什麼樣的內容：文字、數字、日期等等。括號裡的數字是最多幾個字。"],
+  ["NULL", "這一欄可不可以留空。「否」代表每一筆都必須填。"],
+  ["說明", null],
+];
+
 function renderTables(tables) {
   const container = document.querySelector('[data-target="schema-tables-container"]');
   if (!container) return;
@@ -32,8 +40,14 @@ function renderTables(tables) {
     const tbl = el("table", "data-table");
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    for (const label of ["欄位", "型態", "NULL", "說明"]) {
-      headRow.appendChild(el("th", null, label));
+    // 術語旁掛白話解釋：不懂技術的使用者看不懂 NULL / 🔑，會不敢確認
+    for (const [label, explain] of HEAD_LABELS) {
+      const th = el("th", null, label);
+      if (explain) {
+        th.title = explain;
+        th.appendChild(el("span", "th-help", "?"));
+      }
+      headRow.appendChild(th);
     }
     thead.appendChild(headRow);
     tbl.appendChild(thead);
@@ -75,19 +89,19 @@ function renderKeyPoints(keyPoints) {
   }
 }
 
-// ── 與現有 DB 差異（前端就 latest_tables vs context_tables 做表層比對） ──
+// ── 與現有 DB 差異（後端 app/rules/schema_diff.py 算好，前端只負責呈現） ──
+//
+// 不要在這裡重寫比對邏輯：後端會比對型態／NULL／UNIQUE／索引，前端自己用欄位
+// 名稱做集合差集會把 VARCHAR(20)→VARCHAR(10) 這種會截斷資料的變更判成「不變」。
 
-function renderDiff(designed, existing) {
+function renderDiff(diff) {
   const container = document.querySelector('[data-target="schema-diff"]');
   if (!container) return;
   container.textContent = "";
-  if (!existing || !existing.length) {
+  if (!diff) {
     container.appendChild(el("p", "form-hint", "此 session 未匯入現有 DB，無差異比對。"));
     return;
   }
-
-  const designedNames = new Set((designed || []).map((t) => t.table_name));
-  const existingMap = new Map(existing.map((t) => [t.table_name, t]));
 
   function addItem(tagClass, tagText, description) {
     const item = el("div", "diff-item");
@@ -96,28 +110,24 @@ function renderDiff(designed, existing) {
     container.appendChild(item);
   }
 
-  for (const table of designed || []) {
-    const old = existingMap.get(table.table_name);
-    if (!old) {
-      addItem("new", "新增", table.table_name);
-      continue;
+  for (const name of diff.new_tables || []) addItem("new", "新增", name);
+
+  for (const [name, detail] of Object.entries(diff.modified_tables || {})) {
+    const parts = [];
+    if (detail.added_columns?.length) {
+      parts.push(`新增欄位：${detail.added_columns.map((c) => c.name).join(", ")}`);
     }
-    const oldCols = new Set(old.columns.map((c) => c.name));
-    const newCols = new Set(table.columns.map((c) => c.name));
-    const added = [...newCols].filter((c) => !oldCols.has(c));
-    const removed = [...oldCols].filter((c) => !newCols.has(c));
-    if (added.length || removed.length) {
-      const parts = [];
-      if (added.length) parts.push(`新增欄位：${added.join(", ")}`);
-      if (removed.length) parts.push(`移除欄位：${removed.join(", ")}`);
-      addItem("modified", "變更", `${table.table_name}（${parts.join("；")}）`);
-    } else {
-      addItem("same", "不變", table.table_name);
+    if (detail.removed_columns?.length) {
+      parts.push(`移除欄位：${detail.removed_columns.map((c) => c.name).join(", ")}`);
     }
+    for (const col of detail.changed_columns || []) {
+      parts.push(`${col.name}：${col.diffs.join("、")}`);
+    }
+    addItem("modified", "變更", `${name}（${parts.join("；")}）`);
   }
-  for (const name of existingMap.keys()) {
-    if (!designedNames.has(name)) addItem("dropped", "移除", name);
-  }
+
+  for (const name of diff.unchanged_tables || []) addItem("same", "不變", name);
+  for (const name of diff.dropped_tables || []) addItem("dropped", "移除", name);
 }
 
 // ── 版本列表／還原 ──────────────────────────────────────────────────────
@@ -145,10 +155,21 @@ async function loadDetail() {
     const detail = await api.get(ENDPOINTS.session(sessionId));
     renderTables(detail.latest_tables);
     renderKeyPoints(detail.latest_key_points);
-    renderDiff(detail.latest_tables, detail.context_tables);
+    renderDiff(detail.schema_diff);
   } catch {
     // apiFetch 已 toast
   }
+}
+
+// ── 以 DDL 直接編輯結構 ──────────────────────────────────────────────────
+
+function setDdlEditorOpen(open) {
+  const editor = document.querySelector('[data-target="ddl-editor"]');
+  const tables = document.querySelector('[data-target="schema-tables-container"]');
+  const toggle = document.querySelector('[data-action="toggle-ddl-editor"]');
+  if (editor) editor.hidden = !open;
+  if (tables) tables.hidden = open;
+  if (toggle) toggle.textContent = open ? "回到表格檢視" : "直接編輯結構";
 }
 
 document.addEventListener("click", async (event) => {
@@ -164,6 +185,50 @@ document.addEventListener("click", async (event) => {
     } catch {
       target.disabled = false;
     }
+  }
+
+  if (action === "toggle-ddl-editor") {
+    const editor = document.querySelector('[data-target="ddl-editor"]');
+    if (editor && !editor.hidden) {
+      setDdlEditorOpen(false);
+      return;
+    }
+    try {
+      const { ddl } = await api.get(ENDPOINTS.sessionTablesDdl(sessionId));
+      const textarea = document.querySelector('[data-target="ddl-editor-text"]');
+      if (textarea) textarea.value = ddl;
+      setDdlEditorOpen(true);
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
+
+  if (action === "cancel-ddl-editor") {
+    setDdlEditorOpen(false);
+    return;
+  }
+
+  if (action === "save-ddl-editor") {
+    const textarea = document.querySelector('[data-target="ddl-editor-text"]');
+    if (!textarea || !textarea.value.trim()) {
+      showToast("請先填入建表語法", "warning");
+      return;
+    }
+    target.disabled = true;
+    try {
+      const version = await api.put(ENDPOINTS.sessionTablesDdl(sessionId), {
+        ddl: textarea.value,
+      });
+      showToast(`已儲存為 v${version.version_num}`, "success");
+      setDdlEditorOpen(false);
+      await Promise.all([loadDetail(), loadVersions()]);
+    } catch {
+      // apiFetch 已 toast（含解析失敗的說明）
+    } finally {
+      target.disabled = false;
+    }
+    return;
   }
 
   if (action === "restore-version") {

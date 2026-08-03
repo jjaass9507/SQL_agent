@@ -78,3 +78,37 @@ async def test_auth_enabled_cookie_authentication(client, make_user, enable_auth
     # cookie 已存進 client 的 cookie jar，不帶 Authorization header
     resp = await client.get("/api/v1/sessions")
     assert resp.status_code == 200
+
+
+# ── B0：先前完全沒有認證依賴的端點 ────────────────────────────────────────
+#
+# 這幾個端點在 AUTH_ENABLED=false 的預設部署下曾經是誰都能打的：
+# Agent 能透過工具讀取業務資料庫的真實資料、activity 是稽核紀錄、
+# settings 會列出已設定的業務資料庫。加上 get_current_user 後，匿名模式
+# 行為完全不變，但 AUTH_ENABLED=true 時會確實擋下未登入的請求。
+
+_PREVIOUSLY_UNPROTECTED = [
+    ("GET", "/api/v1/settings"),
+    ("GET", "/api/v1/activity"),
+    ("GET", "/api/v1/change-requests"),
+]
+
+
+async def test_previously_unprotected_endpoints_stay_open_when_auth_disabled(client):
+    for method, path in _PREVIOUSLY_UNPROTECTED:
+        resp = await client.request(method, path)
+        assert resp.status_code == 200, f"{method} {path} 在匿名模式下不該被擋"
+
+
+async def test_previously_unprotected_endpoints_require_login_when_auth_enabled(
+    client, enable_auth
+):
+    for method, path in _PREVIOUSLY_UNPROTECTED:
+        resp = await client.request(method, path)
+        assert resp.status_code == 401, f"{method} {path} 在 AUTH_ENABLED=true 時應要求登入"
+
+
+async def test_agent_chat_requires_login_when_auth_enabled(client, enable_auth):
+    """Agent 可透過工具對業務資料庫下查詢，不該是未登入即可呼叫的端點。"""
+    resp = await client.post("/api/v1/agent/chat", json={"message": "列出所有資料庫"})
+    assert resp.status_code == 401

@@ -47,7 +47,6 @@ class Tool:
     description: str
     parameters: dict[str, Any]  # OpenAI function calling 的 JSON Schema
     handler: Callable[[dict, ToolContext], Awaitable[dict]]
-    read_only: bool = True
 
 
 # ── 共用小工具 ────────────────────────────────────────────────────────────
@@ -375,7 +374,6 @@ _register(Tool(
         "required": ["ddl"],
     },
     handler=_tool_propose_ddl,
-    read_only=False,
 ))
 
 

@@ -14,6 +14,20 @@
 > Phase 9 部署（Dockerfile / docker-compose）。
 > v0.5 完整實作保留在 `main` 分支。
 >
+> **上線前可用性強化（依使用者訪談與功能盤點）：** 業務資料庫連線的增刪改由
+> `ADMIN_TOKEN`/admin 角色保護（見 `docs/permission_matrix.md`）、核准 DDL 前
+> 加上帶影響評估的確認對話框、文件頁真正渲染 Markdown 與 SQL 並支援瀏覽器列印
+> 另存 PDF、外部 CDN 資產全部落地（內網可離線運作）、差異比對改由後端計算
+> （會標出型態與長度變更）、session 可命名/刪除/搜尋。
+> 另有：對話歷史可還原、確認頁可直接以建表語法編輯結構、產出失敗可重跑、
+> 設計模式可匯入現有資料庫、DB Agent 可開新對話、審查報告改走結構化輸出
+> （Markdown 由平台排版，不再靠正則解析 LLM 自由書寫的文字）。
+>
+> 本階段新增端點：`DELETE /sessions/{id}`、`GET /sessions/{id}/messages`、
+> `GET|PUT /sessions/{id}/tables-ddl`、`POST /agent/conversations`。
+> `agent` / `settings` / `activity` / `change-requests` 補上認證依賴——
+> `AUTH_ENABLED=false` 的行為完全不變，`true` 時才會實際生效。
+>
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
 
 ---

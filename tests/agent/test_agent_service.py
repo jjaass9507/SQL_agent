@@ -295,13 +295,13 @@ async def test_large_query_result_is_truncated_when_persisted(db_session):
 # -- 純函式單元測試（transcript 編碼/重建、摘要）------------------------------
 
 
-def test_decode_ai_content_plain_text_returns_none():
-    assert agent_service._decode_ai_content("這是一般回覆文字") is None
+def testdecode_ai_content_plain_text_returns_none():
+    assert agent_service.decode_ai_content("這是一般回覆文字") is None
 
 
-def test_decode_ai_content_tool_call_roundtrip():
+def testdecode_ai_content_tool_call_roundtrip():
     encoded = agent_service._encode_tool_call("c1", "get_schema", {"db": "shop"})
-    decoded = agent_service._decode_ai_content(encoded)
+    decoded = agent_service.decode_ai_content(encoded)
     assert decoded == {
         "type": "tool_call",
         "id": "c1",

@@ -47,6 +47,8 @@ app = [
     "web/static/css/*",
     "web/static/js/*",
     "web/static/js/lib/*",
+    "web/static/js/pages/*",
+    "web/static/vendor/*",
     "llm/prompts/*",
 ]
 
