@@ -276,6 +276,12 @@ class LLMProvider:
         await asyncio.sleep(delay)
 
     def _build_chat_result(self, resp: Any) -> ChatResult:
+        # gateway 回 200 但 choices 是空陣列時，直接取 [0] 會是 IndexError——
+        # 那會穿過所有只攔 LLMError 的呼叫端，變成沒有訊息的 500。
+        if not getattr(resp, "choices", None):
+            raise LLMError(
+                "llm gateway 回應沒有任何 choices（回傳內容不符合 Chat Completions 格式）"
+            )
         choice = resp.choices[0]
         message = choice.message
         tool_calls: list[ToolCall] = []

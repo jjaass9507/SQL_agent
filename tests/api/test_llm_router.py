@@ -103,3 +103,41 @@ async def test_diagnose_source_forced_when_force_profile_set(client, monkeypatch
         health_resp = await client.get("/api/v1/llm/health")
 
     assert health_resp.json()["profile"] == body["probed"]
+
+
+async def test_diagnose_reports_bad_force_profile_instead_of_opaque_500(client, monkeypatch):
+    """LLM_FORCE_PROFILE 格式錯時要看得到原因。
+
+    原本探針會照跑（模型端確實收到請求），最後才在解析 force 值時拋 LLMError，
+    對呼叫端只是一個沒有內容的 500，完全無從得知是設定寫錯。
+    """
+    monkeypatch.setenv("LLM_FORCE_PROFILE", "{multi_turn: false}")
+    get_settings.cache_clear()
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").side_effect = _probe_responses()
+        resp = await client.post("/api/v1/llm/diagnose")
+
+    assert resp.status_code == 502
+    assert "LLM_FORCE_PROFILE" in resp.json()["detail"]
+
+
+async def test_diagnose_survives_gateway_returning_no_choices(client):
+    """gateway 回 200 但 choices 是空陣列：探針判定為不支援，端點仍要正常回應。"""
+    empty = httpx.Response(
+        200,
+        json={
+            "id": "1",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "test-model",
+            "choices": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        },
+    )
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(return_value=empty)
+        resp = await client.post("/api/v1/llm/diagnose")
+
+    assert resp.status_code == 200
+    assert resp.json()["probed"]["multi_turn"] is False
