@@ -42,19 +42,31 @@ def _structured_retry_prompt(model: type[BaseModel]) -> str:
     )
 
 
+def _strip_wrapping_quotes(text: str) -> str:
+    """剝掉整串外層的一組成對引號（`'{"a": 1}'` → `{"a": 1}`）。"""
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1].strip()
+    return text
+
+
 def forced_profile(settings: Settings) -> CapabilityProfile | None:
     """解析 `LLM_FORCE_PROFILE`（JSON）為手動覆蓋用的 CapabilityProfile。
 
     留空 → 回傳 None（走自動偵測）。格式錯誤直接拋 `LLMError`（啟動期即發現，
-    不靜默忽略）。未列出的欄位沿用 `CapabilityProfile` 預設（True）。
+    不靜默忽略），訊息帶上實際讀到的字串——只講「不是合法 JSON」時，沒人分得出
+    是自己寫錯還是環境變數根本沒傳進來。未列出的欄位沿用預設（True）。
+
+    外層的成對引號會先剝掉：`.env` 由 python-dotenv 處理掉了，但 web.config、
+    Windows 系統環境變數、docker-compose 的 list 形式都會把引號原封不動傳進來。
     """
     raw = settings.llm_force_profile
     if not raw or not raw.strip():
         return None
+    text = _strip_wrapping_quotes(raw.strip())
     try:
-        data = json.loads(raw)
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise LLMError(f"LLM_FORCE_PROFILE 不是合法 JSON：{exc}") from exc
+        raise LLMError(f"LLM_FORCE_PROFILE 不是合法 JSON（{exc}）；實際讀到的值：{raw!r}") from exc
     try:
         return CapabilityProfile.model_validate(data)
     except ValidationError as exc:

@@ -328,3 +328,18 @@ async def test_force_native_tools_false_sends_downgraded_request_body():
     assert "tools" not in sent_body  # 原生 tools 欄位不送出（已降級為模擬工具）
     # 工具目錄改以文字注入 prompt
     assert any("get_schema" in (m.get("content") or "") for m in sent_body["messages"])
+
+
+def test_force_profile_tolerates_wrapping_quotes():
+    """web.config、Windows 系統環境變數、docker-compose 的 list 形式都不會剝掉
+    外層引號，值會原封不動連引號一起傳進來。"""
+    for raw in ("'{\"native_tools\": false}'", '"{\"native_tools\": false}"'):
+        provider = LLMProvider.from_settings(_force_settings(raw))
+        assert provider.profile.native_tools is False
+
+
+def test_force_profile_error_shows_the_value_actually_read():
+    """只說「不是合法 JSON」的話，分不出是自己寫錯還是環境變數根本沒傳進來。"""
+    settings = _force_settings("{multi_turn: false}")
+    with pytest.raises(LLMError, match=r"實際讀到的值：'\{multi_turn: false\}'"):
+        LLMProvider.from_settings(settings)
