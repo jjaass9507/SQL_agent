@@ -54,6 +54,7 @@
 | [`workflow_diagrams.md`](docs/workflow_diagrams.md) | 工作流程圖 |
 | [`test_cases.md`](docs/test_cases.md) | 測試案例 |
 | [`go_live_checklist.md`](docs/go_live_checklist.md) | 上線檢查清單 |
+| [`feature_backlog.md`](docs/feature_backlog.md) | 功能盤點與優先順序（三方評估整合，含已複驗的證據與裁決） |
 | `v05/` | v0.5 舊實作的架構/部署/維運文件（歷史參考，不適用於 v2） |
 
 ## 開發輔助 Skills（`.claude/skills/`）
