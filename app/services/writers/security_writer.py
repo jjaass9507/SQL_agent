@@ -34,4 +34,5 @@ class SecurityWriter:
         )
         task = _TASK_PROMPT.format(sensitive_note=sensitive_note)
         response = await ask(self._provider, tables_prompt(task, tables))
-        return f"# 效能與安全規劃書\n\n{response}\n"
+        body = response or "（效能與安全規劃書產出失敗，請重新產出。）"
+        return f"# 效能與安全規劃書\n\n{body}\n"

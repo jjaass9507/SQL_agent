@@ -60,4 +60,6 @@ class DiagramWriter:
         response = await ask(self._provider, tables_prompt(_TASK_PROMPT, tables))
         prose = _FENCE_RE.sub("", response).strip()
         diagram = build_mermaid_er(tables)
-        return f"# 結構與關聯圖\n\n{prose}\n\n```mermaid\n{diagram}\n```\n"
+        # 關聯說明拿不到時只留圖：圖本身是確定性產生的，文件不會因此開天窗。
+        body = f"{prose}\n\n" if prose else ""
+        return f"# 結構與關聯圖\n\n{body}```mermaid\n{diagram}\n```\n"

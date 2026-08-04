@@ -85,6 +85,7 @@ class LLMProvider:
         verify: bool = True,
         timeout: float = 120.0,
         profile: CapabilityProfile | None = None,
+        debug_payload: bool = False,
     ) -> None:
         # 自簽憑證 gateway：verify=False 時改用自訂 httpx.AsyncClient(verify=False)
         http_client = None if verify else httpx.AsyncClient(verify=False)
@@ -97,6 +98,7 @@ class LLMProvider:
         )
         self.model = model
         self.profile = profile or CapabilityProfile()
+        self._debug_payload = debug_payload
 
     @classmethod
     def from_settings(
@@ -124,6 +126,7 @@ class LLMProvider:
             verify=settings.llm_verify,
             timeout=settings.llm_timeout,
             profile=profile,
+            debug_payload=settings.llm_debug_payload,
         )
 
     async def chat(
@@ -250,6 +253,8 @@ class LLMProvider:
                     "n_messages": len(kwargs.get("messages", [])),
                 },
             )
+            if self._debug_payload:
+                logger.warning("llm_debug_request >>>\n%s", _preview(_dump(kwargs)))
             t0 = time.monotonic()
             try:
                 resp = await self._client.chat.completions.create(**kwargs)
@@ -269,6 +274,8 @@ class LLMProvider:
                 )
                 raise LLMError(f"llm 連線失敗：{exc}") from exc
 
+            if self._debug_payload and not kwargs.get("stream"):
+                logger.warning("llm_debug_response <<<\n%s", _preview(_dump(resp)))
             elapsed = time.monotonic() - t0
             logger.info(
                 "llm_call_done",
@@ -310,6 +317,26 @@ class LLMProvider:
             total_tokens=usage_obj.total_tokens if usage_obj else 0,
         )
         return ChatResult(text=message.content, tool_calls=tool_calls, parsed=None, usage=usage)
+
+
+# LLM_DEBUG_PAYLOAD 的單則 log 上限（request/response 各自計算）。
+_DEBUG_MAX_CHARS = 6_000
+
+
+def _dump(obj: Any) -> str:
+    """把 request kwargs 或 SDK 回應物件轉成可讀的 JSON 文字。"""
+    if hasattr(obj, "model_dump"):
+        obj = obj.model_dump()
+    try:
+        return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        return str(obj)
+
+
+def _preview(text: str) -> str:
+    if len(text) <= _DEBUG_MAX_CHARS:
+        return text
+    return f"{text[:_DEBUG_MAX_CHARS]}\n...（截斷，全長 {len(text)} 字）"
 
 
 def _usage_dict(usage: Any) -> dict[str, int] | None:

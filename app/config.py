@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     llm_verify: bool = False          # 自簽憑證 gateway 預設不驗證
     llm_timeout: float = 120.0        # read timeout 秒數
     llm_force_profile: str | None = None  # JSON，覆蓋自動偵測的 CapabilityProfile（除錯用）
+    llm_debug_payload: bool = False    # 把每次送出的 messages 與模型回應寫進 log（除錯用）
 
     # 平台自身資料庫（正式 PostgreSQL；未設定時本機 SQLite）
     database_url: str = "sqlite+aiosqlite:///./data/app.db"

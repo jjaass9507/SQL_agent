@@ -343,3 +343,22 @@ def test_force_profile_error_shows_the_value_actually_read():
     settings = _force_settings("{multi_turn: false}")
     with pytest.raises(LLMError, match=r"實際讀到的值：'\{multi_turn: false\}'"):
         LLMProvider.from_settings(settings)
+
+
+async def test_debug_payload_logs_request_and_response(caplog):
+    """LLM_DEBUG_PAYLOAD=true：把送出的 messages 與模型回應寫進 log 訊息本體。
+
+    專案沒有設定任何 logging formatter，`extra={...}` 的欄位不會被印出來，
+    所以除錯內容必須放在訊息字串裡才看得到。
+    """
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(return_value=chat_completion_response(content="哈囉"))
+        provider = make_provider(debug_payload=True)
+        with caplog.at_level("WARNING", logger="app.llm.provider"):
+            await provider.chat([{"role": "user", "content": "獨特的問題內容"}])
+
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "llm_debug_request" in logged
+    assert "獨特的問題內容" in logged
+    assert "llm_debug_response" in logged
+    assert "哈囉" in logged

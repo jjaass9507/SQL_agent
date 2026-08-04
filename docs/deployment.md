@@ -135,6 +135,25 @@ app 依 gateway 的五項能力（`multi_turn` / `system_role` / `native_tools` 
    但 `source` 為 `forced`、`profile` 為覆蓋值——若「改了平台卻看不到行為變化」，先確認此變數
    是否仍在覆蓋。實測驗證通過後，建議把最終生效的 profile 與平台設定記錄於此。
 
+   **只放「值」，不要連變數名稱一起填**。`.env` 檔才需要寫 `LLM_FORCE_PROFILE=...` 整行；
+   web.config 的 `value=`、Windows 系統環境變數的「變數值」欄、docker-compose 的 map 形式
+   都只填 JSON 本身。填錯時 `diagnose` 會回 502 並附上實際讀到的字串，照著改即可。
+   外層若被平台原封不動帶入成對引號（web.config／compose 的 list 形式），程式會自動剝掉。
+
+### LLM 呼叫的除錯 log
+
+`LLM_DEBUG_PAYLOAD=true` 時，每次呼叫都會把**實際送出的 messages** 與**模型的原始回應**
+寫進 log（WARNING 級別，各自上限 6,000 字）。判斷「是設定沒生效、還是模型不聽話」時直接看它：
+
+```
+llm_debug_request >>>
+{ "model": "...", "messages": [ { "role": "user", "content": "..." } ] }
+llm_debug_response <<<
+{ "choices": [ { "message": { "content": "..." } } ] }
+```
+
+內容含完整 prompt 與資料表結構，正式環境查完問題請關掉。
+
 ## 4. Windows Server IIS 部署（AD SSO）
 
 適用情境：內網部署、需要以 Active Directory 帳號登入，且希望瀏覽器透過 IIS 的
