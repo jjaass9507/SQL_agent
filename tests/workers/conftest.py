@@ -98,19 +98,18 @@ def chat_completion_response(content: str | None) -> httpx.Response:
 
 
 def dispatch_by_marker(responses: dict[str, str]):
-    """依 system prompt 是否含某個 marker 字串分派回應內容，供 respx side_effect 使用。
+    """依請求內容是否含某個 marker 字串分派回應內容，供 respx side_effect 使用。
 
     四份文件並行產出時會同時打好幾個不同的 writer（DDL/圖說明/安全規劃……），
-    需要依請求內容分辨是哪一個呼叫、回傳對應內容。
+    需要依請求內容分辨是哪一個呼叫、回傳對應內容。比對範圍是整包訊息而不是
+    只有 system——任務指示現在寫在 human 訊息裡（見 writers/_common.py）。
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        system_content = next(
-            (m["content"] for m in body["messages"] if m.get("role") == "system"), ""
-        )
+        all_content = "\n".join(m.get("content") or "" for m in body["messages"])
         for marker, content in responses.items():
-            if marker in system_content:
+            if marker in all_content:
                 return chat_completion_response(content)
         return chat_completion_response("")
 

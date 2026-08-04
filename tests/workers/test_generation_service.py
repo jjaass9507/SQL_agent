@@ -80,11 +80,11 @@ async def test_single_document_failure_does_not_affect_others(session_factory):
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        system_content = next(m["content"] for m in body["messages"] if m["role"] == "system")
-        if "PostgreSQL DDL 腳本" in system_content:
+        all_content = "\n".join(m.get("content") or "" for m in body["messages"])
+        if "PostgreSQL DDL 腳本" in all_content:
             return httpx.Response(500, json={"error": {"message": "boom"}})
         for marker, content in _MARKERS.items():
-            if marker in system_content:
+            if marker in all_content:
                 return chat_completion_response(content)
         return chat_completion_response("")
 
@@ -143,3 +143,29 @@ async def test_progress_json_transitions_waiting_loading_done_per_file(
             if value != changes[-1]:
                 changes.append(value)
         assert changes == ["waiting", "loading", "done"]
+
+
+async def test_writers_send_one_user_message_with_everything_in_it(session_factory):
+    """writers 只送一則 user 訊息，角色設定與任務指示都在裡面。
+
+    指示放 system 的話，gateway 一忽略 system role，模型收到的就只有一串資料表
+    JSON，完全不知道要做什麼（實測 ER 圖說明就是這樣被產壞的）。
+    """
+    session_id, job_id = await _create_session_and_job(session_factory)
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions").mock(side_effect=dispatch_by_marker(_MARKERS))
+        provider = make_provider()
+        await generation_service.generate_documents(
+            job_id, session_id, _sample_tables(), provider=provider, session_factory=session_factory
+        )
+
+    sent = [json.loads(call.request.content)["messages"] for call in route.calls]
+    assert all([m["role"] for m in messages] == ["user"] for messages in sent)
+
+    contents = [messages[0]["content"] for messages in sent]
+    assert any("關聯設計決策" in c for c in contents)  # 02 ER 圖的任務指示
+    assert any("PostgreSQL DDL 腳本" in c for c in contents)  # 03 DDL 的任務指示
+    assert any("效能與安全規劃書" in c for c in contents)  # 04 安全規劃的任務指示
+    assert all("你是資料庫架構師" in c for c in contents)  # 角色設定
+    assert all("資料表的規格（JSON）" in c for c in contents)  # 資料本身也有標示

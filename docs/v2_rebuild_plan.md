@@ -185,11 +185,11 @@ class ChatResult:
 
 | 能力缺失 | 降級行為 | 對應 v0.5 的舊機制 |
 |---|---|---|
-| `native_tools=false` | 工具目錄改注入 system prompt，要求模型輸出 JSON 格式的工具呼叫（單一 JSON 區塊，非 XML 標籤），provider 解析後包裝成 `ToolCall` 回傳 | `<TOOL>` 標籤協定（簡化重寫） |
-| `json_schema=false` | 在 prompt 中附上 schema 說明要求輸出 JSON，回應以 Pydantic 寬鬆解析（含 markdown code fence 剝除、一次自動重試） | `<TABLE_SPECS>` 標籤解析 |
+| `native_tools=false` | 工具目錄改注入 prompt，要求模型輸出 JSON 格式的工具呼叫（單一 JSON 區塊，非 XML 標籤），provider 以與 structured output 同一套寬鬆規則解析後包裝成 `ToolCall` 回傳 | `<TOOL>` 標籤協定（簡化重寫） |
+| `json_schema=false` | 在 prompt 中附上 schema 說明要求輸出 JSON，回應以 Pydantic 寬鬆解析（剝除 `<think>` 區塊與 markdown code fence、抽出夾在說明文字中的 JSON 區塊、修補結尾多餘逗號；仍失敗則附上 schema 自動重試兩次） | `<TABLE_SPECS>` 標籤解析 |
 | `system_role=false` | system 內容併入第一則 user 訊息開頭 | `LLM_SYSTEM_MODE=inline` |
 | `streaming=false` | 非串流呼叫後一次性回傳（SSE 端仍照常推一個完整 event，前端無感） | —（新功能） |
-| `multi_turn=false` | **最後手段**：整段歷史攤平成單一 user 訊息 | `LLM_SYSTEM_MODE=single_turn` |
+| `multi_turn=false` | **最後手段**：整段歷史攤平成單一 user 訊息。角色以 `[系統指示]`／`[使用者]`／`[助理]`／`[工具結果]` 標示；原生 tool call（`content` 為 None、工具在 `tool_calls` 欄位）改寫成「呼叫工具 X，參數：…」文字，工具結果標明是哪個工具回傳；注入的工具目錄與 schema 說明改放在整段文字**最後** | `LLM_SYSTEM_MODE=single_turn` |
 
 **設定介面**：只留一個選配環境變數 `LLM_FORCE_PROFILE`（JSON，覆蓋自動偵測，
 供除錯），其餘 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_VERIFY` /
@@ -199,12 +199,28 @@ class ChatResult:
 
 | 功能 | v0.5 作法 | v2 作法 |
 |---|---|---|
-| Interviewer 需求收集 | 每輪把回覆丟給 XML 標籤解析找 `<TABLE_SPECS>` | 多輪 messages + `response_model=InterviewTurn`（Pydantic：`reply: str`、`tables: list[TableSpec] | None`、`summary: list[str] | None`）——一次呼叫同時拿到回覆文字與結構化 schema |
+| Interviewer 需求收集 | 每輪把回覆丟給 XML 標籤解析找 `<TABLE_SPECS>` | 多輪 messages + `response_model=InterviewTurn`（Pydantic：`reply: str`、`tables: list[TableSpec] | None`、`summary: list[str] | None`、`user_confirmed: bool`）——一次呼叫同時拿到回覆文字與結構化 schema。tables 要**先提案、使用者明確同意**才會定案（見 4-5） |
 | DB Agent 工具迴圈 | `<TOOL>`/`<OBSERVATION>` 文字協定，人肉重建 transcript | 原生 function calling 迴圈：`tools=registry.tool_defs()` → 收到 `tool_calls` → 執行 → 以 `role:"tool"` 訊息回填 → 續呼叫（上限 8 步不變；`propose_ddl` 仍為 terminal） |
-| Writers（DDL/Diagram/Security） | 單發 `chat(system, human)` | 不變（單發呼叫），但走 provider 統一出口；DiagramWriter 的 Mermaid 仍**確定性產生**、SpecWriter 仍零 API |
-| Reviewer | 單發呼叫 | 不變 |
+| Writers（DDL/Diagram/Security） | 單發 `chat(system, human)` | 走 provider 統一出口；DiagramWriter 的 Mermaid 仍**確定性產生**、SpecWriter 仍零 API。改為**只送一則 user 訊息**，角色設定、資料與任務指示全寫在裡面（資料在前、指示在後），完全不依賴 system role——只放 system 的話，gateway 一忽略，模型收到的就只有一串資料表 JSON |
+| Reviewer | 單發呼叫 | 同上只送一則 user 訊息（reviewer.txt 同時是角色設定與四面向規範，一併寫進去）；報告走 `response_model=ReviewReport`，解析失敗才退回純文字單發 |
 | NL2SQL | 單發呼叫 | `response_model=SQLDraft`（`sql: str`、`explanation: str`），杜絕從自由文字撈 SQL |
 | 對話串流 | 無 | Interviewer 與 DB Agent 的文字回覆改走 streaming → SSE |
+
+### 4-5 Interviewer 的提案／同意閘門
+
+模型常常使用者一句「我要一張設備主檔」就直接吐出完整設計，跳過整個訪談。
+「什麼時候算蒐集夠了」交給模型判斷不可靠，改成由 `interview_service` 把關：
+
+1. 模型給出 tables 時，若**尚未提過案**，本輪一律降級成提案——不落版本、
+   不轉 phase，並由我們自己把結構排版成文字附在 `reply` 後面（模型常把設計
+   只放進 tables 欄位、reply 只寫一句「設計完成」，擋掉 tables 後使用者會
+   什麼都看不到）。
+2. 提過案之後，模型回報 `user_confirmed=true`（使用者說「可以」「就這樣」）
+   的那一輪才定案。
+3. 保險：提案累積到 2 次就直接放行，避免模型始終不回報同意、使用者卡在
+   永遠進不了確認頁的迴圈。
+
+「已提過幾次案」不另外存狀態，數對話歷史裡帶提案標記的 AI 訊息即可。
 
 ---
 
@@ -361,7 +377,7 @@ app/web/
 - `llm/capabilities.py`：五項能力探針 + profile 持久化
 - `llm/adapters.py`：五個降級轉接器（表格見 4-3）
 - **驗證**：單元測試涵蓋——標準路徑、429 退避、每個能力缺失時的降級行為、
-  串流分塊、structured output 解析失敗自動重試一次；
+  串流分塊、structured output 解析失敗自動重試（重試訊息同樣套用 multi_turn 降級）；
   `pytest tests/llm/ -v` 全綠
 
 ### Phase 2 — 資料層（1.5 天）

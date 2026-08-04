@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.llm.errors import LLMError
 from app.llm.provider import LLMProvider
 from app.rules.spec_models import TableSpec
-from app.services.writers._common import BASE_PROMPT, ask, load_prompt, tables_payload
+from app.services.writers._common import ask, load_prompt, tables_prompt, task_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +30,10 @@ _SINGLE_SHOT = {
 
 
 async def write(provider: LLMProvider, kind: str, tables: list[TableSpec]) -> str:
-    """單發 LLM 產出：system = base + `{kind}.txt`，human = TableSpec JSON。"""
+    """單發 LLM 產出：單一則 user 訊息 = TableSpec JSON + 角色設定 + `{kind}.txt`。"""
     header, fallback = _SINGLE_SHOT[kind]
-    system_prompt = f"{BASE_PROMPT}\n\n{load_prompt(kind)}"
-    return header + (await ask(provider, system_prompt, tables_payload(tables)) or fallback)
+    prompt = tables_prompt(task_instructions(kind), tables)
+    return header + (await ask(provider, prompt) or fallback)
 
 
 class ReviewReport(BaseModel):
@@ -80,27 +80,24 @@ def render_review_markdown(report: ReviewReport) -> str:
 
 
 async def review(provider: LLMProvider, tables: list[TableSpec]) -> str:
-    """審查模式單發：四維度報告 + 評分。system 只用 reviewer.txt，不套 base。
+    """審查模式單發：四維度報告 + 評分。指示只用 reviewer.txt，不套 base。
+
+    與其他 writer 一樣只送一則 user 訊息：reviewer.txt 同時是角色設定與四個
+    面向的內容規範，放在 system 的話 gateway 一忽略就整份規範消失，模型只會
+    收到一串 JSON。
 
     走 structured output；gateway 不支援 json_schema 時 `adapters` 會改以 prompt
     注入模擬，仍解析失敗才退回純文字單發（至少產出得了東西，格式則不保證——
     審查頁對此有降級顯示）。
     """
-    human_prompt = (
-        f"請審查以下 {len(tables)} 張資料表的結構：\n\n```json\n{tables_payload(tables)}\n```"
-    )
-    system_prompt = load_prompt("reviewer")
+    prompt = tables_prompt(load_prompt("reviewer"), tables)
     try:
         result = await provider.chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": human_prompt},
-            ],
-            response_model=ReviewReport,
+            [{"role": "user", "content": prompt}], response_model=ReviewReport
         )
         return render_review_markdown(result.parsed)
     except LLMError:
         logger.warning("review_structured_output_failed_falling_back_to_text")
 
-    response = await ask(provider, system_prompt, human_prompt)
+    response = await ask(provider, prompt)
     return response or "（審查失敗，請稍後再試）"

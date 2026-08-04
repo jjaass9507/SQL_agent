@@ -6,15 +6,19 @@
     system_role → native_tools → json_schema → multi_turn（最後手段）
 `multi_turn` 放最後，是因為它會把整段訊息攤平成單一則，其餘轉接注入的
 內容（工具目錄、schema 說明）必須先寫進訊息裡，才會一併被攤平進去。
+
+能力全關（gateway 只讀得到單一則 user 訊息）時，這一層等於是唯一的介面：
+送出去的那則訊息必須自帶角色設定、完整歷史、工具目錄與本輪指示，
+模型才有可能答對——`flatten_history` 的排版就是為此而寫。
 """
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from app.llm.structured import strip_code_fence
+from app.llm.structured import json_candidates
 from app.llm.types import ChatChunk, ChatResult, Message, ToolCall, ToolDef
 
 _ROLE_LABELS = {
@@ -52,24 +56,29 @@ def apply(
     if not system_role:
         result_messages = _adapt_system_role(result_messages)
 
+    instructions: list[str] = []
+
     api_tools = tools
     emulate_tools = False
     if tools and not native_tools:
-        result_messages = _inject_instruction(result_messages, _build_tool_prompt_injection(tools))
+        instructions.append(_build_tool_prompt_injection(tools))
         api_tools = None
         emulate_tools = True
 
     api_response_model = response_model
     emulate_schema = None
     if response_model and not json_schema:
-        result_messages = _inject_instruction(
-            result_messages, _build_schema_prompt_injection(response_model)
-        )
+        instructions.append(_build_schema_prompt_injection(response_model))
         api_response_model = None
         emulate_schema = response_model
 
-    if not multi_turn:
-        result_messages = _adapt_multi_turn(result_messages)
+    if multi_turn:
+        for text in instructions:
+            result_messages = _inject_instruction(result_messages, text)
+    else:
+        # 攤平時指示改放整段文字的最後：夾在歷史最前面的指示（工具目錄、
+        # schema 說明）在長對話裡最容易被模型忽略。
+        result_messages = flatten_history(result_messages, instructions)
 
     return AdaptedRequest(
         messages=result_messages,
@@ -93,13 +102,46 @@ def _adapt_system_role(messages: list[Message]) -> list[Message]:
     return [{"role": "user", "content": system_content}, *rest]
 
 
-def _adapt_multi_turn(messages: list[Message]) -> list[Message]:
-    """multi_turn 缺失（最後手段）：整段歷史攤平成單一則 user 訊息。"""
-    lines = [
-        f"{_ROLE_LABELS.get(m.get('role'), '[' + str(m.get('role')) + ']')}\n{m.get('content', '')}"
-        for m in messages
-    ]
+def flatten_history(messages: list[Message], trailing: Sequence[str] = ()) -> list[Message]:
+    """multi_turn 缺失（最後手段）：整段歷史攤平成單一則 user 訊息。
+
+    `trailing` 是要附在整段文字最後的指示（工具目錄、schema 說明）。
+
+    公開給 provider 的 structured 重試路徑重複使用——重試會在訊息尾端補上
+    assistant/user 兩則，那段也必須攤平，否則不支援多輪的 gateway 只會看到
+    最後一則重試指示，原始問題整個遺失。
+    """
+    tool_names: dict[str, str] = {}
+    lines: list[str] = []
+    for message in messages:
+        role = str(message.get("role"))
+        lines.append(f"{_ROLE_LABELS.get(role, f'[{role}]')}\n{_message_text(message, tool_names)}")
+        for call in message.get("tool_calls") or []:
+            if call.get("id"):
+                tool_names[call["id"]] = call.get("function", {}).get("name", "")
+    lines.extend(trailing)
     return [{"role": "user", "content": "\n\n".join(lines)}]
+
+
+def _message_text(message: Message, tool_names: dict[str, str]) -> str:
+    """把一則訊息轉成攤平後的純文字。
+
+    原生 tool call 的 assistant 訊息 `content` 是 None、工具名稱與參數在
+    `tool_calls` 欄位裡；只取 content 的話，攤平後模型會看不到自己上一步
+    呼叫了什麼工具（那一行只剩空白），也分不出工具結果是誰回來的。
+    """
+    parts: list[str] = []
+    if message.get("role") == "tool":
+        name = tool_names.get(str(message.get("tool_call_id")))
+        if name:
+            parts.append(f"（工具 {name} 的回傳）")
+    content = message.get("content")
+    if content:
+        parts.append(str(content))
+    for call in message.get("tool_calls") or []:
+        function = call.get("function", {})
+        parts.append(f"呼叫工具 {function.get('name', '')}，參數：{function.get('arguments', '')}")
+    return "\n".join(parts) if parts else "（無內容）"
 
 
 def _inject_instruction(messages: list[Message], text: str) -> list[Message]:
@@ -137,21 +179,24 @@ def _build_schema_prompt_injection(response_model: type[BaseModel]) -> str:
 
 
 def parse_tool_call_from_text(text: str) -> ToolCall | None:
-    """從降級轉接要求模型輸出的單一 JSON 區塊中解析出 ToolCall；解析失敗回傳 None。"""
-    if not text:
-        return None
-    candidate = strip_code_fence(text)
-    try:
-        payload = json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
-    call = payload.get("tool_call") if isinstance(payload, dict) else None
-    if not isinstance(call, dict) or "name" not in call:
-        return None
-    arguments = call.get("arguments")
-    if not isinstance(arguments, dict):
-        arguments = {}
-    return ToolCall(id="adapter-call-0", name=call["name"], arguments=arguments)
+    """從降級轉接要求模型輸出的 JSON 中解析出 ToolCall；解析失敗回傳 None。
+
+    候選字串沿用 structured output 那套寬鬆規則（`<think>` 區塊、code fence、
+    夾在說明文字中的 JSON），模型在 JSON 前後多寫幾句話不會讓工具呼叫失效。
+    """
+    for candidate in json_candidates(text or ""):
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        call = payload.get("tool_call") if isinstance(payload, dict) else None
+        if not isinstance(call, dict) or "name" not in call:
+            continue
+        arguments = call.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        return ToolCall(id="adapter-call-0", name=call["name"], arguments=arguments)
+    return None
 
 
 async def single_chunk_stream(result: ChatResult) -> AsyncIterator[ChatChunk]:

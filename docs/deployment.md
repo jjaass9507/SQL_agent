@@ -114,7 +114,22 @@ app 依 gateway 的五項能力（`multi_turn` / `system_role` / `native_tools` 
    ```bash
    # 例：平台確定不支援原生 tools / system role，強制走降級路徑
    LLM_FORCE_PROFILE='{"native_tools": false, "system_role": false}'
+
+   # 例：平台每次呼叫都是獨立的一問一答（無法帶入上下文），
+   #     強制把整段歷史攤平成單一則 user 訊息
+   LLM_FORCE_PROFILE='{"multi_turn": false}'
+
+   # 例：平台只讀得到單一則 user 訊息（system／歷史／原生 tools／json_schema 全都無效），
+   #     全部關掉，所有內容一律塞進那一則訊息
+   LLM_FORCE_PROFILE='{"multi_turn": false, "system_role": false, "native_tools": false, "json_schema": false}'
    ```
+
+   全關時送出的那則訊息長這樣（依序）：角色設定 → 標好角色的完整對話歷史
+   （工具呼叫與工具結果會寫成文字）→ 工具目錄／JSON Schema 指示。指示放最後是
+   刻意的：夾在長歷史前面的指示最容易被模型忽略。
+
+   `multi_turn=false` 會套用到**所有**送出的訊息，包含 structured output 解析失敗後的
+   自動重試——重試訊息會連同原始問題與 schema 一起攤平，不會只送出重試指示。
 
    設有 `LLM_FORCE_PROFILE` 時，`diagnose` 仍會實測並回報 `probed`（供比對平台是否已改變），
    但 `source` 為 `forced`、`profile` 為覆蓋值——若「改了平台卻看不到行為變化」，先確認此變數

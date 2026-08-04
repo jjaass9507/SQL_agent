@@ -1,23 +1,11 @@
 """GET /sessions/{id}/versions、POST /sessions/{id}/versions/{n}/restore。"""
 
-import respx
-
-from tests.api.conftest import BASE_URL, interview_turn_payload, sample_table
-from tests.llm.conftest import chat_completion_response
+from tests.api.conftest import drive_to_confirming, sample_table
 
 
 async def _send_turn_with_table(client, session_id: str, table_name: str) -> None:
-    tables = [sample_table(table_name)]
-    with respx.mock(base_url=BASE_URL) as mock:
-        mock.post("/chat/completions").mock(
-            return_value=chat_completion_response(
-                content=interview_turn_payload(f"設計了 {table_name}", tables=tables)
-            )
-        )
-        resp = await client.post(
-            f"/api/v1/sessions/{session_id}/messages",
-            json={"content": f"我要一張 {table_name} 表"},
-        )
+    """跑完提案 → 同意兩輪，讓 `{table_name}` 的設計落成一個新版本。"""
+    resp = await drive_to_confirming(client, session_id, [sample_table(table_name)])
     assert resp.status_code == 200
 
 

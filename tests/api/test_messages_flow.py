@@ -2,7 +2,12 @@
 
 import respx
 
-from tests.api.conftest import BASE_URL, interview_turn_payload, sample_table
+from tests.api.conftest import (
+    BASE_URL,
+    drive_to_confirming,
+    interview_turn_payload,
+    sample_table,
+)
 from tests.llm.conftest import chat_completion_response
 
 
@@ -29,22 +34,42 @@ async def test_json_mode_turn_without_tables_keeps_collecting_phase(client):
     assert detail["phase"] == "collecting"
 
 
-async def test_json_mode_turn_with_tables_sets_confirming_and_creates_version(client):
+async def test_first_turn_never_finalizes_tables_even_if_model_gives_them(client):
+    """一句需求就直接產出設計是要擋掉的行為：第一輪的 tables 只當提案，
+    不落版本、不進確認頁，並把結構附在回覆裡請使用者確認。"""
     session = (await client.post("/api/v1/sessions", json={})).json()
-    tables = [sample_table("users")]
 
     with respx.mock(base_url=BASE_URL) as mock:
         mock.post("/chat/completions").mock(
             return_value=chat_completion_response(
                 content=interview_turn_payload(
-                    "這是設計結果", tables=tables, summary=["需要使用者表"]
+                    "設計完成", tables=[sample_table("users")], summary=["需要使用者表"]
                 )
             )
         )
         resp = await client.post(
             f"/api/v1/sessions/{session['id']}/messages",
-            json={"content": "我想要一個使用者資料表，有 id 欄位"},
+            json={"content": "我需要設計一個設備主檔的資料表"},
         )
+
+    body = resp.json()
+    assert body["tables_ready"] is False
+    assert body["tables"] is None
+    assert "尚未定案" in body["reply"]  # 提案內容仍看得到
+    assert "users" in body["reply"]
+
+    detail = (await client.get(f"/api/v1/sessions/{session['id']}")).json()
+    assert detail["phase"] == "collecting"
+    assert detail["latest_version"] is None
+
+
+async def test_json_mode_turn_with_tables_sets_confirming_and_creates_version(client):
+    """提案 → 使用者同意兩輪後才定案。"""
+    session = (await client.post("/api/v1/sessions", json={})).json()
+
+    resp = await drive_to_confirming(
+        client, session["id"], [sample_table("users")], summary=["需要使用者表"]
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -57,6 +82,51 @@ async def test_json_mode_turn_with_tables_sets_confirming_and_creates_version(cl
     assert detail["latest_version"] == 1
     assert detail["latest_tables"][0]["table_name"] == "users"
     assert detail["latest_key_points"] == ["需要使用者表"]
+
+
+async def test_tables_stay_proposal_until_user_agrees(client):
+    """使用者提了修改而不是同意（user_confirmed=false）→ 仍然只是提案。"""
+    session = (await client.post("/api/v1/sessions", json={})).json()
+    tables = [sample_table("users")]
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=chat_completion_response(
+                content=interview_turn_payload("我的規劃如下", tables=tables)
+            )
+        )
+        await client.post(
+            f"/api/v1/sessions/{session['id']}/messages", json={"content": "我要一張使用者表"}
+        )
+        resp = await client.post(
+            f"/api/v1/sessions/{session['id']}/messages", json={"content": "再加一個電話欄位"}
+        )
+
+    assert resp.json()["tables_ready"] is False
+    detail = (await client.get(f"/api/v1/sessions/{session['id']}")).json()
+    assert detail["phase"] == "collecting"
+
+
+async def test_third_proposal_is_accepted_even_without_user_confirmed_flag(client):
+    """保險機制：模型始終不回報 user_confirmed 時，提案兩次後放行，
+    使用者不會卡在永遠進不了確認頁的迴圈。"""
+    session = (await client.post("/api/v1/sessions", json={})).json()
+    tables = [sample_table("users")]
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=chat_completion_response(
+                content=interview_turn_payload("我的規劃如下", tables=tables)
+            )
+        )
+        for content in ("我要一張使用者表", "可以", "可以，就這樣"):
+            resp = await client.post(
+                f"/api/v1/sessions/{session['id']}/messages", json={"content": content}
+            )
+
+    assert resp.json()["tables_ready"] is True
+    detail = (await client.get(f"/api/v1/sessions/{session['id']}")).json()
+    assert detail["phase"] == "confirming"
 
 
 async def test_message_content_empty_returns_422(client):
@@ -89,11 +159,10 @@ async def test_send_message_session_not_found_returns_404(client):
 async def test_list_messages_returns_history_for_restore(client):
     """重整後前端要能還原對話：沒有這個端點，使用者會看到空白畫面以為 AI 失憶。"""
     session = (await client.post("/api/v1/sessions", json={})).json()
-    tables = [sample_table("users")]
     with respx.mock(base_url=BASE_URL) as mock:
         mock.post("/chat/completions").mock(
             return_value=chat_completion_response(
-                content=interview_turn_payload("好的，我整理如下", tables=tables)
+                content=interview_turn_payload("好的，我整理如下")
             )
         )
         await client.post(

@@ -141,6 +141,64 @@ def test_apply_system_role_and_multi_turn_off_applies_system_role_first():
     assert "[系統指示]" not in content  # system 已於前一步併入 user，不會被貼上系統標籤
 
 
+def test_flatten_renders_native_tool_calls_and_results_as_text():
+    """攤平時 assistant 的 tool_calls（content 為 None）與工具結果都要變成看得懂的文字，
+    否則單輪 gateway 上的 agent 迴圈會看不到自己上一步呼叫了什麼工具。"""
+    messages = [
+        {"role": "user", "content": "查一下 users 表"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "get_schema", "arguments": '{"table": "users"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"columns": ["id"]}'},
+    ]
+    adapted = apply(
+        messages,
+        None,
+        None,
+        multi_turn=False,
+        system_role=True,
+        native_tools=True,
+        json_schema=True,
+    )
+
+    content = adapted.messages[0]["content"]
+    assert "呼叫工具 get_schema" in content
+    assert '{"table": "users"}' in content
+    assert "（工具 get_schema 的回傳）" in content
+    assert '{"columns": ["id"]}' in content
+    assert "None" not in content
+
+
+def test_flatten_puts_injected_instructions_last():
+    """能力全關時，工具目錄與 schema 說明要落在整段文字的最後，不能被歷史蓋過。"""
+    messages = [
+        {"role": "system", "content": "你是助理"},
+        {"role": "user", "content": "查一下 users 表"},
+    ]
+    adapted = apply(
+        messages,
+        _TOOLS,
+        _Draft,
+        multi_turn=False,
+        system_role=False,
+        native_tools=False,
+        json_schema=False,
+    )
+
+    content = adapted.messages[0]["content"]
+    assert len(adapted.messages) == 1
+    assert content.index("查一下 users 表") < content.index("get_schema")
+    assert content.index("get_schema") < content.index("JSON Schema")
+
+
 def test_parse_tool_call_from_text_valid_json():
     text = '{"tool_call": {"name": "get_schema", "arguments": {"table": "users"}}}'
     call = parse_tool_call_from_text(text)
@@ -151,6 +209,13 @@ def test_parse_tool_call_from_text_valid_json():
 
 def test_parse_tool_call_from_text_strips_markdown_fence():
     text = '```json\n{"tool_call": {"name": "get_schema", "arguments": {}}}\n```'
+    call = parse_tool_call_from_text(text)
+    assert call is not None
+    assert call.name == "get_schema"
+
+
+def test_parse_tool_call_from_text_ignores_surrounding_prose():
+    text = '好的，我先查一下結構：\n{"tool_call": {"name": "get_schema", "arguments": {}}}\n請稍候'
     call = parse_tool_call_from_text(text)
     assert call is not None
     assert call.name == "get_schema"

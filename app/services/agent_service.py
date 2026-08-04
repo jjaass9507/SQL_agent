@@ -139,13 +139,19 @@ def _msg_chars(m: dict) -> int:
 
 
 def _trim_to_budget(messages: list[dict]) -> list[dict]:
-    """messages 總字數超過預算時，從最舊的訊息開始丟棄。"""
-    trimmed = list(messages)
-    total = sum(_msg_chars(m) for m in trimmed)
+    """messages 總字數超過預算時，從最舊的訊息開始丟棄。
+
+    system prompt（第一則）永遠保留：它是 agent 的能力與限制說明，一旦被丟掉，
+    模型就不知道自己有哪些工具、不能做什麼。單回合最多 8 次工具呼叫、每則
+    observation 上限 4,000 字，光是工具結果就足以撐爆預算，這條路徑很容易踩到。
+    """
+    pinned = messages[:1] if messages and messages[0].get("role") == "system" else []
+    trimmed = list(messages[len(pinned) :])
+    total = sum(_msg_chars(m) for m in pinned) + sum(_msg_chars(m) for m in trimmed)
     while total > MAX_MESSAGES_CHARS and len(trimmed) > 1:
         removed = trimmed.pop(0)
         total -= _msg_chars(removed)
-    return trimmed
+    return pinned + trimmed
 
 
 # ── observation 截斷／摘要 ─────────────────────────────────────────────────

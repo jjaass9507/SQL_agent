@@ -47,15 +47,23 @@ async def test_sse_stream_turn_done_carries_tables_ready(client):
     session = (await client.post("/api/v1/sessions", json={})).json()
     tables = [sample_table("orders")]
 
+    # 第一輪只是提案，第二輪使用者同意後才會帶 tables_ready
     with respx.mock(base_url=BASE_URL) as mock:
-        mock.post("/chat/completions").mock(
-            return_value=chat_completion_response(
-                content=interview_turn_payload("設計完成", tables=tables, summary=["訂單表"])
-            )
+        mock.post("/chat/completions").side_effect = [
+            chat_completion_response(content=interview_turn_payload("我的規劃如下", tables=tables)),
+            chat_completion_response(
+                content=interview_turn_payload(
+                    "設計完成", tables=tables, summary=["訂單表"], user_confirmed=True
+                )
+            ),
+        ]
+        await client.post(
+            f"/api/v1/sessions/{session['id']}/messages",
+            json={"content": "我需要一張訂單表"},
         )
         resp = await client.post(
             f"/api/v1/sessions/{session['id']}/messages",
-            json={"content": "我需要一張訂單表"},
+            json={"content": "可以"},
             headers={"Accept": "text/event-stream"},
         )
 
