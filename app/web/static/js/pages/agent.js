@@ -3,6 +3,7 @@ import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, api, adminHeaders } from "../lib/ap
 import { createAgentChat } from "../lib/agent-chat.js";
 import { confirmDialog } from "../lib/confirm-dialog.js";
 import { analyzeDdl } from "../lib/ddl-impact.js";
+import { createQueryWorkbench } from "../lib/query-workbench.js";
 import { showToast } from "../lib/toast.js";
 
 const messagesEl = document.querySelector('[data-target="agent-messages"]');
@@ -95,6 +96,25 @@ const chat = createAgentChat({
     if (data.design_request) appendDesignRequestCard(data.design_request);
   },
 });
+
+// ── 查詢工作台（「查詢資料」分頁） ──────────────────────────────────────
+
+const workbench = createQueryWorkbench({
+  resultEl: document.querySelector('[data-target="workbench-result"]'),
+  getDbName: () => (dbSelect && dbSelect.value ? dbSelect.value : null),
+});
+
+function switchQueryMode(mode) {
+  document.querySelectorAll('[data-action="switch-query-mode"]').forEach((btn) => {
+    const active = btn.dataset.target === mode;
+    btn.classList.toggle("btn-primary", active);
+    btn.classList.toggle("btn-ghost", !active);
+  });
+  for (const name of ["ask", "sql"]) {
+    const form = document.querySelector(`[data-target="query-mode-${name}"]`);
+    if (form) form.hidden = name !== mode;
+  }
+}
 
 // ── 待審變更請求面板 ────────────────────────────────────────────────────
 
@@ -203,15 +223,33 @@ async function loadDatabases() {
 // ── 事件委派 ────────────────────────────────────────────────────────────
 
 document.addEventListener("submit", (event) => {
-  const form = event.target.closest('[data-action="agent-send-message"]');
-  if (!form) return;
-  event.preventDefault();
+  const chatForm = event.target.closest('[data-action="agent-send-message"]');
+  if (chatForm) {
+    event.preventDefault();
+    const input = chatForm.querySelector('[data-target="agent-message-input"]');
+    const message = input.value.trim();
+    if (!message || input.disabled) return;
+    chat.send(message);
+    input.value = "";
+    return;
+  }
 
-  const input = form.querySelector('[data-target="agent-message-input"]');
-  const message = input.value.trim();
-  if (!message || input.disabled) return;
-  chat.send(message);
-  input.value = "";
+  const askForm = event.target.closest('[data-action="run-ask"]');
+  if (askForm) {
+    event.preventDefault();
+    const input = askForm.querySelector('[data-target="workbench-question"]');
+    const question = input.value.trim();
+    if (question) workbench.runAsk(question);
+    return;
+  }
+
+  const sqlForm = event.target.closest('[data-action="run-sql"]');
+  if (sqlForm) {
+    event.preventDefault();
+    const input = sqlForm.querySelector('[data-target="workbench-sql"]');
+    const sql = input.value.trim();
+    if (sql) workbench.runSql(sql);
+  }
 });
 
 document.addEventListener("keydown", (event) => {
@@ -229,6 +267,26 @@ document.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
   const action = target.dataset.action;
+
+  if (action === "switch-agent-tab") {
+    document.querySelectorAll('[data-action="switch-agent-tab"]').forEach((tab) => {
+      tab.classList.toggle("is-active", tab === target);
+    });
+    document.querySelectorAll('[data-target="agent-panel"]').forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.panel === target.dataset.target);
+    });
+    return;
+  }
+
+  if (action === "switch-query-mode") {
+    switchQueryMode(target.dataset.target);
+    return;
+  }
+
+  if (action === "export-query-result") {
+    workbench.exportResult();
+    return;
+  }
 
   if (action === "approve-change-request" || action === "reject-change-request") {
     const decision = action === "approve-change-request" ? "approve" : "reject";

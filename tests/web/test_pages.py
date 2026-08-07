@@ -56,3 +56,25 @@ def test_tokens_css_defines_the_color_scale():
     """tokens.css 是唯一允許出現色碼的檔案。"""
     content = (CSS_DIR / "tokens.css").read_text(encoding="utf-8")
     assert HEX_COLOR_RE.search(content), "tokens.css 應定義色板"
+
+
+async def test_agent_page_renders_query_workbench():
+    """工作台的 data-action / data-target 是 agent.js 唯一的接點（無 JS 測試框架），
+    樣板改名會讓按鈕靜默失效，因此在此固定住。"""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        html = (await client.get("/agent")).text
+
+    for hook in [
+        'data-action="switch-agent-tab"',
+        'data-panel="query"',
+        'data-action="switch-query-mode"',
+        'data-target="workbench-question"',
+        'data-target="workbench-sql"',
+        'data-target="workbench-result"',
+    ]:
+        assert hook in html, f"agent.js 依賴的接點消失了：{hook}"
+
+    # 丙（不會寫 SQL 的使用者）要求的兩件事：預設是中文提問、查詢前看得到唯讀保證。
+    assert "唯讀，不會修改任何資料" in html
+    assert html.index('data-target="ask"') < html.index('data-target="sql"')

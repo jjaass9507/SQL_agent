@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import check_session_access, get_current_user, get_db
 from app.api.schemas.workbench import (
+    BusinessDbNL2SQLRequest,
+    BusinessDbQueryRequest,
     DDLImportRequest,
     DDLImportResponse,
     NL2SQLRequest,
@@ -31,6 +33,9 @@ router = APIRouter(tags=["workbench"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 CurrentUserDep = Annotated[CurrentUser | None, Depends(get_current_user)]
+# 業務資料庫範圍的端點沒有 session 可比對所有權，改為與 /agent/chat 同層級的
+# 登入檢查（AUTH_ENABLED=false 時恆放行，行為不變）。
+_AuthDep = Depends(get_current_user)
 
 
 def _not_found(session_id: uuid.UUID) -> HTTPException:
@@ -112,6 +117,51 @@ async def validate_ddl(session_id: uuid.UUID, db: DbDep, current_user: CurrentUs
         return await svc.validate_session_ddl(db, session_id)
     except svc.SessionNotFound:
         raise _not_found(session_id) from None
+
+
+# ── 業務資料庫範圍的工作台 ───────────────────────────────────────────────
+# DB Agent 頁沒有 session，操作對象是頂欄下拉選的業務資料庫。以下端點與上方
+# session 範圍的版本共用 service 層核心，差別只在連線怎麼解析。
+
+
+@router.post("/workbench/query", response_model=QueryResult, dependencies=[_AuthDep])
+async def workbench_query(body: BusinessDbQueryRequest, db: DbDep):
+    try:
+        return await svc.run_query_on_business_db(db, body.db_name, body.sql)
+    except svc.NoDatabaseConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except dbops.QueryRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.post("/workbench/explain", response_model=QueryResult, dependencies=[_AuthDep])
+async def workbench_explain(body: BusinessDbQueryRequest, db: DbDep):
+    try:
+        return await svc.run_explain_on_business_db(db, body.db_name, body.sql)
+    except svc.NoDatabaseConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except dbops.QueryRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.get("/workbench/schema-tree", response_model=SchemaTreeResponse, dependencies=[_AuthDep])
+async def workbench_schema_tree(db: DbDep, db_name: str | None = None):
+    try:
+        return await svc.get_schema_tree_on_business_db(db, db_name)
+    except svc.NoDatabaseConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.post("/workbench/nl2sql", response_model=NL2SQLResponse, dependencies=[_AuthDep])
+async def workbench_nl2sql(body: BusinessDbNL2SQLRequest, db: DbDep):
+    llm = LLMProvider.from_settings()
+    try:
+        draft = await svc.generate_nl2sql_on_business_db(db, body.db_name, body.question, llm)
+    except svc.NoDatabaseConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except dbops.QueryRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return NL2SQLResponse(sql=draft.sql, explanation=draft.explanation)
 
 
 @router.post("/ddl-import", response_model=DDLImportResponse, status_code=201)

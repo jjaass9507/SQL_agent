@@ -10,6 +10,15 @@
 
 {% block content %}
 <div class="page-agent-layout">
+ <div class="agent-main">
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab is-active" role="tab"
+            data-action="switch-agent-tab" data-target="chat">💬 對話</button>
+    <button type="button" class="tab" role="tab"
+            data-action="switch-agent-tab" data-target="query">🔍 查詢資料</button>
+  </div>
+
+  <section class="tab-panel is-active" data-target="agent-panel" data-panel="chat">
   <section class="chat-panel">
     <div class="chat-messages" id="agent-messages" data-target="agent-messages">
       <div class="chat-bubble-row">
@@ -26,6 +35,41 @@
       <button type="submit" class="btn btn-primary" data-action="agent-submit-message">送出</button>
     </form>
   </section>
+  </section>
+
+  <section class="tab-panel" data-target="agent-panel" data-panel="query">
+    <div class="card workbench">
+      <p class="workbench-notice">
+        <span aria-hidden="true">🔒</span>
+        唯讀，不會修改任何資料。這裡只能查資料，改不動任何東西。
+      </p>
+
+      <div class="workbench-modes" role="group" aria-label="提問方式">
+        <button type="button" class="btn btn-sm btn-primary"
+                data-action="switch-query-mode" data-target="ask">用中文問</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                data-action="switch-query-mode" data-target="sql">自己寫 SQL</button>
+      </div>
+
+      <form class="form-field" data-action="run-ask" data-target="query-mode-ask">
+        <label class="form-label" for="workbench-question">想查什麼？用中文描述就好</label>
+        <textarea class="form-textarea" rows="2" id="workbench-question"
+                  data-target="workbench-question"
+                  placeholder="例如：上個月每個通路的訂單數"></textarea>
+        <button type="submit" class="btn btn-primary" data-action="submit-ask">查詢</button>
+      </form>
+
+      <form class="form-field" data-action="run-sql" data-target="query-mode-sql" hidden>
+        <label class="form-label" for="workbench-sql">SQL（只接受 SELECT／EXPLAIN）</label>
+        <textarea class="form-textarea form-mono" rows="4" id="workbench-sql"
+                  data-target="workbench-sql" placeholder="SELECT * FROM orders LIMIT 20"></textarea>
+        <button type="submit" class="btn btn-primary" data-action="submit-sql">執行</button>
+      </form>
+
+      <div data-target="workbench-result"></div>
+    </div>
+  </section>
+ </div>
 
   <aside class="page-agent-sidebar">
     <section class="card" data-target="agent-tool-trace">

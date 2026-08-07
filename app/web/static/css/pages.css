@@ -243,6 +243,25 @@ body {
   height: 100%;
 }
 
+/* 對話與查詢工作台共用左欄：分頁列固定，下方面板吃掉剩餘高度。 */
+.agent-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-3);
+}
+
+.agent-main > .tab-panel.is-active {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.agent-main .workbench {
+  overflow-y: auto;
+}
+
 .agent-ddl-confirm {
   display: flex;
   flex-direction: column;

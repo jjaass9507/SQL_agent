@@ -21,7 +21,7 @@ from app.repos.models import SessionRecord
 from app.rules import ddl_parser, ddl_validator, sql_safety
 from app.rules.db_introspect import format_context
 from app.rules.spec_models import TableSpec, asdict
-from app.services import dbops
+from app.services import change_service, dbops
 
 _CRED_RE = re.compile(r"://[^\s/]+:[^\s/@]+@")
 
@@ -65,6 +65,18 @@ async def _require_db_url(db: AsyncSession, session_id: uuid.UUID) -> str:
     return decrypt_db_url(record.db_url_encrypted)
 
 
+async def _require_business_db_url(db: AsyncSession, db_name: str | None) -> tuple[str, str]:
+    """解析設定頁登錄的業務資料庫，回傳 (resolved_name, db_url)。
+
+    DB Agent 頁沒有 session，操作對象是頂欄下拉選的業務資料庫，因此工作台在該頁
+    走這條解析路徑；session 內的工作台仍走 `_require_db_url`。
+    """
+    resolved_name, db_url, error = await change_service.resolve_business_db(db, db_name)
+    if db_url is None:
+        raise NoDatabaseConfigured(error or "找不到資料庫連線")
+    return resolved_name or "", db_url
+
+
 async def run_query(db: AsyncSession, session_id: uuid.UUID, sql: str) -> dict:
     """對 session 的目標資料庫執行唯讀查詢（護欄不過拋 `dbops.QueryRejected`）。"""
     db_url = await _require_db_url(db, session_id)
@@ -79,6 +91,58 @@ async def run_explain(db: AsyncSession, session_id: uuid.UUID, sql: str) -> dict
     """對 session 的目標資料庫執行 EXPLAIN。"""
     db_url = await _require_db_url(db, session_id)
     return await dbops.explain_query(db_url, sql)
+
+
+async def run_query_on_business_db(db: AsyncSession, db_name: str | None, sql: str) -> dict:
+    """對指定的業務資料庫執行唯讀查詢（DB Agent 頁的工作台用）。"""
+    resolved_name, db_url = await _require_business_db_url(db, db_name)
+    result = await dbops.execute_query(db_url, sql)
+    await activity.log_activity(
+        db, "query_executed", {"db": resolved_name, "rows": len(result["rows"])}
+    )
+    return result
+
+
+async def run_explain_on_business_db(db: AsyncSession, db_name: str | None, sql: str) -> dict:
+    """對指定的業務資料庫執行 EXPLAIN。"""
+    _resolved_name, db_url = await _require_business_db_url(db, db_name)
+    return await dbops.explain_query(db_url, sql)
+
+
+async def get_schema_tree_on_business_db(db: AsyncSession, db_name: str | None) -> dict:
+    """指定業務資料庫的結構樹（DB Agent 頁的結構瀏覽器用）。"""
+    _resolved_name, db_url = await _require_business_db_url(db, db_name)
+    tables, err = await dbops.schema_tree(db_url)
+    if err and not tables:
+        raise NoDatabaseConfigured(sanitize_db_error(err))
+    return {"source": "db", "tables": [_table_to_tree(t) for t in tables]}
+
+
+async def generate_nl2sql_on_business_db(
+    db: AsyncSession, db_name: str | None, question: str, llm: LLMProvider
+) -> SQLDraft:
+    """對指定業務資料庫產生唯讀 SQL 草稿（不執行）。"""
+    resolved_name, db_url = await _require_business_db_url(db, db_name)
+    tables, _err = await dbops.schema_tree(db_url)
+    draft = await _draft_sql(question, tables, llm)
+    await activity.log_activity(
+        db, "nl2sql_generated", {"db": resolved_name, "q_len": len(question)}
+    )
+    return draft
+
+
+async def _draft_sql(question: str, tables: list[TableSpec], llm: LLMProvider) -> SQLDraft:
+    """NL2SQL 的共用核心：組 prompt、要 structured output、過唯讀護欄。"""
+    messages: list[Message] = [
+        {"role": "system", "content": _NL2SQL_SYSTEM},
+        {"role": "user", "content": f"{format_context(tables)}\n\n問題：{question}"},
+    ]
+    result = await llm.chat(messages, response_model=SQLDraft)
+    draft: SQLDraft = result.parsed
+    error = sql_safety.check_read_only(draft.sql)
+    if error:
+        raise dbops.QueryRejected(error)
+    return draft
 
 
 def _table_to_tree(table: TableSpec) -> dict:
@@ -118,16 +182,7 @@ async def generate_nl2sql(
     """依自然語言問題產生唯讀 SQL 草稿（不執行）。護欄不過拋 `dbops.QueryRejected`。"""
     db_url = await _require_db_url(db, session_id)
     tables, _err = await dbops.schema_tree(db_url)
-    schema_summary = format_context(tables)
-    messages: list[Message] = [
-        {"role": "system", "content": _NL2SQL_SYSTEM},
-        {"role": "user", "content": f"{schema_summary}\n\n問題：{question}"},
-    ]
-    result = await llm.chat(messages, response_model=SQLDraft)
-    draft: SQLDraft = result.parsed
-    error = sql_safety.check_read_only(draft.sql)
-    if error:
-        raise dbops.QueryRejected(error)
+    draft = await _draft_sql(question, tables, llm)
     await activity.log_activity(
         db, "nl2sql_generated", {"session_id": str(session_id), "q_len": len(question)}
     )

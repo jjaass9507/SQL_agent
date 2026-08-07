@@ -31,6 +31,13 @@ export const ENDPOINTS = {
   workbenchNl2sql: (sessionId) => `${API_PREFIX}/sessions/${sessionId}/nl2sql`,
   workbenchSchemaTree: (sessionId) => `${API_PREFIX}/sessions/${sessionId}/schema-tree`,
   workbenchValidateDdl: (sessionId) => `${API_PREFIX}/sessions/${sessionId}/validate-ddl`,
+  // 業務資料庫範圍（DB Agent 頁的工作台；該頁沒有 session，操作對象是頂欄選的 DB）。
+  // 名稱與上面 session 範圍的那組刻意區隔：同名會在物件字面值裡被覆蓋掉。
+  workbenchDbQuery: () => `${API_PREFIX}/workbench/query`,
+  workbenchDbExplain: () => `${API_PREFIX}/workbench/explain`,
+  workbenchDbNl2sql: () => `${API_PREFIX}/workbench/nl2sql`,
+  workbenchDbSchemaTree: (dbName) =>
+    `${API_PREFIX}/workbench/schema-tree${dbName ? `?db_name=${encodeURIComponent(dbName)}` : ""}`,
   changeRequests: () => `${API_PREFIX}/change-requests`,
   changeRequestApprove: (id) => `${API_PREFIX}/change-requests/${id}/approve`,
   changeRequestReject: (id) => `${API_PREFIX}/change-requests/${id}/reject`,

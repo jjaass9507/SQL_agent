@@ -11,6 +11,18 @@ class QueryRequest(BaseModel):
     sql: str = Field(min_length=1, max_length=10_000)
 
 
+class BusinessDbQueryRequest(BaseModel):
+    """DB Agent 頁工作台的請求：對象是設定頁登錄的業務資料庫，不是 session。"""
+
+    sql: str = Field(min_length=1, max_length=10_000)
+    db_name: str | None = None
+
+
+class BusinessDbNL2SQLRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+    db_name: str | None = None
+
+
 class QueryResult(BaseModel):
     """查詢／EXPLAIN 共用的回應本體。"""
 
