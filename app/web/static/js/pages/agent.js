@@ -4,6 +4,7 @@ import { createAgentChat } from "../lib/agent-chat.js";
 import { confirmDialog } from "../lib/confirm-dialog.js";
 import { analyzeDdl } from "../lib/ddl-impact.js";
 import { createQueryWorkbench } from "../lib/query-workbench.js";
+import { createSchemaBrowser } from "../lib/schema-browser.js";
 import { showToast } from "../lib/toast.js";
 
 const messagesEl = document.querySelector('[data-target="agent-messages"]');
@@ -104,16 +105,31 @@ const workbench = createQueryWorkbench({
   getDbName: () => (dbSelect && dbSelect.value ? dbSelect.value : null),
 });
 
+const schemaBrowser = createSchemaBrowser({
+  containerEl: document.querySelector('[data-target="schema-browser"]'),
+  getDbName: () => (dbSelect && dbSelect.value ? dbSelect.value : null),
+});
+
+let schemaLoaded = false;
+
 function switchQueryMode(mode) {
   document.querySelectorAll('[data-action="switch-query-mode"]').forEach((btn) => {
     const active = btn.dataset.target === mode;
     btn.classList.toggle("btn-primary", active);
     btn.classList.toggle("btn-ghost", !active);
   });
-  for (const name of ["ask", "sql", "plan"]) {
+  for (const name of ["ask", "sql", "plan", "browse"]) {
     const form = document.querySelector(`[data-target="query-mode-${name}"]`);
     if (form) form.hidden = name !== mode;
   }
+  // 結構樹要連資料庫，切到這個模式才載入，不要一進頁面就打
+  if (mode === "browse" && !schemaLoaded) {
+    schemaLoaded = true;
+    schemaBrowser.load();
+  }
+  // 結構瀏覽器有自己的顯示區，查詢結果留著會很混亂
+  const result = document.querySelector('[data-target="workbench-result"]');
+  if (result && mode === "browse") result.textContent = "";
 }
 
 // ── 待審變更請求面板 ────────────────────────────────────────────────────
@@ -261,6 +277,12 @@ document.addEventListener("submit", (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  if (event.target.matches('[data-target="schema-search"]')) {
+    schemaBrowser.handleSearch(event.target.value);
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (
     event.target.matches('[data-target="agent-message-input"]') &&
@@ -289,6 +311,23 @@ document.addEventListener("click", async (event) => {
 
   if (action === "switch-query-mode") {
     switchQueryMode(target.dataset.target);
+    return;
+  }
+
+  if (action === "toggle-table") {
+    schemaBrowser.toggleTable(target.dataset.table);
+    return;
+  }
+
+  if (action === "edit-dictionary") {
+    const { table, column } = target.dataset;
+    const current = schemaBrowser.noteOf(table, column);
+    const label = column ? `${table}.${column}` : table;
+    const note = window.prompt(`${label} 是做什麼用的？（清空即刪除說明）`, current.note || "");
+    if (note === null) return;
+    const owner = window.prompt("負責人（可留空）", current.owner || "");
+    if (owner === null) return;
+    schemaBrowser.saveEntry(table, column || null, note, owner);
     return;
   }
 

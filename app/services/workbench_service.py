@@ -9,6 +9,7 @@ DDL dry-run 驗證、貼上 DDL 建立設計 session。
 import asyncio
 import re
 import uuid
+from datetime import UTC, datetime
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm.provider import LLMProvider
 from app.llm.types import Message
 from app.repos import activity, outputs, sessions, versions
+from app.repos import settings as settings_repo
 from app.repos.crypto import decrypt_db_url
 from app.repos.models import SessionRecord
 from app.rules import ddl_parser, ddl_validator, sql_safety
@@ -212,6 +214,89 @@ async def validate_session_ddl(db: AsyncSession, session_id: uuid.UUID) -> dict:
     return result
 
 
+# ── 資料字典（表／欄位的白話說明與負責人） ────────────────────────────────
+#
+# 存在 `app_settings` 的單一 JSON，不新增資料表：這份內容是人工少量維護的註記
+# （「這欄位誰在用」這種問題的答案），量級是幾百筆字串，不需要獨立 schema。
+# key 格式：`<db>|<table>` 或 `<db>|<table>|<column>`。
+
+DATA_DICTIONARY_KEY = "data_dictionary"
+
+
+def _dict_key(db_name: str, table: str, column: str | None) -> str:
+    return f"{db_name}|{table}|{column}" if column else f"{db_name}|{table}"
+
+
+async def get_data_dictionary(db: AsyncSession, db_name: str) -> dict:
+    """取出某個業務資料庫的所有註記（key 已去掉資料庫前綴，前端直接查表用）。"""
+    setting = await settings_repo.get_setting(db, DATA_DICTIONARY_KEY)
+    stored: dict = (setting.value_json if setting and setting.value_json else {}) or {}
+    prefix = f"{db_name}|"
+    return {k[len(prefix) :]: v for k, v in stored.items() if k.startswith(prefix)}
+
+
+async def set_dictionary_entry(
+    db: AsyncSession,
+    db_name: str,
+    table: str,
+    column: str | None,
+    note: str,
+    owner: str,
+) -> dict:
+    """新增或更新一則註記；note 與 owner 都空白時視為刪除。"""
+    setting = await settings_repo.get_setting(db, DATA_DICTIONARY_KEY)
+    stored: dict = dict((setting.value_json if setting and setting.value_json else {}) or {})
+    key = _dict_key(db_name, table, column)
+
+    note, owner = (note or "").strip(), (owner or "").strip()
+    if not note and not owner:
+        stored.pop(key, None)
+        entry = {}
+    else:
+        entry = {
+            "note": note,
+            "owner": owner,
+            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        stored[key] = entry
+
+    await settings_repo.set_setting(db, DATA_DICTIONARY_KEY, stored)
+    await activity.log_activity(
+        db, "dictionary_updated", {"db": db_name, "table": table, "column": column}
+    )
+    return entry
+
+
+# PostgreSQL 內建型態與常見別名。用途是抓 `varchr`／`intt` 這種拼字錯誤——
+# 解析器把型態當成任意字串照收，沒有這張表就得等到真的建表才會發現。
+# 自訂型態、domain、enum 都是合法但不在這張表裡的，因此結果只當「提醒」不當「錯誤」。
+_KNOWN_PG_TYPES = frozenset(
+    """
+    bigint bigserial bit boolean bool box bytea char character citext cidr circle date
+    decimal double float float4 float8 inet int int2 int4 int8 integer interval json
+    jsonb line lseg macaddr macaddr8 money numeric path pg_lsn point polygon real serial
+    serial2 serial4 serial8 smallint smallserial text time timestamp timestamptz timetz
+    tsquery tsvector txid_snapshot uuid varbit varchar xml
+    """.split()
+)
+
+
+def _unknown_type_warnings(tables: list[TableSpec]) -> list[str]:
+    """列出看起來像打錯字的型態名稱（不是錯誤，自訂型態也會落在這裡）。"""
+    unknown: dict[str, list[str]] = {}
+    for table in tables:
+        for column in table.columns:
+            base = (column.data_type or "").split("(")[0].strip().lower()
+            base = base.removesuffix("[]")  # 陣列型態
+            if base and base not in _KNOWN_PG_TYPES:
+                unknown.setdefault(base, []).append(f"{table.table_name}.{column.name}")
+    return [
+        f"型態「{name}」不是 PostgreSQL 內建型態，請確認有沒有打錯字"
+        f"（用到：{'、'.join(columns[:5])}）"
+        for name, columns in unknown.items()
+    ]
+
+
 async def validate_ddl_text(db: AsyncSession, session_id: uuid.UUID, ddl_text: str) -> dict:
     """驗證確認頁編輯器裡「還沒存檔」的 DDL 文字。
 
@@ -240,12 +325,15 @@ async def validate_ddl_text(db: AsyncSession, session_id: uuid.UUID, ddl_text: s
             "checked": "parse",
         }
 
+    warnings = _unknown_type_warnings(tables)
+
     if not record.db_url_encrypted:
         return {
             "ok": True,
             "error": None,
             "checked": "parse",
             "table_count": len(tables),
+            "warnings": warnings,
         }
 
     conn_url = decrypt_db_url(record.db_url_encrypted)
@@ -254,6 +342,7 @@ async def validate_ddl_text(db: AsyncSession, session_id: uuid.UUID, ddl_text: s
         result["error"] = sanitize_db_error(result.get("error", ""))
     result["checked"] = "database"
     result["table_count"] = len(tables)
+    result["warnings"] = warnings
     await activity.log_activity(
         db, "ddl_text_validated", {"session_id": str(session_id), "ok": result.get("ok")}
     )

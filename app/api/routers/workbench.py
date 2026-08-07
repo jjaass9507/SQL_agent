@@ -15,6 +15,7 @@ from app.api.schemas.workbench import (
     BusinessDbQueryRequest,
     DDLImportRequest,
     DDLImportResponse,
+    DictionaryEntryRequest,
     NL2SQLRequest,
     NL2SQLResponse,
     QueryRequest,
@@ -164,6 +165,20 @@ async def workbench_nl2sql(body: BusinessDbNL2SQLRequest, db: DbDep):
     except dbops.QueryRejected as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     return NL2SQLResponse(sql=draft.sql, explanation=draft.explanation)
+
+
+@router.get("/workbench/dictionary", dependencies=[_AuthDep])
+async def workbench_dictionary(db: DbDep, db_name: str):
+    """某個業務資料庫的所有表／欄位註記（key 為 `table` 或 `table|column`）。"""
+    return await svc.get_data_dictionary(db, db_name)
+
+
+@router.put("/workbench/dictionary", dependencies=[_AuthDep])
+async def workbench_dictionary_upsert(body: DictionaryEntryRequest, db: DbDep):
+    """新增或更新一則註記；note 與 owner 皆空白時視為刪除。"""
+    return await svc.set_dictionary_entry(
+        db, body.db_name, body.table, body.column, body.note, body.owner
+    )
 
 
 @router.post("/sessions/{session_id}/validate-ddl-text", response_model=ValidateDDLTextResponse)

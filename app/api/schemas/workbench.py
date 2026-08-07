@@ -79,6 +79,7 @@ class ValidateDDLTextResponse(BaseModel):
     error: str | None = None
     checked: str
     table_count: int | None = None
+    warnings: list[str] = []
 
 
 class DDLImportRequest(BaseModel):
@@ -89,3 +90,13 @@ class DDLImportRequest(BaseModel):
 class DDLImportResponse(BaseModel):
     id: uuid.UUID
     table_count: int
+
+
+class DictionaryEntryRequest(BaseModel):
+    """資料字典的一則註記：column 省略時代表整張表的說明。"""
+
+    db_name: str
+    table: str = Field(min_length=1, max_length=200)
+    column: str | None = None
+    note: str = Field(default="", max_length=2_000)
+    owner: str = Field(default="", max_length=100)

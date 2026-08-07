@@ -51,6 +51,8 @@
                 data-action="switch-query-mode" data-target="sql">自己寫 SQL</button>
         <button type="button" class="btn btn-sm btn-ghost"
                 data-action="switch-query-mode" data-target="plan">查詢為什麼慢</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                data-action="switch-query-mode" data-target="browse">找資料表</button>
       </div>
 
       <form class="form-field" data-action="run-ask" data-target="query-mode-ask">
@@ -75,6 +77,10 @@
                   placeholder="SELECT ... FROM ... WHERE ..."></textarea>
         <button type="submit" class="btn btn-primary" data-action="submit-plan">取得執行計畫</button>
       </form>
+
+      <div data-target="query-mode-browse" hidden>
+        <div data-target="schema-browser"></div>
+      </div>
 
       <div data-target="workbench-result"></div>
     </div>

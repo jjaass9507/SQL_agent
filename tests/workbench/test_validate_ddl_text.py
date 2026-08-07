@@ -60,3 +60,29 @@ async def test_empty_ddl_is_rejected_by_schema(client, make_session):
         f"/api/v1/sessions/{record.id}/validate-ddl-text", json={"ddl": ""}
     )
     assert resp.status_code == 422
+
+
+async def test_warns_about_misspelled_type_names(client, make_session):
+    """解析器把型態當任意字串照收，varchr／intt 這種拼錯要靠型態表才抓得到。"""
+    record = await make_session()
+    resp = await client.post(
+        f"/api/v1/sessions/{record.id}/validate-ddl-text",
+        json={"ddl": "CREATE TABLE t (id uuid PRIMARY KEY, email varchr(255), qty intt);"},
+    )
+    body = resp.json()
+    assert body["ok"] is True  # 自訂型態也長這樣，所以是提醒不是錯誤
+    assert len(body["warnings"]) == 2
+    assert any("varchr" in w for w in body["warnings"])
+    assert any("intt" in w for w in body["warnings"])
+
+
+async def test_no_warning_for_valid_types_including_arrays(client, make_session):
+    record = await make_session()
+    resp = await client.post(
+        f"/api/v1/sessions/{record.id}/validate-ddl-text",
+        json={
+            "ddl": "CREATE TABLE t (id uuid PRIMARY KEY, name varchar(50), "
+            "amount numeric(10,2), tags text[], created_at timestamptz);"
+        },
+    )
+    assert resp.json()["warnings"] == []

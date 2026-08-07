@@ -96,3 +96,11 @@ async def test_agent_page_has_explain_plan_mode():
         html = (await client.get("/agent")).text
     assert 'data-target="plan"' in html
     assert 'data-target="workbench-plan-sql"' in html
+
+
+async def test_agent_page_has_schema_browser_mode():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        html = (await client.get("/agent")).text
+    assert 'data-target="browse"' in html
+    assert 'data-target="schema-browser"' in html

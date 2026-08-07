@@ -231,6 +231,14 @@ document.addEventListener("click", async (event) => {
         box.className = "ddl-validate-result is-error";
         box.textContent = `✗ ${result.error}`;
       }
+      // 型態名稱拼錯（varchr／intt）解析階段看不出來，只能靠內建型態表提醒。
+      // 自訂型態長得一樣，所以是提醒不是錯誤，不擋儲存。
+      for (const warning of result.warnings || []) {
+        const line = document.createElement("p");
+        line.className = "ddl-validate-warning";
+        line.textContent = `⚠ ${warning}`;
+        box.appendChild(line);
+      }
     } catch {
       box.textContent = "";
     } finally {

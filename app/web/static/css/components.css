@@ -937,3 +937,123 @@ h6.md-heading {
   background: var(--color-error-100);
   color: var(--color-error-500);
 }
+
+/* ── 結構瀏覽器 / 資料字典 ─────────────────────────────────────────────── */
+
+.schema-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.schema-table-card {
+  border: var(--border-width-thin) solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.schema-table-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-3);
+  border: none;
+  background: var(--color-bg-panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schema-table-head:hover {
+  background: var(--color-bg-active);
+}
+
+.schema-table-title {
+  color: var(--color-text-900);
+  font-size: var(--font-size-sm);
+}
+
+/* 業務單位看不懂英文表名：有中文說明時表名退成小字副標。 */
+.schema-table-sub {
+  color: var(--color-text-500);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.schema-table-body {
+  padding: var(--space-3);
+  border-top: var(--border-width-thin) solid var(--border-color);
+}
+
+.schema-column {
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+}
+
+.schema-column:last-child {
+  border-bottom: none;
+}
+
+.schema-column-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.schema-column-name {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+}
+
+.schema-column-type {
+  margin-left: auto;
+  color: var(--color-text-500);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.schema-column-badges {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.schema-badge {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-active);
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+}
+
+.schema-badge.is-pk {
+  background: var(--color-accent-100);
+  color: var(--color-accent-500);
+}
+
+.schema-badge.is-fk {
+  background: var(--color-warning-100);
+  color: var(--color-warning-500);
+}
+
+.schema-note {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-700);
+  font-size: var(--font-size-sm);
+}
+
+.schema-note-owner {
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+}
+
+.schema-note-edit {
+  margin-top: var(--space-1);
+}
+
+.ddl-validate-warning {
+  margin: var(--space-2) 0 0;
+  color: var(--color-warning-500);
+  font-size: var(--font-size-sm);
+}
