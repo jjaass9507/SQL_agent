@@ -76,6 +76,7 @@
 | [`go_live_checklist.md`](docs/go_live_checklist.md) | 上線檢查清單 |
 | [`feature_backlog.md`](docs/feature_backlog.md) | 系統面缺口盤點與優先順序（安全、稽核、agent 行為；含已複驗的證據與裁決） |
 | [`user_feature_backlog.md`](docs/user_feature_backlog.md) | 使用者功能盤點（三方使用者角色辯論後整合，依後端現況分批） |
+| [`work_log_2026-08.md`](docs/work_log_2026-08.md) | 2026-08 工作紀錄：討論方法、實作與驗收過程、實測發現的缺陷、被推翻的判斷 |
 | `v05/` | v0.5 舊實作的架構/部署/維運文件（歷史參考，不適用於 v2） |
 
 ## 開發輔助 Skills（`.claude/skills/`）
