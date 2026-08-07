@@ -18,9 +18,47 @@ import re
 
 # ── read-only guard ─────────────────────────────────────────────────────────
 
-# Reject DML, DDL, and DCL
-_FORBIDDEN_RE = re.compile(
-    r"^\s*(CREATE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|INSERT|UPDATE|DELETE|MERGE)\b",
+# A read-only statement must *start* with one of these. An allowlist is used
+# rather than a denylist of write verbs: the latter silently admits anything
+# nobody thought to add (CALL, DO, COPY ... TO PROGRAM, EXECUTE of a prepared
+# write, ...), which is exactly the failure mode this guard exists to prevent.
+_READ_ONLY_START_RE = re.compile(
+    r"^\s*(SELECT|WITH|VALUES|TABLE|SHOW)\b",
+    re.IGNORECASE,
+)
+
+# `EXPLAIN [ ( option, ... ) | option ... ] <statement>` is allowed only when the
+# statement it wraps is itself read-only. This matters because `EXPLAIN ANALYZE`
+# *executes* the wrapped statement — `EXPLAIN ANALYZE DELETE FROM t` really does
+# delete the rows.
+_EXPLAIN_HEAD_RE = re.compile(r"^\s*EXPLAIN\b\s*(\([^)]*\))?\s*", re.IGNORECASE)
+_EXPLAIN_OPTION_RE = re.compile(
+    r"^\s*(ANALYZE|ANALYSE|VERBOSE|COSTS|SETTINGS|BUFFERS|WAL|TIMING|SUMMARY"
+    r"|GENERIC_PLAN|FORMAT|TEXT|XML|JSON|YAML|ON|OFF|TRUE|FALSE)\b\s*",
+    re.IGNORECASE,
+)
+
+# Write verbs anywhere in the skeleton, not just at the start: catches them when
+# nested inside an otherwise-allowed statement (`EXPLAIN ANALYZE DELETE ...`,
+# `WITH c AS (...) INSERT ...`). Word boundaries keep identifiers such as
+# `create_date`, `updated_at` and a table named `updates` from tripping this.
+_WRITE_VERB_ANYWHERE_RE = re.compile(
+    r"\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|CREATE|ALTER"
+    r"|GRANT|REVOKE|COPY|CALL|DO)\b",
+    re.IGNORECASE,
+)
+
+# Functions that write, reach outside the current connection, or kill sessions.
+# `default_transaction_read_only` does not constrain these: dblink opens its own
+# connection, and pg_terminate_backend needs no transaction at all. Requiring a
+# following `(` keeps same-named columns from tripping the check.
+_DANGEROUS_FUNC_RE = re.compile(
+    r"\b(dblink|dblink_exec|dblink_open|dblink_connect|dblink_send_query"
+    r"|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_rotate_logfile"
+    r"|pg_sleep|pg_sleep_for|pg_sleep_until"
+    r"|pg_read_file|pg_read_binary_file|pg_write_file|pg_ls_dir|pg_stat_file"
+    r"|lo_import|lo_export|lo_get|lo_put|lo_unlink"
+    r"|set_config)\s*\(",
     re.IGNORECASE,
 )
 
@@ -89,6 +127,19 @@ def split_statements(sql: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _strip_explain_prefix(skel: str) -> str:
+    """Return whatever an `EXPLAIN ...` prefix wraps (unchanged if there is none)."""
+    head = _EXPLAIN_HEAD_RE.match(skel)
+    if not head:
+        return skel
+    rest = skel[head.end() :]
+    while True:  # bare option words, e.g. EXPLAIN ANALYZE VERBOSE SELECT ...
+        option = _EXPLAIN_OPTION_RE.match(rest)
+        if not option:
+            return rest.lstrip()
+        rest = rest[option.end() :]
+
+
 def check_read_only(sql: str) -> str | None:
     """Returns an error string if the SQL is forbidden, else None.
 
@@ -103,19 +154,23 @@ def check_read_only(sql: str) -> str | None:
     skel = skeleton(statements[0]).strip()
     if not skel:
         return "SQL query is empty"
-    # First keyword after stripping comments must not be a write/DDL/DCL verb.
-    if _FORBIDDEN_RE.match(skel):
+    # An EXPLAIN wrapper is transparent: validate whatever it wraps.
+    if not _READ_ONLY_START_RE.match(_strip_explain_prefix(skel)):
         return "Only SELECT and EXPLAIN queries are allowed"
-    # Data-modifying CTE, e.g. WITH x AS (...) DELETE ...
-    if re.match(r"^\s*WITH\b", skel, re.IGNORECASE) and re.search(
-        r"\b(INSERT|UPDATE|DELETE|MERGE)\b", skel, re.IGNORECASE
-    ):
-        return "Data-modifying statements are not allowed"
+    # Write verbs nested inside an allowed statement (EXPLAIN ANALYZE DELETE ...,
+    # WITH c AS (...) UPDATE ...). EXPLAIN ANALYZE executes what it wraps.
+    write_verb = _WRITE_VERB_ANYWHERE_RE.search(skel)
+    if write_verb:
+        return f"Data-modifying statements are not allowed ({write_verb.group(1).upper()})"
     # SELECT ... INTO creates a table (a write disguised as a SELECT).
     if re.match(r"^\s*SELECT\b", skel, re.IGNORECASE) and re.search(
         r"\bINTO\b", skel, re.IGNORECASE
     ):
         return "SELECT ... INTO is not allowed"
+    # Functions that write or reach outside this connection.
+    danger = _DANGEROUS_FUNC_RE.search(skel)
+    if danger:
+        return f"Function {danger.group(1)}() is not allowed in a read-only query"
     return None
 
 

@@ -205,3 +205,74 @@ def test_check_ddl_allowlist_rejects_too_many_statements():
 def test_check_ddl_allowlist_rejects_too_long():
     ddl = "CREATE TABLE t (id int); -- " + ("x" * 8001)
     assert check_ddl_allowlist(ddl) is not None
+
+
+# ═══ read-only guard: statements that hide a write inside an allowed shape ═══
+# These all passed the previous first-keyword denylist. They reach the business
+# database through the workbench query endpoint and the DB Agent's run_query
+# tool, neither of which goes through the HITL approval flow.
+
+def test_check_read_only_rejects_explain_analyze_of_a_write():
+    # EXPLAIN ANALYZE *executes* what it wraps, so this really does delete rows.
+    assert check_read_only("EXPLAIN ANALYZE DELETE FROM orders") is not None
+    assert check_read_only("EXPLAIN ANALYZE INSERT INTO t VALUES (1)") is not None
+    assert check_read_only("EXPLAIN (ANALYZE) UPDATE t SET x = 1") is not None
+    assert check_read_only("EXPLAIN (ANALYZE, BUFFERS) DELETE FROM t") is not None
+
+
+def test_check_read_only_allows_explain_of_a_select():
+    assert check_read_only("EXPLAIN SELECT * FROM orders") is None
+    assert check_read_only("EXPLAIN ANALYZE SELECT * FROM orders") is None
+    assert check_read_only("EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1") is None
+    assert check_read_only("EXPLAIN ANALYZE VERBOSE SELECT 1") is None
+
+
+def test_check_read_only_rejects_call_and_do():
+    assert check_read_only("CALL some_write_procedure()") is not None
+    assert check_read_only("DO $$ BEGIN PERFORM 1; END $$") is not None
+
+
+def test_check_read_only_rejects_copy():
+    # COPY ... TO PROGRAM runs a shell command; COPY ... FROM writes rows.
+    assert check_read_only("COPY orders TO PROGRAM 'curl http://example.invalid'") is not None
+    assert check_read_only("COPY orders FROM '/tmp/x.csv'") is not None
+
+
+def test_check_read_only_rejects_connection_escaping_functions():
+    # dblink opens its own connection, so default_transaction_read_only on this
+    # one does not constrain it.
+    sql = "SELECT dblink_exec('dbname=prod', 'DELETE FROM orders')"
+    assert check_read_only(sql) is not None
+    assert check_read_only("SELECT dblink('dbname=prod', 'SELECT 1')") is not None
+
+
+def test_check_read_only_rejects_session_killing_and_file_functions():
+    assert check_read_only("SELECT pg_terminate_backend(1234)") is not None
+    assert check_read_only("SELECT pg_cancel_backend(1234)") is not None
+    assert check_read_only("SELECT pg_read_file('/etc/passwd')") is not None
+    assert check_read_only("SELECT lo_export(16384, '/tmp/out')") is not None
+    assert check_read_only("SELECT set_config('x', 'y', false)") is not None
+
+
+def test_check_read_only_rejects_unknown_leading_verbs():
+    # The allowlist rejects statement types nobody enumerated, which is the
+    # whole point of using one.
+    for stmt in ["VACUUM FULL orders", "REINDEX TABLE orders", "LOCK TABLE orders",
+                 "EXECUTE prepared_write", "SET work_mem = '1GB'"]:
+        assert check_read_only(stmt) is not None, f"Should reject: {stmt}"
+
+
+def test_check_read_only_still_allows_ordinary_read_shapes():
+    assert check_read_only("WITH c AS (SELECT 1) SELECT * FROM c") is None
+    assert check_read_only("VALUES (1), (2)") is None
+    assert check_read_only("TABLE orders") is None
+    assert check_read_only("SHOW work_mem") is None
+
+
+def test_check_read_only_does_not_trip_on_similar_identifiers():
+    # Guards against the denylist becoming so broad it blocks real queries.
+    assert check_read_only("SELECT create_date, updated_at FROM events") is None
+    assert check_read_only("SELECT * FROM updates WHERE id IN (1, 2)") is None
+    assert check_read_only("SELECT dropped_at FROM sessions") is None
+    assert check_read_only("SELECT copy_count, call_count FROM stats") is None
+    assert check_read_only("SELECT * FROM t WHERE note = 'please delete this'") is None
