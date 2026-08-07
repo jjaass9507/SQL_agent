@@ -223,6 +223,29 @@ document.addEventListener("click", async (event) => {
     });
   }
 
+  if (action === "download-diagram") {
+    // mermaid 算完之後就是一段 inline <svg>，直接序列化下載即可，
+    // 不必經過「列印成 PDF 再截圖」那條會糊掉的路。
+    const svg = document.querySelector('[data-target="doc-content-er_diagram"] svg');
+    if (!svg) {
+      showToast("關聯圖還沒畫出來", "warning");
+      return;
+    }
+    const source = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob(
+      ['<?xml version="1.0" encoding="UTF-8"?>\n', source],
+      { type: "image/svg+xml;charset=utf-8" }
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "er_diagram.svg";
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("已下載 SVG，可直接拖進簡報或文件", "success");
+    return;
+  }
+
   if (action === "copy-code") {
     const codeEl = document.querySelector(`[data-target="doc-content-${target.dataset.target}"]`);
     if (codeEl && navigator.clipboard) {

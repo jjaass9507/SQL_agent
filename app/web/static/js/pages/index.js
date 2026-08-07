@@ -23,6 +23,17 @@ const PHASE_PILL = {
   review_done: ["done", "審查完成"],
 };
 
+// phase → 一句白話說明「現在卡在誰身上」。狀態 pill 講的是系統狀態
+// （「待確認」），這裡講的是使用者要做什麼——提需求的人看 pill 看不出下一步。
+const PHASE_HINT = {
+  collecting: "AI 正在跟你確認需求細節",
+  confirming: "等你確認欄位，確認後才會產出文件",
+  generating: "AI 正在產出文件，稍等一下",
+  done: "文件已經做好了，可以看了",
+  reviewing: "AI 正在審查這個資料庫",
+  review_done: "審查報告已經好了",
+};
+
 // phase → 開啟 session 時導向的頁面
 function sessionUrl(session) {
   const routes = {
@@ -79,6 +90,14 @@ function renderSessions() {
     hint.textContent = `${modeLabel}・${new Date(session.created_at).toLocaleString()}`;
     meta.appendChild(title);
     meta.appendChild(hint);
+
+    const phaseHint = PHASE_HINT[session.phase];
+    if (phaseHint) {
+      const next = document.createElement("span");
+      next.className = "page-index-session-next";
+      next.textContent = phaseHint;
+      meta.appendChild(next);
+    }
 
     const [pillClass, pillText] = PHASE_PILL[session.phase] || ["in_progress", session.phase];
     const pill = document.createElement("span");

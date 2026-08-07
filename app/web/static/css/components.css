@@ -1057,3 +1057,20 @@ h6.md-heading {
   color: var(--color-warning-500);
   font-size: var(--font-size-sm);
 }
+
+/* 已寫過說明的欄位要看得出來，否則分不清哪些內容是可信的。 */
+.schema-column.is-documented {
+  border-left: 2px solid var(--color-accent-500);
+  padding-left: var(--space-2);
+}
+
+.schema-column:not(.is-documented) .schema-column-name,
+.schema-column:not(.is-documented) .schema-column-type {
+  opacity: 0.65;
+}
+
+/* 首頁 session 卡片的「下一步是什麼」——狀態 pill 講系統狀態，這句講使用者要做什麼。 */
+.page-index-session-next {
+  color: var(--color-accent-400);
+  font-size: var(--font-size-sm);
+}

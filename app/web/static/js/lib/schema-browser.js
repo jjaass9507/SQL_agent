@@ -41,7 +41,8 @@ export function createSchemaBrowser({ containerEl, getDbName }) {
 
   function renderColumnRow(tableName, column) {
     const entry = noteOf(tableName, column.name);
-    const row = el("div", "schema-column");
+    // 已經有人寫過說明的欄位要跟沒填的分得出來，否則看的人不知道哪些內容可信。
+    const row = el("div", entry.note ? "schema-column is-documented" : "schema-column");
 
     const head = el("div", "schema-column-head");
     head.appendChild(el("span", "schema-column-name", column.name));

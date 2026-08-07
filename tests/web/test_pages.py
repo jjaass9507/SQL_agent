@@ -104,3 +104,15 @@ async def test_agent_page_has_schema_browser_mode():
         html = (await client.get("/agent")).text
     assert 'data-target="browse"' in html
     assert 'data-target="schema-browser"' in html
+
+
+async def test_docs_page_has_diagram_download_and_term_tooltips():
+    """丙（不會寫 SQL 的使用者）要求的兩件事：ER 圖能直接下載、術語有白話解釋。"""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        html = (await client.get(f"/docs/{uuid.uuid4()}")).text
+    assert 'data-action="download-diagram"' in html
+    # 四個分頁標題都要有 title 屬性，滑過去看得到白話解釋
+    assert html.count('data-action="switch-tab"') == 4
+    for term in ["DDL：", "規格書：", "關聯圖（ER Diagram）：", "安全規劃："]:
+        assert term in html, f"缺少術語說明：{term}"
