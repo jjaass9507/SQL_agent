@@ -9,6 +9,7 @@
 // 第二個人覆核過，而這些數字常常會被貼進給主管看的簡報。
 
 import { ENDPOINTS, api } from "./api.js";
+import { renderPlan } from "./explain-plan.js";
 import { showToast } from "./toast.js";
 
 function el(tag, className, text) {
@@ -171,11 +172,27 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
     }
   }
 
+  /** 執行計畫：畫成樹狀，掃全表等地雷附一句白話說明。 */
+  async function runPlan(sql) {
+    renderEmpty("取得執行計畫中…");
+    try {
+      const result = await api.post(ENDPOINTS.workbenchDbExplain(), {
+        sql,
+        db_name: getDbName(),
+      });
+      lastResult = null;  // 計畫不是查詢結果，不能被「下載」誤用
+      resultEl.textContent = "";
+      renderPlan(resultEl, result);
+    } catch (err) {
+      renderEmpty(err.detail || "沒辦法取得這個查詢的執行計畫。");
+    }
+  }
+
   function exportResult() {
     if (!lastResult || !lastResult.rows.length) return;
     downloadCsv(lastResult.columns, lastResult.rows);
     showToast("已下載，用 Excel 直接開啟即可", "success");
   }
 
-  return { runSql, runAsk, exportResult };
+  return { runSql, runAsk, runPlan, exportResult };
 }

@@ -1,6 +1,7 @@
 """前端骨架煙霧測試：七頁 GET 200 + 內容斷言，以及 token 分層規範檢查。"""
 
 import re
+import uuid
 from pathlib import Path
 
 import httpx
@@ -78,3 +79,20 @@ async def test_agent_page_renders_query_workbench():
     # 丙（不會寫 SQL 的使用者）要求的兩件事：預設是中文提問、查詢前看得到唯讀保證。
     assert "唯讀，不會修改任何資料" in html
     assert html.index('data-target="ask"') < html.index('data-target="sql"')
+
+
+async def test_confirm_page_has_ddl_validate_button():
+    """confirm.js 依賴的接點；驗證結果區塊不存在時按鈕會靜默失效。"""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        html = (await client.get(f"/confirm/{uuid.uuid4()}")).text
+    assert 'data-action="validate-ddl-editor"' in html
+    assert 'data-target="ddl-validate-result"' in html
+
+
+async def test_agent_page_has_explain_plan_mode():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        html = (await client.get("/agent")).text
+    assert 'data-target="plan"' in html
+    assert 'data-target="workbench-plan-sql"' in html

@@ -27,7 +27,10 @@ _CRED_RE = re.compile(r"://[^\s/]+:[^\s/@]+@")
 
 _NL2SQL_SYSTEM = (
     "你是 SQL 產生助手。根據使用者的自然語言問題與下方資料庫結構，"
-    "產生一句唯讀的 PostgreSQL SELECT 查詢，並附上簡短說明。"
+    "產生一句唯讀的 PostgreSQL SELECT 查詢，並附上簡短說明。\n"
+    "說明是寫給看不懂 SQL 的業務單位使用者看的：用日常中文描述這個數字是怎麼算出來的"
+    "（例如「把訂單依通路分組，數每組有幾筆，再依金額由高到低排序」），"
+    "不要出現聚合、子查詢、JOIN、索引這類技術詞彙，也不要複述 SQL 語法本身。"
 )
 
 
@@ -205,6 +208,54 @@ async def validate_session_ddl(db: AsyncSession, session_id: uuid.UUID) -> dict:
         result["error"] = sanitize_db_error(result.get("error", ""))
     await activity.log_activity(
         db, "ddl_validated", {"session_id": str(session_id), "ok": result.get("ok")}
+    )
+    return result
+
+
+async def validate_ddl_text(db: AsyncSession, session_id: uuid.UUID, ddl_text: str) -> dict:
+    """驗證確認頁編輯器裡「還沒存檔」的 DDL 文字。
+
+    與 `validate_session_ddl` 的差別：那個驗的是文件產出後的 `03_ddl.sql`，且一定
+    要有資料庫連線；確認頁的編輯器發生在文件產出之前，設計 session 也常常沒有接
+    業務資料庫，因此這裡分兩段——
+
+    1. 一律先做結構解析（不需要任何連線），抓得出「這根本不是 CREATE TABLE」
+       或欄位寫壞導致解析不出東西這類問題。
+    2. session 有連線時，再送去真實資料庫做 rollback dry-run，錯誤訊息才會帶
+       PostgreSQL 自己標出的位置（型態不存在、相依缺漏等只有資料庫知道的問題）。
+
+    回傳 `checked` 讓前端誠實告訴使用者驗到什麼程度，不要讓「語法正確」被誤讀成
+    「一定建得起來」。
+    """
+    record = await _get_session_or_raise(db, session_id)
+    ddl_text = (ddl_text or "").strip()
+    if not ddl_text:
+        return {"ok": False, "error": "請先填入建表語法。", "checked": "none"}
+
+    tables = ddl_parser.parse_ddl(ddl_text)
+    if not tables:
+        return {
+            "ok": False,
+            "error": "看不出任何 CREATE TABLE 語句，請確認語法格式是否正確。",
+            "checked": "parse",
+        }
+
+    if not record.db_url_encrypted:
+        return {
+            "ok": True,
+            "error": None,
+            "checked": "parse",
+            "table_count": len(tables),
+        }
+
+    conn_url = decrypt_db_url(record.db_url_encrypted)
+    result = await asyncio.to_thread(ddl_validator.validate_ddl, ddl_text, conn_url)
+    if not result.get("ok"):
+        result["error"] = sanitize_db_error(result.get("error", ""))
+    result["checked"] = "database"
+    result["table_count"] = len(tables)
+    await activity.log_activity(
+        db, "ddl_text_validated", {"session_id": str(session_id), "ok": result.get("ok")}
     )
     return result
 

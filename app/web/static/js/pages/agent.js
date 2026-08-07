@@ -110,7 +110,7 @@ function switchQueryMode(mode) {
     btn.classList.toggle("btn-primary", active);
     btn.classList.toggle("btn-ghost", !active);
   });
-  for (const name of ["ask", "sql"]) {
+  for (const name of ["ask", "sql", "plan"]) {
     const form = document.querySelector(`[data-target="query-mode-${name}"]`);
     if (form) form.hidden = name !== mode;
   }
@@ -249,6 +249,15 @@ document.addEventListener("submit", (event) => {
     const input = sqlForm.querySelector('[data-target="workbench-sql"]');
     const sql = input.value.trim();
     if (sql) workbench.runSql(sql);
+    return;
+  }
+
+  const planForm = event.target.closest('[data-action="run-plan"]');
+  if (planForm) {
+    event.preventDefault();
+    const input = planForm.querySelector('[data-target="workbench-plan-sql"]');
+    const sql = input.value.trim();
+    if (sql) workbench.runPlan(sql);
   }
 });
 

@@ -66,6 +66,21 @@ class ValidateDDLResponse(BaseModel):
     error: str | None = None
 
 
+class ValidateDDLTextRequest(BaseModel):
+    """確認頁編輯器裡尚未存檔的 DDL 文字。"""
+
+    ddl: str = Field(min_length=1, max_length=100_000)
+
+
+class ValidateDDLTextResponse(BaseModel):
+    """`checked` 為 "parse"（僅結構解析）或 "database"（已對真實資料庫試跑）。"""
+
+    ok: bool
+    error: str | None = None
+    checked: str
+    table_count: int | None = None
+
+
 class DDLImportRequest(BaseModel):
     title: str | None = None
     ddl: str = Field(min_length=1, max_length=100_000)

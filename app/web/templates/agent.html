@@ -49,6 +49,8 @@
                 data-action="switch-query-mode" data-target="ask">用中文問</button>
         <button type="button" class="btn btn-sm btn-ghost"
                 data-action="switch-query-mode" data-target="sql">自己寫 SQL</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                data-action="switch-query-mode" data-target="plan">查詢為什麼慢</button>
       </div>
 
       <form class="form-field" data-action="run-ask" data-target="query-mode-ask">
@@ -64,6 +66,14 @@
         <textarea class="form-textarea form-mono" rows="4" id="workbench-sql"
                   data-target="workbench-sql" placeholder="SELECT * FROM orders LIMIT 20"></textarea>
         <button type="submit" class="btn btn-primary" data-action="submit-sql">執行</button>
+      </form>
+
+      <form class="form-field" data-action="run-plan" data-target="query-mode-plan" hidden>
+        <label class="form-label" for="workbench-plan-sql">貼上跑很慢的查詢，看資料庫實際怎麼執行它</label>
+        <textarea class="form-textarea form-mono" rows="4" id="workbench-plan-sql"
+                  data-target="workbench-plan-sql"
+                  placeholder="SELECT ... FROM ... WHERE ..."></textarea>
+        <button type="submit" class="btn btn-primary" data-action="submit-plan">取得執行計畫</button>
       </form>
 
       <div data-target="workbench-result"></div>

@@ -204,6 +204,41 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "validate-ddl-editor") {
+    const textarea = document.querySelector('[data-target="ddl-editor-text"]');
+    const box = document.querySelector('[data-target="ddl-validate-result"]');
+    if (!textarea || !box) return;
+    if (!textarea.value.trim()) {
+      showToast("請先填入建表語法", "warning");
+      return;
+    }
+    target.disabled = true;
+    box.textContent = "驗證中…";
+    box.className = "ddl-validate-result";
+    try {
+      const result = await api.post(ENDPOINTS.workbenchValidateDdlText(sessionId), {
+        ddl: textarea.value,
+      });
+      if (result.ok) {
+        box.className = "ddl-validate-result is-ok";
+        // 兩種驗證深度的差別要講清楚：只解析過的結果不能被當成「一定建得起來」。
+        box.textContent =
+          result.checked === "database"
+            ? `✓ 語法正確，已在資料庫試跑過（${result.table_count} 個資料表），可以儲存。`
+            : `✓ 結構解析通過，共 ${result.table_count} 個資料表。`
+              + "（此 session 沒有連到資料庫，尚未實際試跑，型態或相依性問題要等產出時才會發現。）";
+      } else {
+        box.className = "ddl-validate-result is-error";
+        box.textContent = `✗ ${result.error}`;
+      }
+    } catch {
+      box.textContent = "";
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
+
   if (action === "cancel-ddl-editor") {
     setDdlEditorOpen(false);
     return;

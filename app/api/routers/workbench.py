@@ -21,6 +21,8 @@ from app.api.schemas.workbench import (
     QueryResult,
     SchemaTreeResponse,
     ValidateDDLResponse,
+    ValidateDDLTextRequest,
+    ValidateDDLTextResponse,
 )
 from app.config import get_settings
 from app.llm.provider import LLMProvider
@@ -162,6 +164,18 @@ async def workbench_nl2sql(body: BusinessDbNL2SQLRequest, db: DbDep):
     except dbops.QueryRejected as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     return NL2SQLResponse(sql=draft.sql, explanation=draft.explanation)
+
+
+@router.post("/sessions/{session_id}/validate-ddl-text", response_model=ValidateDDLTextResponse)
+async def validate_ddl_text(
+    session_id: uuid.UUID, body: ValidateDDLTextRequest, db: DbDep, current_user: CurrentUserDep
+):
+    """驗證確認頁編輯器裡尚未存檔的 DDL（validate-ddl 驗的是產出後的文件）。"""
+    await _check_access(db, session_id, current_user)
+    try:
+        return await svc.validate_ddl_text(db, session_id, body.ddl)
+    except svc.SessionNotFound:
+        raise _not_found(session_id) from None
 
 
 @router.post("/ddl-import", response_model=DDLImportResponse, status_code=201)
