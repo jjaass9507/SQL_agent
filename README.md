@@ -28,6 +28,26 @@
 > `agent` / `settings` / `activity` / `change-requests` 補上認證依賴——
 > `AUTH_ENABLED=false` 的行為完全不變，`true` 時才會實際生效。
 >
+> **使用者功能強化（依三位使用者角色的討論與逐階段驗收，見
+> [`docs/user_feature_backlog.md`](docs/user_feature_backlog.md)）：**
+> DB Agent 頁新增「查詢資料」分頁——一個唯讀查詢工作台，含四種模式：
+> 中文提問（nl2sql 產生語法後直接執行，語法收在進階區）、自己寫 SQL、
+> 查詢為什麼慢（EXPLAIN 樹狀圖，掃全表標紅並附白話說明）、
+> 找資料表（結構瀏覽器 + 資料字典，可為表與欄位加註說明與負責人）。
+> 結果附「尚未經人工覆核」標記與帶 BOM 的 CSV 匯出（Excel 可直接開啟中文）。
+> 確認頁 DDL 編輯器加「驗證語法」；文件頁 ER 圖可下載 SVG、術語有白話解釋；
+> 首頁每筆紀錄顯示「下一步要做什麼」的白話進度。
+>
+> 同期修正三個既有缺陷：唯讀護欄改用允許清單（原本 `EXPLAIN ANALYZE DELETE`、
+> `setval()`、`dblink_exec()`、`CALL`、`COPY ... TO PROGRAM` 皆可通過，
+> 且此路徑不經 HITL）；ER 關聯圖原本在隱藏分頁渲染導致每份文件的圖都畫不出來；
+> 中文表名原本被逐字轉成底線。
+>
+> 本階段新增端點：`POST /workbench/{query,explain,nl2sql}`、
+> `GET /workbench/schema-tree`、`GET|PUT /workbench/dictionary`、
+> `POST /sessions/{id}/validate-ddl-text`。前四個以業務資料庫名稱為範圍
+> （DB Agent 頁沒有 session），與既有 session 範圍的版本共用 service 層核心。
+>
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
 
 ---
