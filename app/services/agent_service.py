@@ -22,13 +22,12 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.capabilities import CapabilityProfile
 from app.llm.provider import LLMProvider
 from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
 from app.repos import settings as settings_repo
 from app.repos.models import Message
-from app.services import tool_registry
+from app.services import provider_factory, tool_registry
 
 MAX_STEPS = 8
 MAX_OBS_ROWS = 20
@@ -72,9 +71,7 @@ async def start_new_conversation(db: AsyncSession) -> uuid.UUID:
 
 
 async def _build_provider(db: AsyncSession) -> LLMProvider:
-    setting = await settings_repo.get_setting(db, _CAPABILITY_SETTING_KEY)
-    profile = CapabilityProfile(**setting.value_json) if setting and setting.value_json else None
-    return LLMProvider.from_settings(profile=profile)
+    return await provider_factory.build_provider(db)
 
 
 # ── transcript 編碼／重建 ──────────────────────────────────────────────────
