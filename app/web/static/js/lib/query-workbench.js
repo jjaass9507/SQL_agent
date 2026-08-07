@@ -98,7 +98,7 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
 
     const bar = el("div", "data-table-header-bar");
     bar.appendChild(el("span", "form-hint", `${rows.length} 筆${truncated ? "（僅顯示前 200 筆）" : ""}`));
-    const exportBtn = el("button", "btn btn-ghost btn-sm", "⬇ 下載 Excel");
+    const exportBtn = el("button", "btn btn-ghost btn-sm", "⬇ 下載 CSV（Excel 可直接開）");
     exportBtn.type = "button";
     exportBtn.dataset.action = "export-query-result";
     bar.appendChild(exportBtn);

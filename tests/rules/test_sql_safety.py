@@ -6,6 +6,8 @@ check_read_only cases originating from v0.5's tests/test_db_manager.py
 (_check_sql unit tests) and extra check_ddl_allowlist cases not present in
 the official file.
 """
+import re
+
 from app.rules.sql_safety import (
     check_ddl_allowlist,
     check_read_only,
@@ -276,3 +278,33 @@ def test_check_read_only_does_not_trip_on_similar_identifiers():
     assert check_read_only("SELECT dropped_at FROM sessions") is None
     assert check_read_only("SELECT copy_count, call_count FROM stats") is None
     assert check_read_only("SELECT * FROM t WHERE note = 'please delete this'") is None
+
+
+def test_check_read_only_rejects_sequence_writes():
+    """setval/nextval 回傳數字、長得像讀取，但會真的改動序列值且回不去。"""
+    assert check_read_only("SELECT setval('orders_id_seq', 100)") is not None
+    assert check_read_only("SELECT nextval('orders_id_seq')") is not None
+
+
+def test_check_read_only_rejects_side_effect_functions():
+    assert check_read_only("SELECT pg_advisory_lock(1)") is not None
+    assert check_read_only("SELECT pg_try_advisory_xact_lock(1)") is not None
+    assert check_read_only("SELECT pg_notify('chan', 'msg')") is not None
+    assert check_read_only("SELECT pg_sleep(60)") is not None
+    assert check_read_only("SELECT pg_stat_reset()") is not None
+    # query_to_xml 會執行傳進去的查詢字串，等於把 SQL 藏在參數裡。
+    assert check_read_only("SELECT query_to_xml('DELETE FROM t', true, true, '')") is not None
+
+
+def test_check_read_only_still_allows_read_only_sequence_inspection():
+    """currval 只讀 session 狀態，擋掉它沒有安全收益。"""
+    assert check_read_only("SELECT currval('orders_id_seq')") is None
+    assert check_read_only("SELECT last_value FROM orders_id_seq") is None
+
+
+def test_read_only_errors_are_in_chinese():
+    """錯誤訊息會直接顯示給不懂技術的使用者；英文會被當成系統壞掉。"""
+    for sql in ["DELETE FROM t", "SELECT 1; SELECT 2", "", "SELECT setval('s', 1)"]:
+        message = check_read_only(sql)
+        assert message is not None
+        assert re.search(r"[一-鿿]", message), f"訊息應為中文：{message!r}"
