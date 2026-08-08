@@ -126,6 +126,13 @@ async def _tool_list_databases(args: dict, ctx: ToolContext) -> dict:
     return {"databases": [d.get("name") for d in databases]}
 
 
+# 超過這個表數就不再回完整結構。observation 會被硬砍在 4,000 字元、而且是字元
+# 邊界不是表邊界——使用者要的那張表可能整段落在截斷點之後，模型只好憑殘缺
+# 資料硬猜，或用同樣的參數重查（截斷是決定性的，重查不會有新結果）。
+_FULL_SCHEMA_MAX_TABLES = 15
+_SUMMARY_MAX_NAMES = 150
+
+
 async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
     url, err = await _resolve_db_url(ctx, args)
     if err:
@@ -133,6 +140,41 @@ async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
     tables, err = await dbops.schema_tree(url)
     if err and not tables:
         return {"error": err}
+
+    wanted = args.get("tables")
+    if wanted:
+        names = {str(n).lower() for n in wanted}
+        picked = [t for t in tables if t.table_name.lower() in names]
+        if not picked:
+            available = ", ".join(t.table_name for t in tables[:20])
+            return {"error": f"找不到指定的資料表。這個資料庫有：{available}…"}
+        return {"tables": [spec_models.asdict(t) for t in picked]}
+
+    keyword = (args.get("name_contains") or "").strip().lower()
+    if keyword:
+        matched = [t for t in tables if keyword in t.table_name.lower()]
+        if not matched:
+            return {"error": f"沒有資料表的名稱包含「{keyword}」。"}
+        if len(matched) <= _FULL_SCHEMA_MAX_TABLES:
+            return {"tables": [spec_models.asdict(t) for t in matched]}
+        tables = matched
+
+    if len(tables) > _FULL_SCHEMA_MAX_TABLES:
+        # 只給表名，讓模型看得到「有哪些表」，再指名要細節。清單本身也可能超過
+        # observation 預算，因此在**表名邊界**截斷並講清楚少了幾張——絕不能像
+        # 原本那樣砍在字元中間，那會讓模型讀到半個表名而不自知。
+        names = [t.table_name for t in tables]
+        shown = names[:_SUMMARY_MAX_NAMES]
+        omitted = len(names) - len(shown)
+        hint = (
+            f"這個資料庫有 {len(tables)} 張表，數量太多無法一次回傳完整結構。"
+            '請用 tables 參數指名你需要的資料表（例如 {"tables": ["orders"]}）'
+            '，或用 name_contains 依關鍵字搜尋（例如 {"name_contains": "order"}）。'
+        )
+        if omitted:
+            hint += f"（表名清單只列出前 {len(shown)} 張，還有 {omitted} 張未列出）"
+        return {"table_count": len(tables), "summary": shown, "hint": hint}
+
     return {"tables": [spec_models.asdict(t) for t in tables]}
 
 
@@ -268,8 +310,26 @@ _register(Tool(
 ))
 _register(Tool(
     name="get_schema",
-    description="取得指定資料庫的完整結構（資料表、欄位、型態、PK/FK、註解）。",
-    parameters={"type": "object", "properties": {"db": _DB_PARAM}},
+    description=(
+        "取得資料庫結構（資料表、欄位、型態、PK/FK、註解）。"
+        "資料表很多時只會回傳表名清單——請用 tables 參數指名你需要的資料表，"
+        "才會拿到完整欄位。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "db": _DB_PARAM,
+            "tables": {
+                "type": "array",
+                "description": "只取這幾張資料表的完整結構（省略則回傳全部或表名摘要）",
+                "items": {"type": "string"},
+            },
+            "name_contains": {
+                "type": "string",
+                "description": "依關鍵字搜尋資料表名稱（資料表很多時用這個找到目標）",
+            },
+        },
+    },
     handler=_tool_get_schema,
 ))
 _register(Tool(
