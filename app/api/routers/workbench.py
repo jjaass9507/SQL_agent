@@ -9,8 +9,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_session_access, get_current_user, get_db
+from app.api.deps import check_session_access, get_current_user, get_db, require_admin_role
 from app.api.schemas.workbench import (
+    ApproveQuestionRequest,
     BusinessDbNL2SQLRequest,
     BusinessDbQueryRequest,
     DDLImportRequest,
@@ -20,6 +21,7 @@ from app.api.schemas.workbench import (
     NL2SQLResponse,
     QueryRequest,
     QueryResult,
+    SavedQuestionRequest,
     SchemaTreeResponse,
     ValidateDDLResponse,
     ValidateDDLTextRequest,
@@ -27,7 +29,7 @@ from app.api.schemas.workbench import (
 )
 from app.config import get_settings
 from app.repos import sessions as sessions_repo
-from app.services import dbops, provider_factory
+from app.services import dbops, provider_factory, saved_questions
 from app.services import workbench_service as svc
 from app.services.auth_service import CurrentUser
 
@@ -38,6 +40,8 @@ CurrentUserDep = Annotated[CurrentUser | None, Depends(get_current_user)]
 # 業務資料庫範圍的端點沒有 session 可比對所有權，改為與 /agent/chat 同層級的
 # 登入檢查（AUTH_ENABLED=false 時恆放行，行為不變）。
 _AuthDep = Depends(get_current_user)
+# 核可是「我確認過這個口徑」的背書，比一般查詢多一道門檻。
+_AdminDep = Depends(require_admin_role)
 
 
 def _not_found(session_id: uuid.UUID) -> HTTPException:
@@ -178,6 +182,39 @@ async def workbench_dictionary_upsert(body: DictionaryEntryRequest, db: DbDep):
     return await svc.set_dictionary_entry(
         db, body.db_name, body.table, body.column, body.note, body.owner
     )
+
+
+@router.get("/workbench/saved-questions", dependencies=[_AuthDep])
+async def list_saved_questions(db: DbDep, db_name: str) -> list[dict]:
+    """某個業務資料庫的常用問題（每項含核可狀態與是否已過期）。"""
+    return await saved_questions.list_questions(db, db_name)
+
+
+@router.post("/workbench/saved-questions", dependencies=[_AuthDep])
+async def save_saved_question(body: SavedQuestionRequest, db: DbDep) -> dict:
+    """新增或更新。更新且語法有變時會撤銷核可——改了語法等於換了口徑。"""
+    return await saved_questions.save_question(
+        db, body.db_name, body.question, body.sql, body.id
+    )
+
+
+@router.post("/workbench/saved-questions/{question_id}/approve", dependencies=[_AdminDep])
+async def approve_saved_question(
+    question_id: str, body: ApproveQuestionRequest, db: DbDep, current_user: CurrentUserDep
+) -> dict:
+    """標記口徑已確認。這是「我背書這個算法」，不該人人都能按。"""
+    actor = getattr(current_user, "email", None) if current_user else "anonymous(admin-token)"
+    result = await saved_questions.approve_question(db, body.db_name, question_id, actor)
+    if result is None:
+        raise HTTPException(status_code=404, detail="找不到這則常用問題，可能已經被刪除了。")
+    return result
+
+
+@router.delete("/workbench/saved-questions/{question_id}", dependencies=[_AuthDep])
+async def delete_saved_question(question_id: str, db: DbDep, db_name: str) -> dict:
+    if not await saved_questions.delete_question(db, db_name, question_id):
+        raise HTTPException(status_code=404, detail="找不到這則常用問題，可能已經被刪除了。")
+    return {"ok": True}
 
 
 @router.post("/sessions/{session_id}/validate-ddl-text", response_model=ValidateDDLTextResponse)

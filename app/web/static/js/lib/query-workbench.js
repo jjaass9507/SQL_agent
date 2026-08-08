@@ -54,15 +54,16 @@ function downloadCsv(columns, rows) {
   URL.revokeObjectURL(url);
 }
 
-export function createQueryWorkbench({ resultEl, getDbName }) {
+export function createQueryWorkbench({ resultEl, getDbName, onSaved }) {
   let lastResult = null;
+  let lastQuery = null;  // { question, sql }——「存成常用」要知道存什麼
 
   function renderEmpty(message) {
     resultEl.textContent = "";
     resultEl.appendChild(el("p", "form-hint", message));
   }
 
-  function renderTable({ columns, rows, truncated }, { explanation, sql } = {}) {
+  function renderTable({ columns, rows, truncated }, { explanation, sql, approval } = {}) {
     lastResult = { columns, rows };
     resultEl.textContent = "";
 
@@ -82,15 +83,33 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
     }
 
     // 措辭要跟實際來源相符：SQL 模式的語法是使用者自己寫的，講成 AI 產生會失去可信度。
-    resultEl.appendChild(
-      el(
+    if (approval && approval.approved && !approval.stale) {
+      const ok = el(
         "p",
-        "workbench-trust",
-        sql
-          ? "⚠ 這個結果由 AI 產生的查詢語法算出來，尚未經人工覆核。要放進對外報告前，請先找工程師或 DBA 確認口徑。"
-          : "⚠ 這份查詢尚未經第二個人覆核。要放進對外報告前，建議先請人確認口徑。"
-      )
-    );
+        "workbench-trust is-approved",
+        `✓ 這個問題的口徑已由 ${approval.approved_by} 確認過（${(approval.approved_at || "").slice(0, 10)}）。`
+      );
+      resultEl.appendChild(ok);
+    } else if (approval && approval.stale) {
+      resultEl.appendChild(
+        el(
+          "p",
+          "workbench-trust",
+          `⚠ 這個問題上次確認口徑是 ${(approval.approved_at || "").slice(0, 10)}，已經有一段時間了。`
+            + "資料表結構可能已經改過，建議請工程師或 DBA 重新確認一次。"
+        )
+      );
+    } else {
+      resultEl.appendChild(
+        el(
+          "p",
+          "workbench-trust",
+          sql
+            ? "⚠ 這個結果由 AI 產生的查詢語法算出來，尚未經人工覆核。要放進對外報告前，請先找工程師或 DBA 確認口徑。"
+            : "⚠ 這份查詢尚未經第二個人覆核。要放進對外報告前，建議先請人確認口徑。"
+        )
+      );
+    }
 
     if (!rows.length) {
       resultEl.appendChild(el("p", "form-hint", "查詢成功，但沒有符合條件的資料。"));
@@ -103,6 +122,13 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
     exportBtn.type = "button";
     exportBtn.dataset.action = "export-query-result";
     bar.appendChild(exportBtn);
+
+    if (lastQuery) {
+      const save = el("button", "btn btn-ghost btn-sm", "⭐ 存成常用問題");
+      save.type = "button";
+      save.dataset.action = "save-question";
+      bar.appendChild(save);
+    }
     resultEl.appendChild(bar);
 
     const wrap = el("div", "data-table-wrap");
@@ -133,6 +159,7 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
         sql,
         db_name: getDbName(),
       });
+      lastQuery = { question: sql, sql };
       renderTable(result);
     } catch (err) {
       renderEmpty(err.detail || "查詢沒有成功。");
@@ -159,6 +186,7 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
         sql: draft.sql,
         db_name: getDbName(),
       });
+      lastQuery = { question, sql: draft.sql };
       renderTable(result, { explanation: draft.explanation, sql: draft.sql });
     } catch (err) {
       // SQL 產出來了但跑不動：把語法秀出來，工程師才有東西可以接手。
@@ -194,5 +222,35 @@ export function createQueryWorkbench({ resultEl, getDbName }) {
     showToast("已下載，用 Excel 直接開啟即可", "success");
   }
 
-  return { runSql, runAsk, runPlan, exportResult };
+  async function saveCurrentQuestion() {
+    if (!lastQuery) return;
+    try {
+      await api.post(ENDPOINTS.workbenchSaveQuestion(), {
+        db_name: getDbName() || "",
+        question: lastQuery.question,
+        sql: lastQuery.sql,
+      });
+      showToast("已存成常用問題，下次可以一鍵重跑", "success");
+      if (onSaved) await onSaved();
+    } catch {
+      // apiFetch 已 toast
+    }
+  }
+
+  /** 重跑一則存下來的問題——把它的核可狀態一起帶進結果，讓標記反映真實情況。 */
+  async function runSaved(entry) {
+    renderEmpty("查詢中…");
+    try {
+      const result = await api.post(ENDPOINTS.workbenchDbQuery(), {
+        sql: entry.sql,
+        db_name: getDbName(),
+      });
+      lastQuery = { question: entry.question, sql: entry.sql };
+      renderTable(result, { sql: entry.sql, approval: entry });
+    } catch (err) {
+      renderEmpty(err.detail || "這個查詢執行失敗了。");
+    }
+  }
+
+  return { runSql, runAsk, runPlan, exportResult, saveCurrentQuestion, runSaved };
 }

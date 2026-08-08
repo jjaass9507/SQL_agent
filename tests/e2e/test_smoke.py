@@ -190,3 +190,32 @@ def test_session_tags_and_pinning(page, live_server):
     page.wait_for_timeout(200)
     assert page.locator('[data-action="open-session"]').count() == 1
     _assert_looks_healthy(page)
+
+
+def test_saved_questions_show_approval_state(page, live_server):
+    """常用問題的核可狀態要直接顯示在清單上——不然要跑一次才知道能不能信。"""
+    # 常用問題以 db_name 為 key，空字串也是合法的——這裡不需要真的註冊一個業務
+    # 資料庫（那需要通過連線測試），用預設的空選項就能驗到這段 UI。
+    db = ""
+    created = page.request.post(
+        f"{live_server}/api/v1/workbench/saved-questions",
+        data={"db_name": db, "question": "上月退貨率", "sql": "SELECT 1 AS r"},
+    )
+    assert created.ok, created.text()
+
+    page.goto(f"{live_server}/agent", wait_until="networkidle")
+    page.click('[data-action="switch-agent-tab"][data-target="query"]')
+    page.wait_for_selector(".saved-question")
+
+    assert page.locator(".saved-question-badge", has_text="尚未覆核").count() == 1
+
+    # 核可之後標記要跟著變
+    page.request.post(
+        f"{live_server}/api/v1/workbench/saved-questions/{created.json()['id']}/approve",
+        data={"db_name": db},
+        headers={"X-Admin-Token": "e2e-token"},
+    )
+    page.reload(wait_until="networkidle")
+    page.click('[data-action="switch-agent-tab"][data-target="query"]')
+    page.wait_for_selector(".saved-question-badge.is-approved")
+    _assert_looks_healthy(page)

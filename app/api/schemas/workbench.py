@@ -100,3 +100,16 @@ class DictionaryEntryRequest(BaseModel):
     column: str | None = None
     note: str = Field(default="", max_length=2_000)
     owner: str = Field(default="", max_length=100)
+
+
+class SavedQuestionRequest(BaseModel):
+    """新增或更新一則常用問題（帶 id 即為更新）。"""
+
+    db_name: str
+    question: str = Field(min_length=1, max_length=500)
+    sql: str = Field(min_length=1, max_length=10_000)
+    id: str | None = None
+
+
+class ApproveQuestionRequest(BaseModel):
+    db_name: str
