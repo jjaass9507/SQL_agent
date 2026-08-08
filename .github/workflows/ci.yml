@@ -20,3 +20,19 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest -v
+
+  e2e:
+    # 瀏覽器煙霧測試：只驗「畫得出來、不出現看起來像故障的字樣」。
+    # 與主測試分開跑——它慢、需要瀏覽器，不該拖慢每次 push 的回饋。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev,e2e]"
+      - name: Install browser
+        run: python -m playwright install --with-deps chromium
+      - name: Smoke test
+        run: pytest -m e2e -v

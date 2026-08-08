@@ -49,6 +49,13 @@
 > （DB Agent 頁沒有 session），與既有 session 範圍的版本共用 service 層核心。
 >
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
+>
+> **測試分層**（見 `CLAUDE.md` 第 4.2 節）：`tests/rules|repos`（純邏輯）、
+> `tests/web/test_contract.py`（前端依賴的 API 形狀）、`tests/architecture`
+> （跨檔案約定，例如分層方向、錯誤訊息必須是中文）、`tests/gateway`
+> （LLM gateway 能力降級）、`tests/e2e`（瀏覽器煙霧測試，預設不跑，
+> `pip install -e ".[e2e]" && python -m playwright install chromium`
+> 之後以 `pytest -m e2e` 執行）。
 
 ---
 

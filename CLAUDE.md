@@ -62,6 +62,47 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+### 4.1 Prove the test can fail
+
+A test that passes both with and without the bug is worth nothing. Before
+claiming a regression is covered:
+
+1. Write the test. **Run it and watch it fail** for the expected reason.
+2. Fix the code. Run it again — it should pass.
+3. If a test was written after the fix, **temporarily reintroduce the bug** and
+   confirm the test goes red.
+
+This is not ceremony. Two real cases from this repo:
+
+- A browser test for the ER diagram passed even with the bug reintroduced,
+  because the seeded diagram had no relationship line — and the bug lived in
+  mermaid's measurement of relationship paths. The fixture was too simple to
+  reproduce it.
+- A "reintroduce the bug" experiment silently did nothing because the string
+  replacement didn't match. The test looked like a guard; it guarded nothing.
+
+Always inspect the file after reintroducing a bug, before trusting the result.
+
+### 4.2 Which layer should catch it
+
+Pick the cheapest layer that can actually see the failure:
+
+| Layer | Catches | Location |
+|---|---|---|
+| Unit / rules | Pure logic, edge cases | `tests/rules/`, `tests/repos/` |
+| API contract | Request/response shapes the frontend depends on | `tests/web/test_contract.py` |
+| Architecture | Cross-file conventions nobody owns | `tests/architecture/` |
+| Gateway contract | Behaviour under degraded LLM gateways | `tests/gateway/` |
+| Browser smoke | "Looks broken" — render failures, layout-dependent bugs | `tests/e2e/` (`-m e2e`) |
+
+Architecture tests exist because some rules have no natural owner: every file
+looks correct on its own and the mistake is that nobody remembered a
+convention. Add one when a violation would produce a whole class of bugs that
+unit tests structurally cannot see.
+
+Browser smoke tests stay narrow on purpose: render success and absence of
+"looks broken" markers. Business logic belongs in the far faster API tests.
+
 ## 5. Documentation Hygiene
 
 **Every commit that changes behaviour must update the relevant MD files.**

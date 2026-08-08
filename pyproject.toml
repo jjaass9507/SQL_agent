@@ -21,6 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+e2e = [
+    "playwright>=1.44",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -55,6 +58,11 @@ app = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# e2e 需要瀏覽器且較慢，預設不跑；CI 另開一個 job 執行（見 .github/workflows/ci.yml）。
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: 瀏覽器煙霧測試（需 playwright + chromium，用 `pytest -m e2e` 執行）",
+]
 
 [tool.ruff]
 line-length = 100
