@@ -58,7 +58,7 @@ async def resolve_business_db(
 
 
 async def create_change_request(
-    db: AsyncSession, db_name: str | None, ddl: str, reason: str = ""
+    db: AsyncSession, db_name: str | None, ddl: str, reason: str = "", *, actor: str | None = None
 ) -> dict:
     """Allowlist 檢查 + dry-run 驗證皆通過才建立 pending 提案；失敗回傳 {"error": ...}。"""
     err = sql_safety.check_ddl_allowlist(ddl)
@@ -85,19 +85,37 @@ async def create_change_request(
 
 
 async def _fail(
-    db: AsyncSession, change_request_id: uuid.UUID, error: str
+    db: AsyncSession, change_request_id: uuid.UUID, error: str, actor: str | None = None
 ) -> dict:
     updated = await change_requests_repo.decide_change_request(
         db, change_request_id, status="failed", error=error
     )
+    # 執行失敗同樣是稽核事件：是誰按的核准仍然要留下來。
     await activity_repo.log_activity(
-        db, "change_request.failed", {"id": str(change_request_id), "error": error}
+        db,
+        "change_request.failed",
+        {"id": str(change_request_id), "error": error, "actor": _actor(actor)},
     )
     return {"change_request": updated, "ok": False}
 
 
-async def approve_change_request(db: AsyncSession, change_request_id: uuid.UUID) -> dict:
-    """核准並執行：重驗 allowlist/dry-run → 單一交易執行 DDL → 記錄結果。"""
+# AUTH_ENABLED=false 時沒有具名使用者，但共用的 ADMIN_TOKEN 仍代表「用管理員權限
+# 做的」。留白會讓稽核紀錄看起來像資料遺失，因此明確標記。
+ANONYMOUS_ADMIN = "anonymous(admin-token)"
+
+
+def _actor(actor: str | None) -> str:
+    return actor or ANONYMOUS_ADMIN
+
+
+async def approve_change_request(
+    db: AsyncSession, change_request_id: uuid.UUID, *, actor: str | None = None
+) -> dict:
+    """核准並執行：重驗 allowlist/dry-run → 單一交易執行 DDL → 記錄結果。
+
+    `actor` 是按下核准的人。事後稽核問「上週那個 ALTER TABLE 是誰核准的」時，
+    這是唯一的答案來源。
+    """
     record = await change_requests_repo.get_change_request(db, change_request_id)
     if record is None:
         return {"error": "找不到變更提案", "not_found": True}
@@ -106,31 +124,40 @@ async def approve_change_request(db: AsyncSession, change_request_id: uuid.UUID)
 
     err = sql_safety.check_ddl_allowlist(record.ddl)
     if err:
-        return await _fail(db, change_request_id, err)
+        return await _fail(db, change_request_id, err, actor)
 
     _, url, err = await resolve_business_db(db, record.db_name)
     if err:
-        return await _fail(db, change_request_id, err)
+        return await _fail(db, change_request_id, err, actor)
 
     dry_run = await asyncio.to_thread(ddl_validator.validate_ddl, record.ddl, url)
     if not dry_run.get("ok"):
         error_msg = f"dry-run 驗證失敗：{dry_run.get('error', '未知錯誤')}"
-        return await _fail(db, change_request_id, error_msg)
+        return await _fail(db, change_request_id, error_msg, actor)
 
     exec_result = await asyncio.to_thread(ddl_executor.execute_ddl, url, record.ddl)
     if not exec_result.get("ok"):
-        return await _fail(db, change_request_id, exec_result.get("error", "未知錯誤"))
+        return await _fail(db, change_request_id, exec_result.get("error", "未知錯誤"), actor)
 
     updated = await change_requests_repo.decide_change_request(
         db, change_request_id, status="executed"
     )
     await activity_repo.log_activity(
-        db, "change_request.executed", {"id": str(change_request_id), "db_name": record.db_name}
+        db,
+        "change_request.executed",
+        {
+            "id": str(change_request_id),
+            "db_name": record.db_name,
+            "actor": _actor(actor),
+            "ddl": record.ddl[:500],
+        },
     )
     return {"change_request": updated, "ok": True}
 
 
-async def reject_change_request(db: AsyncSession, change_request_id: uuid.UUID) -> dict:
+async def reject_change_request(
+    db: AsyncSession, change_request_id: uuid.UUID, *, actor: str | None = None
+) -> dict:
     """駁回，永不執行。"""
     record = await change_requests_repo.get_change_request(db, change_request_id)
     if record is None:
@@ -141,7 +168,11 @@ async def reject_change_request(db: AsyncSession, change_request_id: uuid.UUID) 
     updated = await change_requests_repo.decide_change_request(
         db, change_request_id, status="rejected"
     )
-    await activity_repo.log_activity(db, "change_request.rejected", {"id": str(change_request_id)})
+    await activity_repo.log_activity(
+        db,
+        "change_request.rejected",
+        {"id": str(change_request_id), "db_name": record.db_name, "actor": _actor(actor)},
+    )
     return {"change_request": updated, "ok": True}
 
 

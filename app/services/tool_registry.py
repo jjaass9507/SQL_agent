@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repos import activity as activity_repo
 from app.repos import settings as settings_repo
 from app.rules import (
     convention_checker,
@@ -33,12 +34,18 @@ from app.services import change_service, dbops
 logger = logging.getLogger(__name__)
 
 
+# DB Agent 目前是全平台共用的一條對話，沒有具名使用者可歸屬。標記清楚比留白好：
+# 空白看起來像資料遺失，明確標記才看得出「當時就是不知道是誰」。
+ANONYMOUS_AGENT = "anonymous(db-agent)"
+
+
 @dataclass
 class ToolContext:
     """每回合共用的工具上下文。"""
 
     db: AsyncSession
     db_name: str | None = None  # 本回合選擇的資料庫（工具的 db 參數可覆蓋）
+    actor: str | None = None  # 稽核用；AUTH_ENABLED=false 時為 None
 
 
 @dataclass
@@ -392,6 +399,38 @@ def tool_defs() -> list[dict]:
     ]
 
 
+# 會碰到業務資料庫、事後需要追溯的工具。純讀結構的工具（get_schema 等）不記，
+# 否則稽核紀錄會被雜訊淹沒、真正該看的東西反而找不到。
+_AUDITED_TOOLS = frozenset({"run_query", "explain_query", "propose_ddl", "draft_comment_ddl"})
+
+_AUDIT_SQL_MAX = 500
+
+
+async def _log_tool_call(name: str, args: dict, ctx: ToolContext, result: dict) -> None:
+    """把 agent 對業務資料庫做的事寫進 activity_log。
+
+    沒有這筆紀錄，「有沒有人透過 DB Agent 查過薪資表」事後完全查不出來——
+    agent 能讀到真實資料，卻是全平台唯一沒有留痕的路徑。
+    """
+    if name not in _AUDITED_TOOLS:
+        return
+    statement = args.get("sql") or args.get("ddl") or ""
+    try:
+        await activity_repo.log_activity(
+            ctx.db,
+            "agent.tool_called",
+            {
+                "tool": name,
+                "db": args.get("db") or ctx.db_name,
+                "actor": ctx.actor or ANONYMOUS_AGENT,
+                "sql": str(statement)[:_AUDIT_SQL_MAX],
+                "ok": "error" not in result,
+            },
+        )
+    except Exception:  # noqa: BLE001 - 稽核失敗不該讓使用者的操作跟著失敗
+        logger.exception("audit log failed for tool %s", name)
+
+
 async def dispatch(name: str, args: dict, ctx: ToolContext) -> dict:
     """查表並執行一個工具呼叫。永不 raise——錯誤一律回傳 {"error": ...}，
     讓 agent_service 能把它當作 observation 回饋給 LLM 自我修正。"""
@@ -401,7 +440,9 @@ async def dispatch(name: str, args: dict, ctx: ToolContext) -> dict:
     if not isinstance(args, dict):
         return {"error": "工具參數必須是 JSON 物件"}
     try:
-        return await tool.handler(args, ctx)
+        result = await tool.handler(args, ctx)
     except Exception as exc:
         logger.exception("tool %s failed", name)
-        return {"error": f"工具執行錯誤：{str(exc)[:200]}"}
+        result = {"error": f"工具執行錯誤：{str(exc)[:200]}"}
+    await _log_tool_call(name, args, ctx, result)
+    return result

@@ -214,6 +214,7 @@ async def run_agent_turn_stream(
     user_message: str,
     db_name: str | None = None,
     *,
+    actor: str | None = None,
     provider: LLMProvider | None = None,
 ) -> AsyncIterator[dict]:
     """執行一回合原生 function calling 的 ReAct 工具迴圈，以 async generator 即時吐出事件。
@@ -233,7 +234,7 @@ async def run_agent_turn_stream(
     ]
 
     provider = provider or await _build_provider(db)
-    ctx = tool_registry.ToolContext(db=db, db_name=db_name)
+    ctx = tool_registry.ToolContext(db=db, db_name=db_name, actor=actor)
     tool_defs = tool_registry.tool_defs()
 
     steps: list[dict] = []

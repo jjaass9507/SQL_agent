@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_admin_role
 from app.repos import change_requests as change_requests_repo
 from app.services import change_service
+from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/change-requests", tags=["change-requests"])
 
@@ -17,6 +18,7 @@ _DbDep = Depends(get_db)
 # AUTH_ENABLED=false：比照舊 ADMIN_TOKEN 機制；true：改要求 JWT role=admin
 # （ADMIN_TOKEN 僅在認證關閉時作為過渡機制，見 app/api/deps.py::require_admin_role）。
 _AdminDep = Depends(require_admin_role)
+_CurrentUserDep = Depends(get_current_user)
 # 建立提案與查看清單：匿名模式維持開放，AUTH_ENABLED=true 時要求已登入
 # （核准/駁回另有 _AdminDep 的 admin 門檻）。
 _AuthDep = Depends(get_current_user)
@@ -51,13 +53,31 @@ async def list_change_requests(status: str | None = None, db: AsyncSession = _Db
     return [change_service.serialize_change_request(r) for r in records]
 
 
+def _actor_of(current_user: CurrentUser | None) -> str | None:
+    """稽核用的身分字串。AUTH_ENABLED=false 時沒有具名使用者，交給 service 標記。"""
+    return getattr(current_user, "email", None) if current_user else None
+
+
 @router.post("/{change_request_id}/approve", dependencies=[_AdminDep])
-async def approve_change_request(change_request_id: uuid.UUID, db: AsyncSession = _DbDep) -> dict:
-    result = await change_service.approve_change_request(db, change_request_id)
+async def approve_change_request(
+    change_request_id: uuid.UUID,
+    db: AsyncSession = _DbDep,
+    current_user: CurrentUser | None = _CurrentUserDep,
+) -> dict:
+    # 核准者身分必須往下傳：這是「上週那個 ALTER TABLE 是誰核准的」唯一的答案來源。
+    result = await change_service.approve_change_request(
+        db, change_request_id, actor=_actor_of(current_user)
+    )
     return _decision_response(result)
 
 
 @router.post("/{change_request_id}/reject", dependencies=[_AdminDep])
-async def reject_change_request(change_request_id: uuid.UUID, db: AsyncSession = _DbDep) -> dict:
-    result = await change_service.reject_change_request(db, change_request_id)
+async def reject_change_request(
+    change_request_id: uuid.UUID,
+    db: AsyncSession = _DbDep,
+    current_user: CurrentUser | None = _CurrentUserDep,
+) -> dict:
+    result = await change_service.reject_change_request(
+        db, change_request_id, actor=_actor_of(current_user)
+    )
     return _decision_response(result)
