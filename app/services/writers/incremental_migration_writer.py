@@ -25,6 +25,12 @@ class IncrementalMigrationWriter:
         if not diff.get("has_changes"):
             return "-- 設計與現有資料庫結構一致，無需任何變更。\n"
 
+        if self._provider is None:
+            raise ValueError(
+                "有結構差異需要產生 migration，但呼叫端沒有提供 LLM provider；"
+                "請以 provider_factory.build_provider(db) 建立後傳入"
+            )
+
         payload = json.dumps(
             {
                 "diff_summary": diff,

@@ -179,7 +179,7 @@ async def delete_session(session_id: UUID, db: DbDep, current_user: CurrentUserD
 async def get_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> SessionDetail:
     detail = await session_service.get_session_detail(db, session_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, detail.session, current_user)
     return _to_detail(detail)
 
@@ -250,7 +250,7 @@ async def send_message(
 ):
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
 
     provider = await provider_factory.build_provider(db)
@@ -273,12 +273,12 @@ async def confirm_session(
 ) -> ConfirmResponse:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
     try:
         job = await session_service.confirm_session(db, session_id)
     except session_service.SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。") from exc
     except session_service.ConfirmConflictError as exc:
         raise HTTPException(status_code=409, detail="session 目前不是 confirming 狀態") from exc
     return ConfirmResponse(session_id=session_id, phase="generating", job_id=job.id)
@@ -290,7 +290,7 @@ async def list_versions(
 ) -> list[VersionOut]:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
     versions = await versions_repo.list_versions(db, session_id)
     return [_to_version_out(v) for v in versions]
@@ -302,14 +302,14 @@ async def restore_version(
 ) -> VersionOut:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
     try:
         restored = await session_service.restore_version(db, session_id, version_num)
     except session_service.SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。") from exc
     except session_service.VersionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="version not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個版本，可能已經被刪除了。") from exc
     return _to_version_out(restored)
 
 
@@ -319,12 +319,12 @@ async def import_db(
 ) -> ImportDbResponse:
     existing = await sessions_repo.get_session(db, session_id)
     if existing is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, existing, current_user)
     try:
         session = await session_service.import_db(db, session_id, payload.db_url)
     except session_service.SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。") from exc
     except session_service.DbConnectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     tables = tables_from_json(session.context_tables_json) if session.context_tables_json else []
