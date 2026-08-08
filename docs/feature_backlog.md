@@ -372,29 +372,42 @@ engine、用完 `dispose()`，沒有跨請求的連線池，也沒有任何併�
 
 ---
 
-## 八、建議執行順序
+## 八、執行狀態
 
 ```
-第一批（安全與資料保全，互不相依，可並行）
-  0-1  sql_safety denylist ........................ 低成本，解鎖第二批
-  0-3  稽核留痕（actor + SQL + usage → detail_json）  資料每天在流失
-  0-2  短期：agent 查詢結果敏感欄位遮罩 ............ 低成本先擋住
+✅ 0-1  唯讀護欄改用允許清單（另實測發現 EXPLAIN ANALYZE <寫入> 可繞過）
+✅ 0-2  agent 查詢結果敏感欄位遮罩（app/rules/sensitive_columns.py）
+✅ 0-3  稽核留痕：誰核准了 DDL、agent 查了什麼 SQL
+✅ 1-1  工作台端點接前端（查詢工作台四種模式）
+✅ 2-1  CREATE INDEX CONCURRENTLY（原本物理上做不到）
+✅ 2-2  propose_ddl 失敗不再終止對話
+✅ 2-3  get_schema 分級降階 + tables/name_contains 篩選
+✅ 2-4  查詢併發上限
+✅ 2-5  重複呼叫偵測
 
-第二批（解鎖已付出的成本）
-  1-1  工作台五端點接前端（需 0-1 先完成）
-  1-2  一鍵送審 + 待審 badge（含核准頁鎖表風險揭露）
+⬜ 1-2  文件頁／審查頁一鍵送審 + 待審 badge
+⬜ 2-6  DDL 執行前的 schema 快照與回滾建議
+⬜ 第 3 級：NL2SQL 強制 LIMIT、MAX_STEPS 收尾、降級模式工具解析重試、
+          remember_note 業務術語記憶、確認頁樂觀鎖
 
-第三批（確定性地雷）
-  2-1  CREATE INDEX CONCURRENTLY
-  2-4  查詢併發上限  ┐
-  2-5  重複呼叫偵測  ├─ 2-2 的前置
-  2-2  propose_ddl 失敗不終止
-  2-3  get_schema 篩選 + 複用 format_context
-
-需要人為決定（不阻塞上述工作，但越早越好）
+需要人為決定（不阻塞其他工作，但越早越好）
   ·  「不得改動 models.py」公約是否解除
-  ·  agent session 是否改為 per-user（0-2 中期方案）
+     ——本輪新增的 session 標籤、常用問題、資料字典全部繞道 AppSetting，
+       繞路成本持續累積
+  ·  agent session 是否改為 per-user（0-2 的中期方案；目前全平台共用一條
+     transcript，未遮罩前的查詢結果會成為下一個人的上下文）
 ```
+
+### 測試防護
+
+本輪同時建立了四層測試架構，讓上述修正不會回歸：
+
+| 層 | 位置 | 抓什麼 |
+|---|---|---|
+| 架構規則 | `tests/architecture/` | 分層方向、LLM 呼叫點、錯誤訊息語言 |
+| gateway 契約 | `tests/gateway/` | 五種 gateway 能力組合下的降級行為 |
+| 瀏覽器煙霧 | `tests/e2e/`（`-m e2e`） | 「看起來像故障」的畫面 |
+| 紀律 | `CLAUDE.md` 4.1／4.2 | 證明測試會失敗、哪一層該抓什麼 |
 
 ---
 
