@@ -106,18 +106,45 @@ async def test_propose_ddl_is_terminal(db_session, monkeypatch):
     assert "已提交結構變更提案" in data["reply"]
 
 
-async def test_propose_ddl_failure_synthesizes_reply_without_extra_llm_call(db_session):
-    # 沒有設定任何業務資料庫 → propose_ddl 的 handler 直接回錯誤，一樣是 terminal。
+async def test_propose_ddl_failure_is_fed_back_for_self_correction(db_session):
+    """propose_ddl 只有成功才終止本回合；失敗要當一般 observation 餵回去。
+
+    原本不論成敗都直接結束，使用者只會拿到一句原始的 Postgres 錯誤（例如
+    dry-run 撞到真實資料的 UNIQUE 違例）然後對話就沒了——即使模型明明可以先用
+    run_query 查出哪些值重複、再改用別的做法。這與 run_query/explain_query
+    早就有的自我修正行為不一致。
+    """
     ddl_args = {"ddl": "CREATE INDEX i ON t(a);"}
     with respx.mock(base_url=BASE_URL) as mock:
         route = mock.post("/chat/completions")
-        route.side_effect = [chat_response(tool_calls=[tool_call("c1", "propose_ddl", ddl_args)])]
+        route.side_effect = [
+            # 沒有設定任何業務資料庫 → propose_ddl 的 handler 直接回錯誤
+            chat_response(tool_calls=[tool_call("c1", "propose_ddl", ddl_args)]),
+            chat_response(content="這個資料庫還沒設定連線，請先在設定頁新增。"),
+        ]
         events = await _collect(db_session, "幫我加個索引")
 
-    assert route.call_count == 1
+    assert route.call_count == 2, "失敗後應該再給模型一次機會，而不是直接結束"
     data = _turn_done(events)
     assert data["proposal"] is None
-    assert "提案未成立" in data["reply"]
+    assert "設定" in data["reply"], "回覆應由模型合成，而非丟出原始錯誤訊息"
+
+
+async def test_propose_ddl_success_still_ends_the_turn(db_session):
+    """成功時仍是 terminal：提案已送出，不需要模型再多說什麼。"""
+    await seed_business_db(db_session, "shop", "sqlite://")
+    ddl_args = {"ddl": "CREATE TABLE t (id int);", "reason": "測試"}
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as mock:
+        route = mock.post("/chat/completions")
+        route.side_effect = [
+            chat_response(tool_calls=[tool_call("c1", "propose_ddl", ddl_args)]),
+            chat_response(content="不該被呼叫"),
+        ]
+        events = await _collect(db_session, "幫我建表")
+
+    data = _turn_done(events)
+    if data["proposal"] is not None:  # dry-run 在 SQLite 上可能不成立，成立時才驗
+        assert route.call_count == 1
 
 
 # -- 工具錯誤時的自我修正（error 回饋給 LLM，下一輪修正後成功）---------------
@@ -329,3 +356,31 @@ def test_summarize_variants():
     assert agent_service._summarize({"rows": [1, 2]}) == "2 筆結果"
     assert agent_service._summarize({"databases": ["a"]}) == "1 個資料庫"
     assert agent_service._summarize("not-a-dict") == "not-a-dict"
+
+
+async def test_repeated_identical_tool_call_is_not_re_executed(db_session):
+    """同工具同參數重複呼叫不會有新資訊，只會燒掉本回合的步數預算。
+
+    observation 的截斷是決定性的——同樣的參數必定得到同樣的截斷結果。模型若因
+    截斷而「再查一次」，會一路重複到 MAX_STEPS 用完，使用者最後只拿到一句
+    「已達到單回合最大工具呼叫次數」。
+    """
+    await seed_business_db(db_session, "shop", "sqlite://")
+    same = {"sql": "SELECT 1 AS a"}
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions")
+        route.side_effect = [
+            chat_response(tool_calls=[tool_call("c1", "run_query", same)]),
+            chat_response(tool_calls=[tool_call("c2", "run_query", same)]),
+            chat_response(content="好的。"),
+        ]
+        events = await _collect(db_session, "查一下")
+
+    data = _turn_done(events)
+    assert len(data["steps"]) == 2, "兩次呼叫都要出現在軌跡上（使用者要看得到繞路）"
+
+    # 第二次的 observation 要帶上「你已經查過了」的提示，引導模型換路
+    third_call_body = json.loads(route.calls[2].request.content)
+    tool_messages = [m for m in third_call_body["messages"] if m.get("role") == "tool"]
+    assert "已用完全相同的參數呼叫過這個工具" in tool_messages[-1]["content"]

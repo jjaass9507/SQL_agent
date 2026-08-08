@@ -26,6 +26,7 @@ from app.rules import (
     convention_checker,
     metadata_checker,
     schema_advisor,
+    sensitive_columns,
     spec_models,
     table_relation,
 )
@@ -157,9 +158,12 @@ async def _tool_run_query(args: dict, ctx: ToolContext) -> dict:
     if err:
         return {"error": err}
     try:
-        return await dbops.execute_query(url, args["sql"])
+        result = await dbops.execute_query(url, args["sql"])
     except dbops.QueryRejected as exc:
         return {"error": str(exc)}
+    # agent 讀到的資料會進入全平台共用的 transcript 並送往 LLM——這裡遮，
+    # 人工查詢頁不遮（那裡的使用者本來就有權限，且結果不進 LLM）。
+    return sensitive_columns.mask_result(result)
 
 
 async def _tool_explain_query(args: dict, ctx: ToolContext) -> dict:
