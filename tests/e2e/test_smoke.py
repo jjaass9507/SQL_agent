@@ -158,3 +158,35 @@ def test_no_untranslated_error_text_on_rejected_query(page, live_server):
     body = page.inner_text("body")
     assert re.search(r"[一-鿿]", body), "畫面上應有中文訊息"
     assert "Internal Server Error" not in body
+
+
+def test_session_tags_and_pinning(page, live_server):
+    """標籤與釘選是純前端互動，API 測試看不到——這是後端工程師點名最痛的功能。"""
+    created = page.request.post(
+        f"{live_server}/api/v1/ddl-import",
+        data={"title": "訂單改版", "ddl": "CREATE TABLE a (id uuid PRIMARY KEY);"},
+    )
+    session_id = created.json()["id"]
+    page.request.post(
+        f"{live_server}/api/v1/ddl-import",
+        data={"title": "會員系統", "ddl": "CREATE TABLE b (id uuid PRIMARY KEY);"},
+    )
+    page.request.put(
+        f"{live_server}/api/v1/sessions/{session_id}/labels",
+        data={"tags": ["PM-陳"], "pinned": True},
+    )
+
+    page.goto(f"{live_server}/", wait_until="networkidle")
+    page.wait_for_selector(".session-tag")
+
+    # 標籤要看得到
+    assert page.locator(".session-tag", has_text="PM-陳").count() == 1
+    # 釘選的要排在最前面
+    first_card = page.locator('[data-action="open-session"]').first
+    assert "訂單改版" in first_card.inner_text()
+
+    # 點標籤即篩選
+    page.click('.session-tag')
+    page.wait_for_timeout(200)
+    assert page.locator('[data-action="open-session"]').count() == 1
+    _assert_looks_healthy(page)

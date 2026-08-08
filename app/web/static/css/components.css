@@ -1074,3 +1074,31 @@ h6.md-heading {
   color: var(--color-accent-400);
   font-size: var(--font-size-sm);
 }
+
+/* ── Session 標籤與釘選 ─────────────────────────────────────────────────── */
+
+.session-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.session-tag {
+  padding: 1px var(--space-2);
+  border: var(--border-width-thin) solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  color: var(--color-text-700);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.session-tag:hover {
+  border-color: var(--color-accent-500);
+  color: var(--color-accent-500);
+}
+
+.btn.is-pinned {
+  color: var(--color-warning-500);
+}

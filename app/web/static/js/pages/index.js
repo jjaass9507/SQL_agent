@@ -50,6 +50,7 @@ function sessionUrl(session) {
 let allSessions = [];
 let currentFilter = "all";
 let searchTerm = "";
+let tagFilter = "";  // 選中的標籤；空字串代表不依標籤篩選
 
 function renderSessions() {
   const list = document.querySelector('[data-target="session-list"]');
@@ -59,7 +60,11 @@ function renderSessions() {
   const visible = allSessions.filter(
     (s) =>
       (currentFilter === "all" || PHASE_GROUP[s.phase] === currentFilter) &&
-      (!needle || (s.title || "").toLowerCase().includes(needle))
+      (!tagFilter || (s.tags || []).includes(tagFilter)) &&
+      // 搜尋也比對標籤：打「PM-陳」就能找到那個 PM 的所有案子
+      (!needle ||
+        (s.title || "").toLowerCase().includes(needle) ||
+        (s.tags || []).some((t) => t.toLowerCase().includes(needle)))
   );
 
   list.textContent = "";
@@ -104,6 +109,39 @@ function renderSessions() {
     pill.className = `status-pill status-pill-${pillClass}`;
     pill.textContent = pillText;
 
+    // 標籤直接顯示在卡片上——不然還是得一個個點開才知道是哪個案子的
+    if ((session.tags || []).length) {
+      const tags = document.createElement("span");
+      tags.className = "session-tags";
+      for (const tag of session.tags) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "session-tag";
+        chip.textContent = tag;
+        chip.dataset.action = "filter-by-tag";
+        chip.dataset.tag = tag;
+        tags.appendChild(chip);
+      }
+      meta.appendChild(tags);
+    }
+
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = session.pinned ? "btn btn-ghost btn-sm is-pinned" : "btn btn-ghost btn-sm";
+    pin.textContent = session.pinned ? "📌" : "📍";
+    pin.title = session.pinned ? "取消釘選" : "釘選到最上面";
+    pin.dataset.action = "toggle-pin";
+    pin.dataset.target = session.id;
+    pin.dataset.pinned = String(Boolean(session.pinned));
+
+    const label = document.createElement("button");
+    label.type = "button";
+    label.className = "btn btn-ghost btn-sm";
+    label.textContent = "標籤";
+    label.dataset.action = "edit-tags";
+    label.dataset.target = session.id;
+    label.dataset.tags = (session.tags || []).join(", ");
+
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn-ghost btn-sm";
@@ -114,6 +152,8 @@ function renderSessions() {
 
     card.appendChild(meta);
     card.appendChild(pill);
+    card.appendChild(pin);
+    card.appendChild(label);
     card.appendChild(remove);
     list.appendChild(card);
   }
@@ -135,9 +175,48 @@ function toggleForm(name) {
   }
 }
 
+async function saveLabels(sessionId, payload) {
+  try {
+    await api.put(ENDPOINTS.sessionLabels(sessionId), payload);
+    await loadSessions();
+  } catch {
+    // apiFetch 已 toast
+  }
+}
+
 document.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
+
+  if (target.dataset.action === "toggle-pin") {
+    event.stopPropagation();
+    await saveLabels(target.dataset.target, { pinned: target.dataset.pinned !== "true" });
+    return;
+  }
+
+  if (target.dataset.action === "edit-tags") {
+    event.stopPropagation();
+    const current = target.dataset.tags || "";
+    const next = window.prompt("標籤（用逗號分隔，例如：PM-陳, 急件）", current);
+    if (next === null) return;
+    await saveLabels(target.dataset.target, {
+      tags: next.split(",").map((t) => t.trim()).filter(Boolean),
+    });
+    return;
+  }
+
+  if (target.dataset.action === "filter-by-tag") {
+    event.stopPropagation();
+    // 再點一次同一個標籤就取消篩選
+    tagFilter = tagFilter === target.dataset.tag ? "" : target.dataset.tag;
+    renderSessions();
+    const banner = document.querySelector('[data-target="tag-filter-banner"]');
+    if (banner) {
+      banner.hidden = !tagFilter;
+      banner.textContent = tagFilter ? `只顯示標籤「${tagFilter}」的紀錄（再點一次取消）` : "";
+    }
+    return;
+  }
   const action = target.dataset.action;
 
   if (action === "create-session") {

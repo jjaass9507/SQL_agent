@@ -17,6 +17,7 @@ export const ENDPOINTS = {
   sessionVersions: (id) => `${API_PREFIX}/sessions/${id}/versions`,
   sessionVersionRestore: (id, version) => `${API_PREFIX}/sessions/${id}/versions/${version}/restore`,
   sessionTablesDdl: (id) => `${API_PREFIX}/sessions/${id}/tables-ddl`,
+  sessionLabels: (id) => `${API_PREFIX}/sessions/${id}/labels`,
   sessionImportDb: (id) => `${API_PREFIX}/sessions/${id}/import-db`,
   sessionOutputs: (id) => `${API_PREFIX}/sessions/${id}/outputs`,
   sessionOutputsZip: (id) => `${API_PREFIX}/sessions/${id}/outputs/zip`,

@@ -48,6 +48,12 @@ async def db_engine():
 
 
 @pytest.fixture
+def session_factory(db_engine):
+    """測試直接操作 repo 用；與 `client` 覆蓋的 get_db 共用同一個 in-memory DB。"""
+    return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+@pytest.fixture
 async def client(db_engine):
     """覆蓋 `app.api.deps.get_db`，回傳直接打 FastAPI app 的 httpx.AsyncClient。"""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
