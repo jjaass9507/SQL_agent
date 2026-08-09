@@ -11,7 +11,7 @@
 
 ---
 
-## 一、工作分為三個階段
+## 一、工作階段一覽
 
 | 階段 | 做法 | 產出 |
 |---|---|---|
@@ -21,6 +21,8 @@
 | 4. 測試架構 | 補上三層原本沒有的測試（架構／gateway 契約／瀏覽器） | 3 個 test commit |
 | 5. 系統面強化 | 依 `feature_backlog` 優先序逐項實作 | 4 個 commit |
 | 6. 使用者功能第二批 | Session 標籤與釘選、常用問題與核可標記 | 2 個 commit |
+| 7. 文件與交接 | 工作紀錄、`HANDOFF.md` | 2 個 docs commit |
+| 8. 解除 schema 凍結 | 公約解除 + 收回第一個繞路（遷移 `0004`） | 2 個 commit |
 
 第一階段的題目被界定錯了——當時討論的是「系統健康度」，而需求其實是
 「使用者在平台上還想要什麼操作介面」。第二階段重做，並改為讓角色**直接對話**
@@ -179,6 +181,37 @@ PM 的）。標籤可點擊即篩選、釘選的排在最前。
 兩者的狀態都存進 `AppSetting` 的 JSON 欄位，因為當時「不得改動 `models.py`」的
 公約還沒解除——這已經是第四、第五個繞路的功能。**該公約已於 2026-08 由專案
 負責人解除**（見第九節），但這兩個功能不需要因此改寫：判準是有沒有查詢需求。
+
+### 階段 8：解除 `models.py` 凍結公約，並收回第一個繞路
+
+專案負責人拍板解除（見 [`../HANDOFF.md`](../HANDOFF.md) §6.1）。解除本身只是文件
+與 docstring 的事，真正的驗證是**實際跑一次新流程**：把 interview 的 sticky 旗標
+從 `app_settings` 收回 `sessions.inject_db_context`（遷移 `0004`）。
+
+選這一個而不是其他四個，理由是它**不只是難看**：key 是
+`session_context_sticky:<session_id>`，會隨 session 數量無限長大，而且不會跟著
+session 一起 CASCADE 刪除。其餘四個（`RefreshToken` 換檔案、session 標籤、
+常用問題／資料字典、agent 全域 session id）現在搬都只是換位置。
+
+**驗證方式**（這裡是這輪最容易自我欺騙的地方）：
+
+- 行為面：既有的 `test_context_injection.py` 兩個測試原封不動要照樣通過——
+  儲存形狀變了、外部行為不該變。並**把 `session.inject_db_context` 那段拿掉確認
+  sticky 測試會紅**，證明它真的走到新欄位。
+- 遷移本身：**測試環境走 `create_all`，根本不會執行遷移**，所以遷移寫錯不會被
+  任何測試抓到。因此手動對 SQLite 與 PostgreSQL 16 各跑一次
+  upgrade → downgrade，確認資料來回一趟完全一致。
+
+兩種資料庫都跑不是形式，兩邊的行為真的不同：
+
+| | PostgreSQL | SQLite |
+|---|---|---|
+| `value_json` 讀出來 | Python `True` | 字串 `"true"` |
+| `Uuid` 欄位存法 | 原生 uuid | 無連字號的 32 字元 hex |
+
+所以遷移的讀寫都必須標註型別（`sa.bindparam(type_=sa.JSON())`、
+`.columns(sa.column("id", sa.Uuid()))`）。少了後者，downgrade 寫回去的 key 會變成
+沒有連字號的版本——**跟原本的 key 對不起來，等於資料丟了**，而且只在 SQLite 上發生。
 
 ---
 

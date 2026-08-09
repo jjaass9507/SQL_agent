@@ -14,15 +14,13 @@
 
 既有 DB context 注入是 sticky 的：一旦本輪判定「動到現有表」（使用者訊息提及
 既有表名，或本輪產出的 tables 與既有表同名／FK 指向既有表），往後每輪都持續
-注入，直到 session 結束。sticky 旗標存在 `app_settings`（key 用 session id
-命名空間）——這是「不得改動 models.py」凍結期的權宜之計。凍結已解除
-（見 HANDOFF.md §6.1），這個旗標本質上是 `sessions` 的一個 boolean 欄位，
-是幾個繞路實作裡最該收回正規 schema 的一個。
+注入，直到 session 結束。旗標是 `sessions.inject_db_context`；它原本借用
+`app_settings`（key 用 session id 命名空間），2026-08 隨「不得改動 models.py」
+公約解除而收回正規欄位（遷移 `0004`，含既有資料搬遷）。
 """
 
 from functools import lru_cache
 from pathlib import Path
-from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +29,6 @@ from app.llm.provider import LLMProvider
 from app.llm.types import Message as LLMMessage
 from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
-from app.repos import settings as settings_repo
 from app.repos import versions as versions_repo
 from app.repos.models import Message as MessageRecord
 from app.repos.models import SessionRecord
@@ -64,19 +61,6 @@ def _base_system_prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
-def _sticky_key(session_id: UUID) -> str:
-    return f"session_context_sticky:{session_id}"
-
-
-async def _get_sticky(db: AsyncSession, session_id: UUID) -> bool:
-    record = await settings_repo.get_setting(db, _sticky_key(session_id))
-    return bool(record.value_json) if record else False
-
-
-async def _set_sticky(db: AsyncSession, session_id: UUID) -> None:
-    await settings_repo.set_setting(db, _sticky_key(session_id), True)
-
-
 def _mentions_existing_table(text: str, tables_json: list[dict]) -> bool:
     lowered = text.lower()
     return any(
@@ -99,12 +83,10 @@ def _touches_existing_tables(new_tables: list[TableSpec], existing_tables_json: 
     return False
 
 
-async def _should_inject_context(
-    db: AsyncSession, session: SessionRecord, user_content: str
-) -> bool:
+def _should_inject_context(session: SessionRecord, user_content: str) -> bool:
     if not session.context_tables_json:
         return False
-    if await _get_sticky(db, session.id):
+    if session.inject_db_context:
         return True
     return _mentions_existing_table(user_content, session.context_tables_json)
 
@@ -169,7 +151,7 @@ async def run_turn(
     """
     await messages_repo.add_message(db, session.id, "user", user_content)
 
-    inject_context = await _should_inject_context(db, session, user_content)
+    inject_context = _should_inject_context(session, user_content)
     system_prompt = _base_system_prompt()
     if inject_context and session.context_tables_json:
         existing_tables = tables_from_json(session.context_tables_json)
@@ -197,8 +179,8 @@ async def run_turn(
         proposed_tables and session.context_tables_json
         and _touches_existing_tables(proposed_tables, session.context_tables_json)
     )
-    if (inject_context or touches_existing) and not await _get_sticky(db, session.id):
-        await _set_sticky(db, session.id)
+    if (inject_context or touches_existing) and not session.inject_db_context:
+        await sessions_repo.update_session(db, session.id, inject_db_context=True)
 
     if turn.tables:
         await versions_repo.create_version(

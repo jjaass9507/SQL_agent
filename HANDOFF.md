@@ -68,7 +68,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```bash
 # Python 環境
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pip install psycopg2-binary playwright   # 額外需要的
+.venv/bin/pip install playwright                    # e2e 用
+.venv/bin/pip install -e ".[postgres]"              # 驗遷移／CONCURRENTLY 才需要
 
 # 測試
 .venv/bin/python -m pytest -q                       # 預設排除 e2e
@@ -204,8 +205,23 @@ gateway 會直接 500。
 .venv/bin/alembic upgrade head
 ```
 
-`downgrade()` 要真的寫得出來——測試環境是每次重建的 in-memory SQLite，
-`downgrade` 寫錯不會被測試抓到，但正式環境回滾時會。
+`downgrade()` 要真的寫得出來——測試環境是每次重建的 in-memory SQLite（走
+`create_all`，**根本不會執行遷移**），所以遷移寫錯不會被任何測試抓到。
+**遷移一定要手動對兩種資料庫各跑一次 upgrade → downgrade**，`0004` 就是這樣驗的：
+
+```bash
+# SQLite
+DATABASE_URL="sqlite+aiosqlite:////tmp/mig.db" .venv/bin/alembic upgrade 0003
+#   → 塞入測試資料 → upgrade head → 檢查 → downgrade 0003 → 檢查資料有回來
+# PostgreSQL（.venv/bin/pip install asyncpg，並啟動第 3 節那個 pg）
+DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:5433/migtest" .venv/bin/alembic upgrade head
+```
+
+**兩種都要跑**，因為 JSON 欄位的行為不同：PostgreSQL 的驅動會把 `value_json`
+解碼成 Python `True`，SQLite 回傳字串 `"true"`；而 `Uuid` 欄位在 SQLite 存成
+無連字號的 32 字元 hex。`0004` 的讀寫都必須標註型別
+（`sa.bindparam(type_=sa.JSON())`、`.columns(sa.column("id", sa.Uuid()))`），
+不然來回一趟就會拼出跟原本不一樣的 key，或在 PostgreSQL 上型別錯誤。
 
 **解除後仍然成立的兩件事**（不要當成「現在可以隨便改 schema」）：
 
@@ -217,7 +233,7 @@ gateway 會直接 500。
 
 | 繞路 | 現況 | 建議 |
 |---|---|---|
-| interview 的 sticky 旗標 | `AppSetting`，key 用 session id 命名空間 | **最該收回**。它本質上就是 `sessions` 的一個 boolean 欄位，而且 key-per-session 會隨 session 數量無限長大 |
+| interview 的 sticky 旗標 | ✅ **已收回** `sessions.inject_db_context`（遷移 `0004`） | 完成。原本 key-per-session 會隨 session 數量無限長大，也不會跟著 session CASCADE 刪除 |
 | `RefreshToken` 定義在 `app/repos/users.py` | 沿用同一個 `Base`，功能正常 | 搬回 `models.py` **不需要遷移**，純粹是類別定義換檔案。做很便宜，不做也沒代價 |
 | session 標籤與釘選 | 單一 JSON | 等到「列出所有標成 PM-陳 的 session」需要 SQL、而不是全撈進記憶體過濾時再建表 |
 | 常用問題 / 資料字典 | 單一 JSON | 同上。要跨資料庫統計「哪些問題最常被跑」才需要建表 |
