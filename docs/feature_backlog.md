@@ -154,6 +154,10 @@ facts 沒有任何一條提及「這個 DDL 含 `CREATE INDEX` 時會鎖表」�
 爭議：安全角度主張 `ActivityLog` 加 `actor` 欄位；Agent 角度主張全部塞進既有的
 `detail_json`，理由是專案有「不得改動 `models.py`」的公約。
 
+> **後續**：該公約已於 2026-08 解除。但這條裁決不受影響——它成立的理由從來就不是
+> 公約，而是下面那個「加了也查不到」的問題。加欄位現在可以做了，
+> 該補的仍然是過濾 API。
+
 **整合者裁決：先用 `detail_json`，但兩邊的理由都不是決定因素。**
 
 真正的決定因素是兩邊都沒提到的一件事——`app/repos/activity.py` 的
@@ -182,20 +186,20 @@ facts 沒有任何一條提及「這個 DDL 含 `CREATE INDEX` 時會鎖表」�
 
 ---
 
-### 附帶決定事項：「不得改動 models.py」公約已到期，需要人決定
+### 附帶決定事項：「不得改動 models.py」公約 → **✅ 2026-08 已解除**
 
-`app/services/agent_service.py:7` 與 `app/services/interview_service.py:17` 的
-docstring 都記載「`app/repos/models.py` 不在本階段可改動範圍」。這原本是 v2
-重建計畫的分階段紀律。
+原本的狀況：`app/services/agent_service.py:7` 與
+`app/services/interview_service.py:17` 的 docstring 都記載
+「`app/repos/models.py` 不在本階段可改動範圍」。這是 v2 重建計畫的分階段紀律，
+但 README 顯示 **Phase 0–9 已全部完成**，理由早已消失，公約卻沒有跟著撤銷——
+於是累積出五個繞路實作（interview 的 sticky 旗標、agent 的全域 session id、
+session 標籤、常用問題、資料字典，全部塞進 `AppSetting`）。
 
-但 README 顯示 **Phase 0–9 已全部完成**，而這個凍結已經讓至少兩個功能繞路實作
-（interview 的 sticky 旗標「無合適欄位可存」只好塞進 `AppSetting`；
-agent 的全域 session id 同樣塞進 `AppSetting`）。Alembic 遷移機制本身是完備的。
+**專案負責人已於 2026-08 正式解除。現行規則：需要欄位就加欄位，走 Alembic 遷移。**
 
-**這需要一個人為決定**：正式解除凍結（往後該加欄位就加），或明確重申
-（往後所有狀態都走 `AppSetting`/`detail_json`）。目前的模糊狀態會讓每次
-遇到 schema 需求都重新爭論一次，並持續累積繞路成本。整合者建議解除，
-但這是專案負責人的決定，不是評估者能代替下的。
+完整的決定內容、加欄位的作法，以及五個既有繞路實作「該不該搬回來」的逐項判準，
+見 [`../HANDOFF.md`](../HANDOFF.md) §6.1。重點只有一條：**判準是有沒有查詢需求，
+不是 JSON 看起來醜不醜**——所以並非每個繞路都該搬。
 
 ---
 
@@ -391,9 +395,8 @@ engine、用完 `dispose()`，沒有跨請求的連線池，也沒有任何併�
           remember_note 業務術語記憶、確認頁樂觀鎖
 
 需要人為決定（不阻塞其他工作，但越早越好）
-  ·  「不得改動 models.py」公約是否解除
-     ——本輪新增的 session 標籤、常用問題、資料字典全部繞道 AppSetting，
-       繞路成本持續累積
+  ✅ 「不得改動 models.py」公約 —— 2026-08 已解除，往後該加欄位就加、走
+     Alembic。既有五個 AppSetting 繞路的逐項判準見 HANDOFF.md §6.1
   ·  agent session 是否改為 per-user（0-2 的中期方案；目前全平台共用一條
      transcript，未遮罩前的查詢結果會成為下一個人的上下文）
 ```

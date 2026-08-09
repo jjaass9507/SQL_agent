@@ -4,9 +4,12 @@
 其 id 存於 app_settings，key 見 `_AGENT_SESSION_SETTING_KEY`）。每回合從
 `messages` repo 重建完整 transcript：工具呼叫/結果以 role="ai"、content 為
 JSON 字串（`{"type": "tool_call"|"tool_result", ...}`）持久化——`messages.role`
-的 CheckConstraint 只允許 'user'/'ai'（app/repos/models.py 不在本階段可改動
-範圍內），因此不新增 role="tool"，改以內容型別區分，重建時再展開成原生
-`assistant(tool_calls)` + `tool` 訊息對送給 LLM。
+的 CheckConstraint 只允許 'user'/'ai'，因此不新增 role="tool"，改以內容型別
+區分，重建時再展開成原生 `assistant(tool_calls)` + `tool` 訊息對送給 LLM。
+
+這個形狀原本是「不得改動 models.py」凍結期的產物；凍結已解除（見 HANDOFF.md
+§6.1），改成 role="tool" 是可行的，但需要放寬 CheckConstraint 的遷移並回填既有
+資料。目前的形狀能正確運作，尚未有改動的理由。
 
 `propose_ddl` 是 terminal 工具：呼叫後立即結束本回合，回覆由本模組合成
 （不再呼叫 LLM）。「新建資料表」意圖由 prompt 要求模型在最終回覆文字附上

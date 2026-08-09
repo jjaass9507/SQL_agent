@@ -3,10 +3,11 @@
 由來：後端工程師手上同時三四個案子，首頁只能用名稱搜尋與狀態篩選，分不出哪個
 是哪個 PM 的需求——驗收時他點名這是「還沒做的裡面最痛的」。
 
-存在 `app_settings` 的單一 JSON，不動 `models.py`：那個凍結公約尚未解除，
-專案裡的 sticky 旗標與 agent session id 也都是這樣繞過的。標籤是每個 session
-幾個字串的量級，撐不起一張獨立資料表。若日後公約解除、或標籤要支援跨 session
-查詢，這裡是唯一需要改的地方。
+存在 `app_settings` 的單一 JSON。當初這樣寫是因為「不得改動 models.py」的凍結，
+但即使凍結已解除（見 HANDOFF.md §6.1）也沒有立刻搬家的理由：標籤是每個 session
+幾個字串的量級，撐不起一張獨立資料表。**真正該搬的訊號是查詢需求**——當「列出
+所有標成 PM-陳 的 session」需要 SQL 而不是全撈進記憶體過濾時，就該建表。
+那時這裡是唯一需要改的地方。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession

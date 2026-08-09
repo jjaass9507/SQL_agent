@@ -7,11 +7,14 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 ## 0. Read HANDOFF.md first
 
 **Before touching this repo, read [`HANDOFF.md`](HANDOFF.md).** It carries the
-current branch state, the constraints that are not obvious from the code
-(`app/repos/models.py` is frozen; all LLM calls must go through
-`app/services/provider_factory.py`; user-facing error messages must be in
-Chinese — the last two are enforced by `tests/architecture/`), a code map, and
-the prioritised backlog. Section 0 is a 60-second version.
+current branch state, the constraints that are not obvious from the code (all
+LLM calls must go through `app/services/provider_factory.py`; user-facing error
+messages must be in Chinese — both enforced by `tests/architecture/`), a code
+map, and the prioritised backlog. Section 0 is a 60-second version.
+
+Schema changes are allowed — the old "don't touch `app/repos/models.py`"
+convention was lifted in 2026-08. Add the column and write an Alembic
+migration; see HANDOFF.md §6.1.
 
 ## 1. Think Before Coding
 

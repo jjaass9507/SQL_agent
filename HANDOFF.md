@@ -21,7 +21,7 @@ LLM 走 openai SDK 相容介面。
 **動手前必知的五件事**：
 
 1. 推 `claude/sql-agent-features-qzpyem`，**不要推別的分支，不要擅自開 PR**。
-2. **`app/repos/models.py` 是凍結的**（公約尚未解除）。新增狀態一律存 `AppSetting`。
+2. 需要欄位就**加欄位、走 Alembic**（凍結公約已於 2026-08 解除，見 §6.1）。
 3. **所有 LLM 呼叫必須經 `app/services/provider_factory.py`**，有架構測試在擋。
 4. **使用者可見的錯誤訊息一律中文**，也有架構測試在擋。
 5. 寫測試要**先看它紅**（`CLAUDE.md` §4.1）。這輪有三次「假的驗證」都是這樣抓到的。
@@ -56,8 +56,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 - **分支**：所有開發推 `claude/sql-agent-features-qzpyem`，未經明確許可不得推其他分支。
 - **不得擅自開 PR**：使用者要求時才開。
 - **基底是 v2**：使用者明確指定「要用現在 v2 這個下去改」。
-- **`app/repos/models.py` 凍結公約尚未解除**（見 §6.1）。新增狀態一律繞道 `AppSetting`。
-  出處：`app/services/agent_service.py:7`、`app/services/interview_service.py:17` 的 docstring。
+- **`app/repos/models.py` 的凍結公約已解除**（2026-08，見 §6.1）——該加欄位就加，
+  走 Alembic。既有的五個 `AppSetting` 繞路實作不必急著搬，判準見 §6.1。
 - **不得關閉 TLS 驗證或 unset `HTTPS_PROXY`**（環境限制）。
 - 錯誤訊息一律中文（有架構測試在擋，見 `tests/architecture/test_layering.py`）。
 
@@ -128,7 +128,7 @@ su pg -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/pgdata -l /tmp/pg.log -o
 | 頁面 HTML | `app/web/templates/` |
 | 頁面行為 | `app/web/static/js/pages/`（`index` / `chat` / `confirm` / `docs` / `review` / `agent` / `settings`） |
 | 共用前端元件 | `app/web/static/js/lib/`（`api.js` 是所有端點常數的集中處） |
-| 資料表定義 | `app/repos/models.py` —— **凍結中，見 §6.1** |
+| 資料表定義 | `app/repos/models.py`（可改動，加欄位請走 Alembic——見 §6.1）；`RefreshToken` 例外地放在 `app/repos/users.py` |
 
 **兩個容易踩的地雷**：
 
@@ -185,13 +185,46 @@ gateway 會直接 500。
 
 ---
 
-## 6. 需要使用者拍板的三件事（阻塞性最高）
+## 6. 需要使用者拍板的事項
 
-### 6.1 `models.py` 凍結公約是否解除
+### 6.1 `models.py` 凍結公約 —— ✅ 已於 2026-08 由專案負責人解除
 
-這輪新增的 **session 標籤、常用問題、資料字典、agent session id、sticky 旗標**
-全部繞道 `AppSetting` 的 JSON 欄位。繞路成本已累積到第五個功能，
-Alembic 機制是完備的。**建議解除**，但這是專案負責人的決定，不該由接手者代決。
+**現行規則：需要欄位就加欄位，走 Alembic 遷移。** 不再為了避開 `models.py`
+把狀態塞進 `AppSetting`。
+
+背景：這原本是 v2 重建計畫的分階段紀律（`models.py` 屬於已完成階段，不在當期
+可改動範圍）。Phase 0–9 全部完成後這個理由就消失了，但公約沒有跟著撤銷，
+於是累積出五個繞路實作。要注意的是那些繞路**在當時的規則下是對的選擇**，
+現在只是不再需要那個規則——不是回頭認定它們寫錯了。
+
+**加欄位的作法**（Alembic 機制完備，三個既有遷移可參考）：
+
+```bash
+.venv/bin/alembic revision -m "描述"      # 手寫 upgrade/downgrade，不要 --autogenerate
+.venv/bin/alembic upgrade head
+```
+
+`downgrade()` 要真的寫得出來——測試環境是每次重建的 in-memory SQLite，
+`downgrade` 寫錯不會被測試抓到，但正式環境回滾時會。
+
+**解除後仍然成立的兩件事**（不要當成「現在可以隨便改 schema」）：
+
+- **既有欄位的破壞性變更仍需單獨評估**，特別是 `messages.role` 的
+  CheckConstraint——放寬它要連帶回填既有 transcript 資料。
+- **不是每個繞路都該搬回來。** 判準是**有沒有查詢需求**，不是「JSON 看起來很醜」。
+
+五個繞路實作的現況與建議（都不急，沒有一個是壞掉的）：
+
+| 繞路 | 現況 | 建議 |
+|---|---|---|
+| interview 的 sticky 旗標 | `AppSetting`，key 用 session id 命名空間 | **最該收回**。它本質上就是 `sessions` 的一個 boolean 欄位，而且 key-per-session 會隨 session 數量無限長大 |
+| `RefreshToken` 定義在 `app/repos/users.py` | 沿用同一個 `Base`，功能正常 | 搬回 `models.py` **不需要遷移**，純粹是類別定義換檔案。做很便宜，不做也沒代價 |
+| session 標籤與釘選 | 單一 JSON | 等到「列出所有標成 PM-陳 的 session」需要 SQL、而不是全撈進記憶體過濾時再建表 |
+| 常用問題 / 資料字典 | 單一 JSON | 同上。要跨資料庫統計「哪些問題最常被跑」才需要建表 |
+| agent 全域 session id | 單一 `AppSetting` | **不必動**。它就是一個全域設定值，正是 `AppSetting` 該存的東西 |
+
+另外 `ChangeRequest.session_id`（變更提案來自哪個設計 session）是
+`docs/feature_backlog.md` 裁決三裡唯一真正需要遷移的項目，現在沒有理由再擋著。
 
 ### 6.2 DB Agent 是否改成 per-user
 

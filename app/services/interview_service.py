@@ -14,8 +14,10 @@
 
 既有 DB context 注入是 sticky 的：一旦本輪判定「動到現有表」（使用者訊息提及
 既有表名，或本輪產出的 tables 與既有表同名／FK 指向既有表），往後每輪都持續
-注入，直到 session 結束。sticky 旗標無合適欄位可存（不得改動 app/repos/models.py），
-借用 `app_settings`（key 用 session id 命名空間）記錄。
+注入，直到 session 結束。sticky 旗標存在 `app_settings`（key 用 session id
+命名空間）——這是「不得改動 models.py」凍結期的權宜之計。凍結已解除
+（見 HANDOFF.md §6.1），這個旗標本質上是 `sessions` 的一個 boolean 欄位，
+是幾個繞路實作裡最該收回正規 schema 的一個。
 """
 
 from functools import lru_cache
