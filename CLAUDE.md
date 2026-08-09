@@ -4,6 +4,15 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+## 0. Read HANDOFF.md first
+
+**Before touching this repo, read [`HANDOFF.md`](HANDOFF.md).** It carries the
+current branch state, the constraints that are not obvious from the code
+(`app/repos/models.py` is frozen; all LLM calls must go through
+`app/services/provider_factory.py`; user-facing error messages must be in
+Chinese — the last two are enforced by `tests/architecture/`), a code map, and
+the prioritised backlog. Section 0 is a 60-second version.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**

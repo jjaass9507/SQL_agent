@@ -1,12 +1,40 @@
-# 交接手冊 — SQL Agent v2（2026-08）
+# HANDOFF — SQL Agent v2
 
-> 這份文件的目的：讓**沒有經歷過這輪開發的人**（或另一個對話）能直接接手。
-> 工作紀錄本身在 `docs/work_log_2026-08.md`，這裡只寫「要接手需要知道什麼」。
+> **接手這個專案的第一份文件。** 給沒有經歷這輪開發的人（或新的 AI 對話）用。
+> 過程紀錄在 `docs/work_log_2026-08.md`，這裡只寫「要動手需要知道什麼」。
+> 最後更新：2026-08，對應分支 `claude/sql-agent-features-qzpyem`。
 
-**現況一句話**：分支 `claude/sql-agent-features-qzpyem` 已完成系統面 9 項強化、
-使用者功能第一批全部與第二批 3 項，並補上四層測試架構。
-測試 `645 passed, 1 skipped`（預設）+ `8 passed`（e2e），`ruff check .` 全綠。
-**尚未開任何 PR**（使用者未要求）。
+---
+
+## 0. 60 秒版
+
+**這是什麼**：資料庫設計與查詢的協作平台。使用者用中文描述需求 → LLM 訪談 →
+產出規格書 / ER 圖 / DDL → 人工審批後執行。另有一個 DB Agent 頁可以用中文問資料。
+技術棧 FastAPI + SQLAlchemy 2.0 async + Alembic + Jinja2 + **原生 JS（無前端框架）**，
+LLM 走 openai SDK 相容介面。
+
+**現在在哪**：分支 `claude/sql-agent-features-qzpyem`（基於 `v2`，領先 23 個 commit，
+72 檔 +6446/-129）。已完成系統面 9 項強化、使用者功能第一批全部與第二批 3 項，
+並補上原本不存在的三層測試。`645 passed, 1 skipped` + `8 e2e passed`，ruff 全綠。
+**尚未開任何 PR。**
+
+**動手前必知的五件事**：
+
+1. 推 `claude/sql-agent-features-qzpyem`，**不要推別的分支，不要擅自開 PR**。
+2. **`app/repos/models.py` 是凍結的**（公約尚未解除）。新增狀態一律存 `AppSetting`。
+3. **所有 LLM 呼叫必須經 `app/services/provider_factory.py`**，有架構測試在擋。
+4. **使用者可見的錯誤訊息一律中文**，也有架構測試在擋。
+5. 寫測試要**先看它紅**（`CLAUDE.md` §4.1）。這輪有三次「假的驗證」都是這樣抓到的。
+
+**最快的上手動作**：
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest -q          # 應該 645 passed, 1 skipped
+.venv/bin/ruff check .                 # 應該全綠
+```
+
+跑不出這個結果，就是環境有問題，不是程式有問題——先看第 3 節。
 
 ---
 
@@ -28,7 +56,7 @@
 - **分支**：所有開發推 `claude/sql-agent-features-qzpyem`，未經明確許可不得推其他分支。
 - **不得擅自開 PR**：使用者要求時才開。
 - **基底是 v2**：使用者明確指定「要用現在 v2 這個下去改」。
-- **`app/repos/models.py` 凍結公約尚未解除**（見 §5.1）。新增狀態一律繞道 `AppSetting`。
+- **`app/repos/models.py` 凍結公約尚未解除**（見 §6.1）。新增狀態一律繞道 `AppSetting`。
   出處：`app/services/agent_service.py:7`、`app/services/interview_service.py:17` 的 docstring。
 - **不得關閉 TLS 驗證或 unset `HTTPS_PROXY`**（環境限制）。
 - 錯誤訊息一律中文（有架構測試在擋，見 `tests/architecture/test_layering.py`）。
@@ -80,9 +108,40 @@ su pg -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/pgdata -l /tmp/pg.log -o
 
 ---
 
-## 4. 這輪的架構決定（接手前要理解的四件事）
+## 4. 程式碼地圖（找東西從這裡開始）
 
-### 4.1 `provider_factory` 是所有 LLM 呼叫的唯一入口
+**分層方向**：`app/api/routers` → `app/services` → `app/repos` → `app/repos/models`。
+`app/rules`（純規則、無狀態）與 `app/llm`（純呼叫層）**不得依賴上層**——
+`tests/architecture/test_layering.py` 在擋反向依賴。
+
+| 想改什麼 | 去哪裡找 |
+|---|---|
+| 新增 / 修改 API 端點 | `app/api/routers/`（`sessions` / `agent` / `workbench` / `changes` / `outputs` / `settings` / `llm` / `auth`） |
+| 業務流程、跨 repo 的協調 | `app/services/` |
+| **LLM 呼叫** | `app/services/provider_factory.py`（唯一入口，見 §5.1） |
+| 唯讀 SQL 護欄 | `app/rules/sql_safety.py`（允許清單，見 §5.2） |
+| DDL 解析 / 驗證 / 執行 | `app/rules/ddl_parser.py`、`ddl_validator.py`、`ddl_executor.py` |
+| 產出規格書 / ER 圖 / DDL 文字 | `app/services/writers/`、`app/rules/writers/` |
+| DB Agent 的工具定義與派發 | `app/services/tool_registry.py` |
+| DB Agent 的對話迴圈 | `app/services/agent_service.py` |
+| 查詢工作台（後端） | `app/services/workbench_service.py` |
+| 頁面 HTML | `app/web/templates/` |
+| 頁面行為 | `app/web/static/js/pages/`（`index` / `chat` / `confirm` / `docs` / `review` / `agent` / `settings`） |
+| 共用前端元件 | `app/web/static/js/lib/`（`api.js` 是所有端點常數的集中處） |
+| 資料表定義 | `app/repos/models.py` —— **凍結中，見 §6.1** |
+
+**兩個容易踩的地雷**：
+
+- `app/web/static/js/lib/api.js` 裡 `workbenchQuery`（session 範圍）與
+  `workbenchDbQuery`（業務庫範圍）**刻意不同名**，取成同名會在物件字面值裡被覆蓋。
+- `tests/agent/conftest.py` 的 `db_session` 與 `client` 是**兩個獨立的 in-memory DB**。
+  要驗路由層請用 `session_factory`，不要用 `db_session` 寫完再打 API。
+
+---
+
+## 5. 這輪的架構決定（接手前要理解的四件事）
+
+### 5.1 `provider_factory` 是所有 LLM 呼叫的唯一入口
 
 `app/services/provider_factory.py` 負責載入 `CapabilityProfile` 再建 provider。
 **任何地方都不准直接呼叫 `LLMProvider.from_settings()`**，唯二合法例外是
@@ -92,7 +151,7 @@ su pg -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/pgdata -l /tmp/pg.log -o
 原因：能力探測結果原本只有 DB Agent 在用，訪談與 nl2sql 對不支援 system role 的
 gateway 會直接 500。
 
-### 4.2 唯讀護欄改成允許清單
+### 5.2 唯讀護欄改成允許清單
 
 `app/rules/sql_safety.py`：開頭必須是 `SELECT|WITH|VALUES|TABLE|SHOW`，
 `EXPLAIN` 視為透明包裝（會剝掉再檢查），另外全文掃描巢狀寫入動詞與危險函式
@@ -101,13 +160,13 @@ gateway 會直接 500。
 原因：`EXPLAIN ANALYZE DELETE FROM orders` 會**真的執行**；`setval()` 回傳數字看起來像
 讀取，實際改動序列值且回不去。
 
-### 4.3 敏感欄位遮罩只套 agent 路徑
+### 5.3 敏感欄位遮罩只套 agent 路徑
 
 `app/rules/sensitive_columns.py` 的 `mask_result()` 套在 `_tool_run_query`，
 **不**套在 workbench 人工查詢頁（人工查詢是使用者自己的資料，遮了反而沒用）。
-這是「DB Agent 共用 transcript」的短期防護，不是根本解（見 §5.2）。
+這是「DB Agent 共用 transcript」的短期防護，不是根本解（見 §6.2）。
 
-### 4.4 四層測試
+### 5.4 四層測試
 
 | 層 | 抓什麼 | 位置 |
 |---|---|---|
@@ -126,21 +185,21 @@ gateway 會直接 500。
 
 ---
 
-## 5. 需要使用者拍板的三件事（阻塞性最高）
+## 6. 需要使用者拍板的三件事（阻塞性最高）
 
-### 5.1 `models.py` 凍結公約是否解除
+### 6.1 `models.py` 凍結公約是否解除
 
 這輪新增的 **session 標籤、常用問題、資料字典、agent session id、sticky 旗標**
 全部繞道 `AppSetting` 的 JSON 欄位。繞路成本已累積到第五個功能，
 Alembic 機制是完備的。**建議解除**，但這是專案負責人的決定，不該由接手者代決。
 
-### 5.2 DB Agent 是否改成 per-user
+### 6.2 DB Agent 是否改成 per-user
 
 目前全平台共用一條 transcript，程式碼 docstring 自承
 「前一個人的表名與查詢結果會一直留在 transcript 裡」。
 已做敏感欄位遮罩當短期防護，根本解法是隔離。
 
-### 5.3 Gemini API 金鑰
+### 6.3 Gemini API 金鑰
 
 免費 OpenAI 相容 API 實測結果：**只有 Google Gemini 端點通得過本環境代理**，其餘全部 403。
 真連線測試需要使用者提供金鑰：
@@ -155,7 +214,7 @@ LLM_MODEL=gemini-2.5-flash
 
 ---
 
-## 6. 待辦（優先序未變）
+## 7. 待辦（優先序未變）
 
 ### 系統面 — `docs/feature_backlog.md`
 
@@ -178,13 +237,13 @@ LLM_MODEL=gemini-2.5-flash
 
 ---
 
-## 7. 這輪動過的檔案（找東西用）
+## 8. 這輪動過的檔案（找東西用）
 
 ### 新增
 
 | 檔案 | 作用 |
 |---|---|
-| `app/services/provider_factory.py` | LLM provider 唯一入口（§4.1） |
+| `app/services/provider_factory.py` | LLM provider 唯一入口（§5.1） |
 | `app/rules/sensitive_columns.py` | 敏感欄位偵測與遮罩 |
 | `app/services/session_labels.py` | Session 標籤與釘選（存 `AppSetting`） |
 | `app/services/saved_questions.py` | 常用問題 + 90 天核可效期 |
@@ -197,7 +256,7 @@ LLM_MODEL=gemini-2.5-flash
 
 | 檔案 | 改了什麼 |
 |---|---|
-| `app/rules/sql_safety.py` | 允許清單 + 危險函式全文掃描（§4.2） |
+| `app/rules/sql_safety.py` | 允許清單 + 危險函式全文掃描（§5.2） |
 | `app/rules/ddl_executor.py` | CONCURRENTLY 拆出主交易單獨執行、鎖警告、失效索引清理 |
 | `app/services/tool_registry.py` | 稽核留痕、結果遮罩、`get_schema` 分級（表數超過 15 走摘要） |
 | `app/services/agent_service.py` | 重複工具呼叫偵測、`propose_ddl` 失敗不再誤判為結束 |
@@ -206,13 +265,9 @@ LLM_MODEL=gemini-2.5-flash
 | `app/services/writers/diagram_writer.py` | 中文表名／欄位名的 mermaid 逸出 |
 | `app/web/static/js/pages/agent.js` | 分頁、四模式、常用問題、資料字典 |
 
-**前端一個易踩的地雷**：`app/web/static/js/lib/api.js` 裡
-`workbenchQuery`（session 版）與 `workbenchDbQuery`（業務庫版）**刻意不同名**，
-同名會在物件字面值裡被後者覆蓋掉。
-
 ---
 
-## 8. 驗收方式（如果要沿用）
+## 9. 驗收方式（如果要沿用）
 
 這輪採用「三個 persona subagent 互相討論 + 逐階段驗收」：
 角色互寄訊息（每人上限 4 則）直接辯論，而非各自向我回報。
@@ -226,4 +281,5 @@ LLM_MODEL=gemini-2.5-flash
 
 ---
 
-_本文件由 2026-08 那輪開發的最後一個對話寫成，內容以當時的分支狀態為準。_
+_本文件寫於 2026-08，以當時 `claude/sql-agent-features-qzpyem` 的分支狀態為準。_
+_改動行為時請一併更新這裡與 `docs/work_log_2026-08.md`（`CLAUDE.md` §5 文件衛生）。_

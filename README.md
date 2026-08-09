@@ -2,6 +2,10 @@
 
 透過對話式 AI 收集資料表設計需求，自動產出規格書、ER Diagram、DDL、效能安全規劃四份技術文件，並提供現有資料庫審查、DB Agent 助手與人工審批（HITL）變更流程。
 
+> 🧭 **要接手繼續開發，先讀 [`HANDOFF.md`](HANDOFF.md)** —— 現況、必須遵守的約束、
+> 程式碼地圖、環境重建與待辦優先序。過程紀錄在
+> [`docs/work_log_2026-08.md`](docs/work_log_2026-08.md)。
+
 > **目前狀態：Phase 0–9 全部完成。**
 > 已完成：Phase 0 專案骨架、Phase 1 LLM Provider 層（openai SDK + 能力探針 +
 > 降級轉接）、Phase 2 資料層（SQLAlchemy 2.0 async + Alembic + 加密）、
@@ -84,7 +88,7 @@
 | [`feature_backlog.md`](docs/feature_backlog.md) | 系統面缺口盤點與優先順序（安全、稽核、agent 行為；含已複驗的證據與裁決） |
 | [`user_feature_backlog.md`](docs/user_feature_backlog.md) | 使用者功能盤點（三方使用者角色辯論後整合，依後端現況分批） |
 | [`work_log_2026-08.md`](docs/work_log_2026-08.md) | 2026-08 工作紀錄：討論方法、實作與驗收過程、實測發現的缺陷、被推翻的判斷 |
-| [`handover_2026-08.md`](docs/handover_2026-08.md) | 交接手冊：環境重建、架構決定、待拍板事項、待辦優先序（接手第一份讀的文件） |
+| [`../HANDOFF.md`](HANDOFF.md) | 交接手冊（在專案根目錄）：現況、約束、程式碼地圖、環境重建、待辦優先序 |
 | `v05/` | v0.5 舊實作的架構/部署/維運文件（歷史參考，不適用於 v2） |
 
 ## 開發輔助 Skills（`.claude/skills/`）

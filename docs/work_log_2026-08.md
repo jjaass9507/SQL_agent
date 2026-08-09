@@ -1,12 +1,13 @@
 # 工作紀錄：功能討論、實作與驗收（2026-08）
 
-分支 `claude/sql-agent-features-qzpyem`（基於 `v2`，領先 11 個 commit）。
-變動規模：35 個檔案、+2946 / -64 行。測試由 520 增至 **572 passed, 1 skipped**，
-`ruff check .` 全綠。
+分支 `claude/sql-agent-features-qzpyem`（基於 `v2`，領先 23 個 commit）。
+變動規模：72 個檔案、+6446 / -129 行。測試由 520 增至 **645 passed, 1 skipped**，
+另有 **8 個瀏覽器煙霧測試**（`-m e2e`，CI 獨立 job），`ruff check .` 全綠。
 
 本文件是完整的工作與決策紀錄，包含**做了什麼、為什麼這樣做、哪些判斷後來被推翻**。
 成果清單另見 [`feature_backlog.md`](feature_backlog.md)（系統面）與
-[`user_feature_backlog.md`](user_feature_backlog.md)（使用者功能面）。
+[`user_feature_backlog.md`](user_feature_backlog.md)（使用者功能面）；
+要**接手繼續開發**請先讀 [`../HANDOFF.md`](../HANDOFF.md)。
 
 ---
 
@@ -17,6 +18,9 @@
 | 1. 系統面盤點 | 三個技術視角獨立盤點 + 交叉評論 | `feature_backlog.md` |
 | 2. 使用者功能盤點 | 三個使用者角色直接互相辯論 | `user_feature_backlog.md` |
 | 3. 實作與驗收 | 五個階段，每階段須三位角色確認才進下一步 | 9 個功能 commit |
+| 4. 測試架構 | 補上三層原本沒有的測試（架構／gateway 契約／瀏覽器） | 3 個 test commit |
+| 5. 系統面強化 | 依 `feature_backlog` 優先序逐項實作 | 4 個 commit |
+| 6. 使用者功能第二批 | Session 標籤與釘選、常用問題與核可標記 | 2 個 commit |
 
 第一階段的題目被界定錯了——當時討論的是「系統健康度」，而需求其實是
 「使用者在平台上還想要什麼操作介面」。第二階段重做，並改為讓角色**直接對話**
@@ -66,7 +70,7 @@
 
 ---
 
-## 三、實作：五個階段，每階段須驗收
+## 三、實作：逐階段推進，每階段須驗收
 
 驗收要求看**實際跑起來的截圖**，不是讀程式碼。為此在容器內架了假的 LLM gateway
 與真實 PostgreSQL 16（5 萬筆資料），並用 Chromium 實際點過每個畫面。
@@ -115,6 +119,65 @@ DDL 驗證發現**既有端點服務不到這個情境**：`validate-ddl` 驗的
 英文表名退成小字副標。
 
 ### 階段 4：ER 圖匯出 / 術語提示 / 白話進度
+
+### 階段 5：補上三層原本不存在的測試
+
+前四個階段有三個 bug 是**靠人眼看截圖**才發現的（ER 圖紅色炸彈、模式切換兩個表單
+同時顯示、能力探測只有一個地方在用）。三個都不是邏輯錯誤，所以既有的單元測試
+結構上就看不到它們。因此補上三層：
+
+| 層 | 抓什麼 | 位置 |
+|---|---|---|
+| 架構測試 | 跨檔案、**沒有人擁有**的約定 | `tests/architecture/` |
+| gateway 契約 | LLM gateway 缺能力時的降級行為 | `tests/gateway/` |
+| 瀏覽器煙霧 | 「看起來壞掉」 | `tests/e2e/`（`-m e2e`） |
+
+架構測試存在的理由是：**每個檔案單獨看都是對的，錯在沒有人記得那條約定。**
+目前三條規則——分層方向（`rules`／`llm` 不得反向依賴上層）、
+LLM 呼叫必須經 `provider_factory`、`HTTPException` 的 detail 必須是中文。
+三條各自對應一個真實發生過的事故。第三條上線當下就抓到 11 處純英文訊息，
+第二條抓到我自己在前一輪修漏的 `generation_service` 靜默後備。
+
+瀏覽器煙霧測試的判準刻意訂得很窄：**只驗畫得出來、且畫面上沒有
+「看起來像故障」的字樣**（`Syntax error`／`Internal Server Error`／`undefined`…）。
+商業邏輯留給快得多的 API 測試。這條判準直接來自驗收回饋——使用者兩次擋下發布，
+理由都是「我會以為系統壞了，不敢再操作」。
+
+**同時把「證明測試會失敗」寫進 `CLAUDE.md` §4.1**，因為這輪有三次驗證是假的：
+
+- **e2e 的 ER 測試在只有一張表的 fixture 下永遠綠。** 那個 bug 來自 mermaid 量測
+  **關係路徑**時算出 NaN，沒有外鍵就沒有路徑可量。補上第二張表與外鍵後才紅。
+- **併發上限測試把 `MAX_CONCURRENT_QUERIES` 改成 999 依然通過。** 量到的是 asyncio
+  的執行緒池，不是我的 semaphore。改成
+  `monkeypatch.setattr(dbops, "_query_slots", asyncio.Semaphore(2))` 才真的驗到。
+- **兩次「把 bug 種回去」的實驗其實什麼都沒做**：一次字串替換沒匹配到，
+  一次插進多餘括號造成語法錯誤。所以規則加一句：
+  **種完 bug 要打開檔案確認它真的種進去了。**
+
+### 階段 6：系統面強化（依 `feature_backlog.md` 優先序）
+
+| 項目 | 問題 | 修法 |
+|---|---|---|
+| 稽核留痕 | 誰核准了 DDL、agent 查了什麼，事後查不到 | `change_service` 全流程帶 `actor`；`tool_registry` 對 4 個工具留痕，**稽核寫入失敗不影響操作本身** |
+| `CREATE INDEX CONCURRENTLY` | 物理上跑不起來——所有語句被包在單一交易內 | 拆成兩批，CONCURRENTLY 語句在主交易 commit 後以 `autocommit` 單獨執行；失敗訊息註明「前面 N 句已經生效且無法回滾」，並清掉留下的失效索引 |
+| agent 迴圈四個缺口 | 敏感欄位直接進 transcript／`propose_ddl` 失敗被當成結束／同一個工具被重複呼叫／查詢無併發上限 | 結果遮罩（只套 agent 路徑）、失敗不終止迴圈、重複呼叫給提示、`MAX_CONCURRENT_QUERIES` semaphore |
+| `get_schema` | 大型資料庫下**硬砍在字元邊界**，模型讀到半個 JSON | 分級降階：表數超過 15 改回摘要，並支援 `tables` / `name_contains` 讓模型自己挖下去 |
+
+敏感欄位遮罩**刻意不套用在 workbench 人工查詢頁**——那是使用者自己查自己的資料，
+遮了沒有意義。它保護的是「上一個人的查詢結果留在共用 transcript 裡送給 LLM」
+這條路徑，是 DB Agent 共用 transcript 的短期防護，不是根本解。
+
+### 階段 7：使用者功能第二批
+
+**Session 標籤與釘選**（甲在驗收時點名最痛：手上三四個案子時首頁分不出哪個是哪個
+PM 的）。標籤可點擊即篩選、釘選的排在最前。
+
+**常用問題 + 已核可標記**（乙要求不得無限期擱置）。關鍵設計來自第二階段辯論的
+延伸結論——**核可會過期**：`APPROVAL_VALID_DAYS = 90`，且**語法一被改動就立即撤銷
+核可**。清單上直接顯示「尚未覆核／已核可／已逾期」，不必跑一次才知道能不能信。
+
+兩者的狀態都存進 `AppSetting` 的 JSON 欄位，因為「不得改動 `models.py`」的公約
+還沒解除——這已經是第四、第五個繞路的功能（見第九節）。
 
 ---
 
@@ -229,20 +292,24 @@ LLM_MODEL=gemini-2.5-flash
 
 ### 需要人為決定
 
-- **「不得改動 `models.py`」公約是否解除**。Phase 0–9 已完成，但這個凍結已讓至少
-  兩個功能繞路（sticky 旗標、agent session id 都因「無合適欄位可存」塞進 `AppSetting`）。
+- **「不得改動 `models.py`」公約是否解除**。Phase 0–9 已完成，但這個凍結已讓**五個**
+  功能繞路（sticky 旗標、agent session id、session 標籤、常用問題、資料字典，
+  全都因「無合適欄位可存」塞進 `AppSetting`）。Alembic 機制是完備的。
+  繞路成本持續累積，建議解除，但這是專案負責人的決定。
 - **DB Agent 是否改為 per-user**。目前是全平台共用一條 transcript，
   程式碼自己的 docstring 承認「前一個人的表名與查詢結果會一直留在 transcript 裡」。
   這同時是資料隔離問題：未遮罩的查詢結果會成為下一個人的上下文並送往 LLM。
 
 ### 待辦（依驗收時各角色點名的優先度）
 
-1. **Session 標籤與篩選**（甲點名最痛：手上三四個案子時首頁分不出哪個是哪個 PM 的）
-2. **常用問題 + 已核可標記**（乙要求不得無限期擱置，已承諾）
-3. Session 釘選 / 退回機制（收斂版）/ 紅旗逐條標記 / 淺色模式
+前兩項（Session 標籤與篩選、常用問題 + 已核可標記）已於階段 7 完成。剩餘：
+
+1. 退回機制（收斂版）/ 紅旗逐條標記 / 淺色模式
+2. 文件頁與審查頁的一鍵送審 + 待審 badge（兩者必須綁在一起做，只做一半沒有價值）
+3. DDL 執行前的 schema 快照與回滾建議
 4. 查詢結果旁一鍵看執行計畫、結構瀏覽器的複製表名圖示
-5. `no_tools` 降級路徑尚未測成功——免費模型常不支援原生 function calling，
-   這是最可能出問題的路徑
+5. `no_tools` 降級路徑已有契約測試涵蓋（`tests/gateway/`），但**尚未對真實的免費模型
+   驗證過**——免費模型常不支援原生 function calling，這仍是最可能出問題的路徑
 
 ### 我沒能替使用者驗證的
 
@@ -265,4 +332,15 @@ a7be0bb feat: 執行計畫面板與確認頁 DDL 驗證按鈕（階段 2）
 e2cb103 fix: ER 關聯圖在隱藏分頁被渲染導致必然失敗
 5e37d1a docs: 同步 README 與功能盤點至實際完成狀態
 4d12d1e fix: 只有 DB Agent 會採用探測到的 gateway 能力檔，其餘路徑一律忽略
+c5b15f1 docs: 新增 2026-08 工作紀錄
+d3a040b test: 新增架構規則測試，並修好它抓到的兩處違規
+862eb93 test: 新增 LLM gateway 能力降級的契約測試
+9e3c46d test: 新增瀏覽器煙霧測試與 CI job，並把測試分層寫進 CLAUDE.md
+dfc85af feat: 補上稽核留痕——誰核准了 DDL、agent 查了什麼
+bdc3174 fix: CREATE INDEX CONCURRENTLY 物理上無法執行——所有語句被包在單一交易內
+c330d91 feat: agent 迴圈四個缺口——敏感欄位遮罩、失敗可自我修正、重複呼叫、併發上限
+166e79c feat: get_schema 在大型資料庫下改為分級降階，不再硬砍在字元邊界
+b8d2a47 feat: Session 標籤與釘選
+a84f03d feat: 常用問題清單與「已核可」標記
+104bd9b docs: 同步兩份 backlog 至實際完成狀態
 ```
