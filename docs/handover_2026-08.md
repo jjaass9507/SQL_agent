@@ -1,0 +1,229 @@
+# 交接手冊 — SQL Agent v2（2026-08）
+
+> 這份文件的目的：讓**沒有經歷過這輪開發的人**（或另一個對話）能直接接手。
+> 工作紀錄本身在 `docs/work_log_2026-08.md`，這裡只寫「要接手需要知道什麼」。
+
+**現況一句話**：分支 `claude/sql-agent-features-qzpyem` 已完成系統面 9 項強化、
+使用者功能第一批全部與第二批 3 項，並補上四層測試架構。
+測試 `645 passed, 1 skipped`（預設）+ `8 passed`（e2e），`ruff check .` 全綠。
+**尚未開任何 PR**（使用者未要求）。
+
+---
+
+## 1. 先讀哪幾份文件
+
+| 順序 | 檔案 | 為什麼要讀 |
+|---|---|---|
+| 1 | 本文件 | 環境、約束、待辦優先序 |
+| 2 | `docs/work_log_2026-08.md` | 這輪做了什麼、為什麼這樣做；第八節記錄**被推翻的判斷** |
+| 3 | `docs/feature_backlog.md` | 系統面缺口；第八節是執行狀態 |
+| 4 | `docs/user_feature_backlog.md` | 使用者功能缺口；第六節是執行狀態 |
+| 5 | `CLAUDE.md` §4.1 / §4.2 | 測試紀律：證明測試會失敗、哪一層該抓什麼 |
+| 6 | `README.md` | 端點清單與測試分層 |
+
+---
+
+## 2. 必須遵守的約束
+
+- **分支**：所有開發推 `claude/sql-agent-features-qzpyem`，未經明確許可不得推其他分支。
+- **不得擅自開 PR**：使用者要求時才開。
+- **基底是 v2**：使用者明確指定「要用現在 v2 這個下去改」。
+- **`app/repos/models.py` 凍結公約尚未解除**（見 §5.1）。新增狀態一律繞道 `AppSetting`。
+  出處：`app/services/agent_service.py:7`、`app/services/interview_service.py:17` 的 docstring。
+- **不得關閉 TLS 驗證或 unset `HTTPS_PROXY`**（環境限制）。
+- 錯誤訊息一律中文（有架構測試在擋，見 `tests/architecture/test_layering.py`）。
+
+---
+
+## 3. 環境重建
+
+```bash
+# Python 環境
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install psycopg2-binary playwright   # 額外需要的
+
+# 測試
+.venv/bin/python -m pytest -q                       # 預設排除 e2e
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers .venv/bin/python -m pytest -m e2e -q
+.venv/bin/ruff check .
+
+# 開發伺服器
+DB_ENCRYPTION_KEY=$(python3 -c "print('ab'*32)") ADMIN_TOKEN=t \
+  .venv/bin/python -m uvicorn app.main:app --port 8899 --host 127.0.0.1
+```
+
+驗證 `CREATE INDEX CONCURRENTLY`／`EXPLAIN` 這類**真的需要資料庫**的行為時，
+容器內架 PostgreSQL 16：
+
+```bash
+useradd -m pg
+mkdir -p /var/lib/pgdata && chown pg /var/lib/pgdata
+mkdir -p /var/run/postgresql && chown pg /var/run/postgresql   # 少這步會 FATAL
+su pg -c "/usr/lib/postgresql/16/bin/initdb -D /var/lib/pgdata -A trust -U postgres"
+su pg -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/pgdata -l /tmp/pg.log -o '-p 5433' start"
+```
+
+### 踩過的坑（會浪費你半天的那種）
+
+- **`pkill -f <pattern>` 會殺掉 agent 自己的 shell（exit 144）**。改成：
+  ```bash
+  for p in $(ps -eo pid,args | grep "[m]ock_gateway.py" | awk '{print $1}'); do kill -9 $p; done
+  ```
+- **背景程序沒殺乾淨 → 新程序綁不到 port → 測試結果全部無效**。
+  這輪有一整輪能力矩陣因此作廢（數字 143→169→188 沒歸零，代表全打到同一個 mock）。
+  切換設定後**一定要驗證實際生效的是哪一個**——mock gateway 的 `/__stats` 端點就是為此加的。
+- `tests/agent/conftest.py` 的 `db_session` 與 `client` 是**兩個獨立的 in-memory DB**；
+  要驗路由層請用 `session_factory`。
+- e2e 的 `live_server` 與直接寫 DB 可能不同源，測試前置一律走 API。
+- Chromium 在 `/opt/pw-browsers/chromium`；CI 沒有這個路徑，
+  `tests/e2e/conftest.py` 已處理（檔案不存在時 `executable_path=None`）。
+
+---
+
+## 4. 這輪的架構決定（接手前要理解的四件事）
+
+### 4.1 `provider_factory` 是所有 LLM 呼叫的唯一入口
+
+`app/services/provider_factory.py` 負責載入 `CapabilityProfile` 再建 provider。
+**任何地方都不准直接呼叫 `LLMProvider.from_settings()`**，唯二合法例外是
+`app/api/routers/llm.py`（能力探針本身）與 `provider_factory` 自己。
+`tests/architecture/test_layering.py` 用原始碼掃描在擋這件事。
+
+原因：能力探測結果原本只有 DB Agent 在用，訪談與 nl2sql 對不支援 system role 的
+gateway 會直接 500。
+
+### 4.2 唯讀護欄改成允許清單
+
+`app/rules/sql_safety.py`：開頭必須是 `SELECT|WITH|VALUES|TABLE|SHOW`，
+`EXPLAIN` 視為透明包裝（會剝掉再檢查），另外全文掃描巢狀寫入動詞與危險函式
+（`dblink*`／`setval`／`nextval`／`pg_*advisory*`／`pg_sleep*`／檔案系統／`set_config`…）。
+
+原因：`EXPLAIN ANALYZE DELETE FROM orders` 會**真的執行**；`setval()` 回傳數字看起來像
+讀取，實際改動序列值且回不去。
+
+### 4.3 敏感欄位遮罩只套 agent 路徑
+
+`app/rules/sensitive_columns.py` 的 `mask_result()` 套在 `_tool_run_query`，
+**不**套在 workbench 人工查詢頁（人工查詢是使用者自己的資料，遮了反而沒用）。
+這是「DB Agent 共用 transcript」的短期防護，不是根本解（見 §5.2）。
+
+### 4.4 四層測試
+
+| 層 | 抓什麼 | 位置 |
+|---|---|---|
+| unit / rules | 純邏輯、邊界 | `tests/rules/`、`tests/repos/` |
+| API contract | 前端依賴的請求／回應形狀 | `tests/web/test_contract.py` |
+| architecture | 跨檔案、沒人擁有的約定 | `tests/architecture/` |
+| gateway contract | LLM gateway 降級時的行為 | `tests/gateway/` |
+| browser smoke | 「看起來壞掉」 | `tests/e2e/`（`-m e2e`） |
+
+**`CLAUDE.md` §4.1 的紀律務必遵守**：寫完測試要先看它紅，或事後把 bug 種回去確認變紅，
+**並且要打開檔案確認 bug 真的種進去了**。這輪有三次驗證失誤都是這樣才抓到的：
+- e2e ER 測試在只有一張表的 fixture 下永遠綠——bug 來自量測**關係路徑**，沒有連線就沒有路徑。
+- 併發測試把上限改成 999 仍然通過——量到的是 asyncio 執行緒池，不是我的 semaphore。
+  正確做法：`monkeypatch.setattr(dbops, "_query_slots", asyncio.Semaphore(2))`。
+- 「摘要必須涵蓋所有表」這條斷言**本身就是錯的**，與 observation 預算矛盾。
+
+---
+
+## 5. 需要使用者拍板的三件事（阻塞性最高）
+
+### 5.1 `models.py` 凍結公約是否解除
+
+這輪新增的 **session 標籤、常用問題、資料字典、agent session id、sticky 旗標**
+全部繞道 `AppSetting` 的 JSON 欄位。繞路成本已累積到第五個功能，
+Alembic 機制是完備的。**建議解除**，但這是專案負責人的決定，不該由接手者代決。
+
+### 5.2 DB Agent 是否改成 per-user
+
+目前全平台共用一條 transcript，程式碼 docstring 自承
+「前一個人的表名與查詢結果會一直留在 transcript 裡」。
+已做敏感欄位遮罩當短期防護，根本解法是隔離。
+
+### 5.3 Gemini API 金鑰
+
+免費 OpenAI 相容 API 實測結果：**只有 Google Gemini 端點通得過本環境代理**，其餘全部 403。
+真連線測試需要使用者提供金鑰：
+
+```
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+LLM_API_KEY=<金鑰>
+LLM_MODEL=gemini-2.5-flash
+```
+
+（我沒有代替使用者註冊任何帳號。）
+
+---
+
+## 6. 待辦（優先序未變）
+
+### 系統面 — `docs/feature_backlog.md`
+
+- **1-2 文件頁／審查頁一鍵送審 + 待審 badge**（兩者必須綁在一起做，只做一半沒有價值）
+- **2-6 DDL 執行前的 schema 快照與回滾建議**
+- 第 3 級：NL2SQL 強制 LIMIT、MAX_STEPS 收尾改為再打一次不帶工具的 LLM、
+  降級模式工具解析重試、`remember_note` 業務術語記憶、確認頁樂觀鎖
+
+### 使用者功能 — `docs/user_feature_backlog.md`
+
+- **第二批剩餘**：紅旗逐條標記、退回機制（收斂版：待回應項目清單 + DDL 存檔連動清除退回標記）、淺色模式切換
+- **第三批**：命名 inline 標示、查詢結果圖表、一句話摘要、版本逐欄位比較、
+  稽核篩選匯出、上線前檢查清單、常用需求片段、複製表名圖示、查詢結果旁一鍵 EXPLAIN
+- **暫緩**：每月自動更新（缺排程基礎建設）、文件分享連結（缺權限模型定案）
+
+### 我沒能替使用者驗證的
+
+- 驗收者「甲」要求測 **Confluence 收不收下載的 ER SVG**——本環境連不到 Confluence。
+  請使用者自行測試，若不行再補 PNG 匯出。
+
+---
+
+## 7. 這輪動過的檔案（找東西用）
+
+### 新增
+
+| 檔案 | 作用 |
+|---|---|
+| `app/services/provider_factory.py` | LLM provider 唯一入口（§4.1） |
+| `app/rules/sensitive_columns.py` | 敏感欄位偵測與遮罩 |
+| `app/services/session_labels.py` | Session 標籤與釘選（存 `AppSetting`） |
+| `app/services/saved_questions.py` | 常用問題 + 90 天核可效期 |
+| `app/web/static/js/lib/query-workbench.js` | 四種查詢模式共用的結果區 |
+| `app/web/static/js/lib/explain-plan.js` | 執行計畫樹狀渲染，Seq Scan 標紅 |
+| `app/web/static/js/lib/schema-browser.js` | 表／欄位／註記三合一搜尋 |
+| `tests/architecture/`、`tests/gateway/`、`tests/e2e/` | 三層新測試 |
+
+### 大改
+
+| 檔案 | 改了什麼 |
+|---|---|
+| `app/rules/sql_safety.py` | 允許清單 + 危險函式全文掃描（§4.2） |
+| `app/rules/ddl_executor.py` | CONCURRENTLY 拆出主交易單獨執行、鎖警告、失效索引清理 |
+| `app/services/tool_registry.py` | 稽核留痕、結果遮罩、`get_schema` 分級（表數超過 15 走摘要） |
+| `app/services/agent_service.py` | 重複工具呼叫偵測、`propose_ddl` 失敗不再誤判為結束 |
+| `app/services/workbench_service.py` | 業務庫直連查詢／EXPLAIN／schema 樹／nl2sql、DDL 語法驗證、資料字典 |
+| `app/services/dbops.py` | `MAX_CONCURRENT_QUERIES` semaphore |
+| `app/services/writers/diagram_writer.py` | 中文表名／欄位名的 mermaid 逸出 |
+| `app/web/static/js/pages/agent.js` | 分頁、四模式、常用問題、資料字典 |
+
+**前端一個易踩的地雷**：`app/web/static/js/lib/api.js` 裡
+`workbenchQuery`（session 版）與 `workbenchDbQuery`（業務庫版）**刻意不同名**，
+同名會在物件字面值裡被後者覆蓋掉。
+
+---
+
+## 8. 驗收方式（如果要沿用）
+
+這輪採用「三個 persona subagent 互相討論 + 逐階段驗收」：
+角色互寄訊息（每人上限 4 則）直接辯論，而非各自向我回報。
+這個方法換到轉述問答做不到的結果——五個提案合併成一個查詢工作台、
+長出「可信度標記」、再延伸出「核可會過期」。
+
+驗收者三次擋下發布，理由都成立，值得記住：
+- 「我沒辦法信任下載的 SVG」——只給單一模式截圖就宣稱全部沒問題，等於要人用猜的驗收。
+- 「文案在騙人」——按鈕寫「下載 Excel」但輸出 `.csv`。
+- 英文錯誤訊息會被當成系統故障。
+
+---
+
+_本文件由 2026-08 那輪開發的最後一個對話寫成，內容以當時的分支狀態為準。_
