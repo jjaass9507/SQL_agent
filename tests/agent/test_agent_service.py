@@ -106,6 +106,39 @@ async def test_propose_ddl_is_terminal(db_session, monkeypatch):
     assert "已提交結構變更提案" in data["reply"]
 
 
+async def test_read_only_table_question_cannot_expose_or_execute_change_tools(db_session):
+    await seed_business_db(db_session, "shop", "sqlite://")
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions")
+        route.side_effect = [
+            # 模擬模型即使違反送出的工具目錄、硬回一個 propose_ddl 呼叫。
+            chat_response(tool_calls=[tool_call(
+                "c1",
+                "propose_ddl",
+                {"ddl": "COMMENT ON TABLE users IS '使用者';"},
+            )]),
+            chat_response(content="目前可查詢 public.users。"),
+        ]
+        events = await _collect(db_session, "有哪些資料表可以查詢？")
+
+    first_request = json.loads(route.calls[0].request.content)
+    offered = {item["function"]["name"] for item in first_request["tools"]}
+    assert "propose_ddl" not in offered
+    assert "draft_comment_ddl" not in offered
+    data = _turn_done(events)
+    assert data["proposal"] is None
+    assert "唯讀詢問" in data["steps"][0]["result_summary"]
+
+
+def test_schema_change_intent_detection_is_conservative():
+    assert not agent_service.allows_schema_changes("有哪些資料表可以查詢？")
+    assert not agent_service.allows_schema_changes("哪些欄位沒有備註？")
+    assert agent_service.allows_schema_changes("請幫 users 的 name 欄位建立索引")
+    assert agent_service.allows_schema_changes("請補上 users.name 的欄位備註")
+    assert agent_service.allows_schema_changes("好，請提交變更提案")
+
+
 async def test_propose_ddl_failure_is_fed_back_for_self_correction(db_session):
     """propose_ddl 只有成功才終止本回合；失敗要當一般 observation 餵回去。
 
@@ -262,6 +295,23 @@ async def test_max_steps_limit_stops_without_extra_llm_call(db_session):
     data = _turn_done(events)
     assert data["reply"] == agent_service._MAX_STEPS_REPLY
     assert len(data["steps"]) == 8
+
+
+async def test_platform_setting_changes_max_tool_calls(db_session):
+    await seed_business_db(db_session, "shop", "sqlite://")
+    await settings_repo.set_setting(db_session, "agent_max_tool_calls", 3)
+    await db_session.commit()
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post("/chat/completions")
+        route.side_effect = [
+            chat_response(tool_calls=[tool_call(f"c{i}", "list_databases", {})])
+            for i in range(3)
+        ]
+        events = await _collect(db_session, "一直查一直查")
+
+    assert route.call_count == 3
+    assert len(_turn_done(events)["steps"]) == 3
 
 
 # -- observation / messages 截斷 -----------------------------------------------
