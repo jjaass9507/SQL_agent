@@ -25,6 +25,37 @@ async def test_get_settings_masks_and_reports_backend(client, monkeypatch):
     assert body["backend"] == "postgresql"
     assert "hunter2" not in body["masked_url"]
     assert body["business_databases"] == []
+    assert body["agent_max_tool_calls"] == 8
+    assert body["agent_max_tool_calls_min"] == 1
+    assert body["agent_max_tool_calls_max"] == 20
+
+
+async def test_update_agent_tool_limit(client):
+    resp = await client.put(
+        "/api/v1/settings/agent",
+        json={"max_tool_calls": 12},
+        headers=_ADMIN,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"max_tool_calls": 12}
+
+    overview = await client.get("/api/v1/settings")
+    assert overview.json()["agent_max_tool_calls"] == 12
+
+
+async def test_update_agent_tool_limit_validates_range(client):
+    for value in (0, 21):
+        resp = await client.put(
+            "/api/v1/settings/agent",
+            json={"max_tool_calls": value},
+            headers=_ADMIN,
+        )
+        assert resp.status_code == 400
+
+
+async def test_update_agent_tool_limit_requires_admin(client):
+    resp = await client.put("/api/v1/settings/agent", json={"max_tool_calls": 4})
+    assert resp.status_code == 401
 
 
 async def test_add_business_db_rejects_non_postgres_scheme(client):
