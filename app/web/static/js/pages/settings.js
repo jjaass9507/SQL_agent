@@ -23,6 +23,25 @@ function renderBackend(settings) {
     maxCalls.min = settings.agent_max_tool_calls_min;
     maxCalls.max = settings.agent_max_tool_calls_max;
   }
+  const llmSelect = document.querySelector('[data-target="llm-backend-select"]');
+  const llmHint = document.querySelector('[data-target="llm-backend-hint"]');
+  if (llmSelect) {
+    llmSelect.textContent = "";
+    for (const backend of settings.llm_backends || []) {
+      const option = document.createElement("option");
+      option.value = backend.id;
+      option.textContent = `${backend.label}${backend.configured ? "" : "（未設定）"}`;
+      option.disabled = !backend.configured;
+      option.selected = backend.id === settings.llm_backend;
+      llmSelect.appendChild(option);
+    }
+  }
+  if (llmHint) {
+    const current = (settings.llm_backends || []).find((item) => item.id === settings.llm_backend);
+    llmHint.textContent = current
+      ? `目前使用：${current.label}`
+      : "目前後端設定無法辨識，請聯絡管理員。";
+  }
 }
 
 function renderBusinessDbs(entries) {
@@ -60,7 +79,7 @@ async function loadSettings() {
 
 // ── LLM health / diagnose ───────────────────────────────────────────────
 
-function renderProfile(profile) {
+function renderProfile(profile, source = null) {
   const keys = ["multi_turn", "system_role", "native_tools", "json_schema", "streaming"];
   for (const key of keys) {
     const pill = document.querySelector(`[data-target="capability-${key}"]`);
@@ -71,7 +90,9 @@ function renderProfile(profile) {
   }
   const probedAt = document.querySelector('[data-target="capability-probed-at"]');
   if (probedAt) {
-    probedAt.textContent = profile.probed_at
+    probedAt.textContent = source === "backend"
+      ? "Pensieve 使用固定相容模式：工具、JSON 與串流由平台降級層處理。"
+      : profile.probed_at
       ? `上次探測：${new Date(profile.probed_at).toLocaleString()}`
       : "尚未探測過（顯示為預設值），點「重新探測」執行。";
   }
@@ -85,10 +106,10 @@ async function testConnection(button) {
     const health = await api.get(ENDPOINTS.llmHealth());
     if (resultEl) {
       resultEl.textContent = health.ok
-        ? `✓ 連線正常（model: ${health.model || "未知"}）`
-        : "✗ 連線失敗，請檢查 LLM_BASE_URL / LLM_API_KEY 環境變數";
+        ? `✓ ${health.backend} 連線正常（model: ${health.model || "未知"}）`
+        : `✗ ${health.backend} 連線失敗，請檢查該後端的環境變數與 Proxy 設定`;
     }
-    renderProfile(health.profile);
+    renderProfile(health.profile, health.backend === "pensieve" ? "backend" : null);
   } catch {
     if (resultEl) resultEl.textContent = "✗ 測試失敗";
   } finally {
@@ -101,7 +122,7 @@ async function diagnose(button) {
   button.textContent = "探測中…";
   try {
     const result = await api.post(ENDPOINTS.llmDiagnose());
-    renderProfile(result.profile);
+    renderProfile(result.profile, result.source);
     showToast("能力探測完成", "success");
   } catch {
     // apiFetch 已 toast
@@ -142,6 +163,23 @@ async function loadActivity() {
 
 document.addEventListener("submit", async (event) => {
   const form = event.target;
+  if (form.matches('[data-action="save-llm-backend"]')) {
+    event.preventDefault();
+    const select = form.querySelector('[data-target="llm-backend-select"]');
+    try {
+      await api.put(
+        ENDPOINTS.settingsLlmBackend(),
+        { backend: select.value },
+        { headers: adminHeaders() }
+      );
+      showToast("LLM 後端已切換", "success");
+      await loadSettings();
+      loadActivity();
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
   if (form.matches('[data-action="save-agent-settings"]')) {
     event.preventDefault();
     const input = form.querySelector('[data-target="agent-max-tool-calls"]');

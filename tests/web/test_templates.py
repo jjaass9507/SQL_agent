@@ -123,6 +123,8 @@ PAGE_BINDINGS = [
     (
         "/settings",
         [
+            'data-action="save-llm-backend"',
+            'data-target="llm-backend-select"',
             'data-action="test-connection"',
             'data-target="llm-health-result"',
             'data-action="diagnose-llm"',

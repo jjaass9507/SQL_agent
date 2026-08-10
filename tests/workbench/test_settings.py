@@ -16,6 +16,8 @@ async def _fake_execute_query_fail(db_url, sql, max_rows=200):
 
 async def test_get_settings_masks_and_reports_backend(client, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://svc:hunter2@platform-host/app")
+    monkeypatch.setenv("LLM_BASE_URL", "http://openai.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
     get_settings.cache_clear()
 
     resp = await client.get("/api/v1/settings")
@@ -28,6 +30,34 @@ async def test_get_settings_masks_and_reports_backend(client, monkeypatch):
     assert body["agent_max_tool_calls"] == 8
     assert body["agent_max_tool_calls_min"] == 1
     assert body["agent_max_tool_calls_max"] == 20
+    assert body["llm_backend"] == "openai"
+    assert body["llm_backends"] == [
+        {"id": "openai", "label": "OpenAI 相容 API", "configured": True},
+        {"id": "pensieve", "label": "Pensieve", "configured": False},
+    ]
+
+
+async def test_switch_llm_backend_persists_and_requires_configuration(client, monkeypatch):
+    missing = await client.put(
+        "/api/v1/settings/llm-backend", json={"backend": "pensieve"}, headers=_ADMIN
+    )
+    assert missing.status_code == 400
+
+    monkeypatch.setenv("PENSIEVE_URL", "http://pensieve.test/api")
+    monkeypatch.setenv("PENSIEVE_TOKEN", "token")
+    monkeypatch.setenv("PENSIEVE_EMPNO", "E123")
+    get_settings.cache_clear()
+    changed = await client.put(
+        "/api/v1/settings/llm-backend", json={"backend": "pensieve"}, headers=_ADMIN
+    )
+    assert changed.status_code == 200
+    assert changed.json() == {"backend": "pensieve"}
+    assert (await client.get("/api/v1/settings")).json()["llm_backend"] == "pensieve"
+
+
+async def test_switch_llm_backend_requires_admin(client):
+    resp = await client.put("/api/v1/settings/llm-backend", json={"backend": "openai"})
+    assert resp.status_code == 401
 
 
 async def test_update_agent_tool_limit(client):

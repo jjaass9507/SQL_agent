@@ -2,19 +2,34 @@
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # LLM gateway（OpenAI 相容 Chat Completions）
+    # LLM 後端（openai / pensieve）；平台可切換並把選擇持久化到 app_settings。
+    llm_backend: str = "openai"
+    llm_label: str = "OpenAI 相容 API"
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_verify: bool = False          # 自簽憑證 gateway 預設不驗證
+    llm_trust_env: bool = True        # 是否繼承 HTTP_PROXY / HTTPS_PROXY / NO_PROXY
     llm_timeout: float = 120.0        # read timeout 秒數
     llm_force_profile: str | None = None  # JSON，覆蓋自動偵測的 CapabilityProfile（除錯用）
+
+    # 內部 Pensieve API（token/empno/variables envelope）
+    pensieve_label: str = "Pensieve"
+    pensieve_url: str | None = None
+    pensieve_token: str | None = None
+    pensieve_empno: str | None = Field(
+        default=None, validation_alias=AliasChoices("PENSIEVE_EMPNO", "EMPNO")
+    )
+    pensieve_building: str = "option"
+    pensieve_verify: bool = False
+    pensieve_timeout: float = 300.0
 
     # 平台自身資料庫（正式 PostgreSQL；未設定時本機 SQLite）
     database_url: str = "sqlite+aiosqlite:///./data/app.db"

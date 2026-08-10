@@ -251,10 +251,16 @@ async def test_structured_output_strips_markdown_fence():
 
 def test_from_settings_reads_llm_config():
     settings = Settings(
-        llm_base_url=BASE_URL, llm_api_key="k", llm_model="m", llm_verify=False, llm_timeout=5.0
+        llm_base_url=BASE_URL,
+        llm_api_key="k",
+        llm_model="m",
+        llm_verify=False,
+        llm_trust_env=False,
+        llm_timeout=5.0,
     )
     provider = LLMProvider.from_settings(settings)
     assert provider.model == "m"
+    assert provider._client._client._trust_env is False
 
 
 def _force_settings(force_json: str) -> Settings:

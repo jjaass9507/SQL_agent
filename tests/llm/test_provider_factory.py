@@ -50,6 +50,22 @@ async def test_build_provider_uses_stored_profile(db_session):
     assert provider.profile.native_tools is False
 
 
+async def test_build_provider_uses_selected_pensieve_backend(db_session, monkeypatch):
+    from app.config import get_settings
+    from app.llm.pensieve import PensieveProvider
+
+    monkeypatch.setenv("PENSIEVE_URL", "http://pensieve.test/api")
+    monkeypatch.setenv("PENSIEVE_TOKEN", "token")
+    monkeypatch.setenv("PENSIEVE_EMPNO", "E123")
+    get_settings.cache_clear()
+    await settings_repo.set_setting(db_session, provider_factory.BACKEND_SETTING_KEY, "pensieve")
+
+    provider = await provider_factory.build_provider(db_session)
+
+    assert isinstance(provider, PensieveProvider)
+    assert provider.model == "Pensieve"
+
+
 @pytest.mark.parametrize(
     "path",
     [

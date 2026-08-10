@@ -26,6 +26,12 @@ LLM 走 openai SDK 相容介面。
 4. **使用者可見的錯誤訊息一律中文**，也有架構測試在擋。
 5. 寫測試要**先看它紅**（`CLAUDE.md` §4.1）。這輪有三次「假的驗證」都是這樣抓到的。
 
+LLM gateway 若是內網直連、不可經系統 Proxy，設 `LLM_TRUST_ENV=false`；預設 `true`
+維持既有 Proxy 繼承行為。Proxy 拒絕會在 server log 保留可辨識的中文診斷。
+LLM 後端現可在 OpenAI 相容 API 與 Pensieve 之間切換；環境變數定義見
+`.env.example`，平台選擇存於 `app_settings.llm_backend`，統一由
+`app/services/provider_factory.py` 套用。Pensieve adapter 在 `app/llm/pensieve.py`。
+
 **最快的上手動作**：
 
 ```bash

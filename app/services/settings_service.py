@@ -12,7 +12,7 @@ from app.repos import activity
 from app.repos import settings as settings_repo
 from app.repos.crypto import decrypt_db_url, encrypt_db_url, mask_db_url
 from app.repos.models import ActivityLog
-from app.services import dbops
+from app.services import dbops, provider_factory
 from app.services.workbench_service import sanitize_db_error
 
 _BUSINESS_DB_KEY = "business_databases"
@@ -52,7 +52,23 @@ async def get_settings_overview(db: AsyncSession) -> dict:
         "agent_max_tool_calls": await get_agent_max_tool_calls(db),
         "agent_max_tool_calls_min": MIN_AGENT_MAX_TOOL_CALLS,
         "agent_max_tool_calls_max": MAX_AGENT_MAX_TOOL_CALLS,
+        "llm_backend": await provider_factory.selected_backend(db),
+        "llm_backends": provider_factory.available_backends(),
     }
+
+
+async def set_llm_backend(db: AsyncSession, backend: str) -> str:
+    backend = backend.strip().lower()
+    choices = {item["id"]: item for item in provider_factory.available_backends()}
+    if backend not in choices:
+        raise ValueError("不支援的 LLM 後端")
+    if not choices[backend]["configured"]:
+        raise ValueError(f"LLM 後端「{choices[backend]['label']}」尚未完成環境變數設定")
+    await settings_repo.set_setting(db, provider_factory.BACKEND_SETTING_KEY, backend)
+    await activity.log_activity(
+        db, "llm_backend_changed", {"backend": backend, "label": choices[backend]["label"]}
+    )
+    return backend
 
 
 async def get_agent_max_tool_calls(db: AsyncSession) -> int:
