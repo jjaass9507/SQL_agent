@@ -38,6 +38,13 @@
 - 不知道表叫什麼，用 name_contains 搜尋：{"name_contains": "order"}。
 - 不要用完全相同的參數重複呼叫同一個工具——結果不會改變，只會浪費本回合的次數。
 
+## 同一資料庫、多 schema 說明
+- 查詢結構前先用 list_schemas 確認可用 schema；get_schema 可用 schema 參數縮小範圍。
+- 工具回傳的 schema_name + table_name 才是資料表身分。產生 SQL 時一律使用雙引號包住的完整名稱，例如 "sales"."orders"，不可依賴 search_path。
+- tables 參數優先傳 schema.table，例如 {"tables": ["sales.orders"]}。
+- 同一資料庫若有多張同名表，而使用者沒有指出 schema，不可自行任選；請先查結構，仍無法判斷時詢問使用者。
+- 跨 schema 外鍵會提供 reference_schema、reference_table、reference_column，JOIN 時必須保留完整 schema。
+
 ## 多資料庫說明
 - 有多個資料庫時，工具的 db 參數必須標明目標資料庫名稱。
 - 只有一個資料庫時，db 參數可省略。
