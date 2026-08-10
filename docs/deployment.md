@@ -1,5 +1,51 @@
 # SQL Agent v2 — 部署指南
 
+## 0. 重新部署腳本（Windows）
+
+已經部署過、要更新到新版本時，用 `scripts/deploy.ps1`，不必手動照著下面的步驟走一遍。
+兩種模式共用同一套流程，差別只在「怎麼停、怎麼起」：
+
+```powershell
+# 先看它打算做什麼，什麼都不會改
+.\scripts\deploy.ps1 -Mode Direct -DryRun
+
+# 測試環境：直接以 venv 的 uvicorn 跑起來
+.\scripts\deploy.ps1 -Mode Direct
+
+# 正式環境：IIS + AD SSO（需系統管理員權限），內網離線裝套件
+.\scripts\deploy.ps1 -Mode IIS -AppPool SqlAgent -WheelDir C:\offline_wheels
+```
+
+流程：**前置檢查 → 停服務 → 更新原始碼 → 更新套件 → 備份資料庫 →
+`alembic upgrade head` → 起服務 → 健康檢查**。
+
+失敗時的行為是刻意分開的：
+
+- **遷移失敗** → 自動 `alembic downgrade` 回原本的版本，並印出備份還原指令與
+  「回到前一版原始碼」的 git 指令。
+- **健康檢查失敗** → **不會**自動回滾。資料庫此時已經是新版，硬回滾風險更高；
+  腳本會停在那裡並指出 log 位置，由人看過再決定。
+
+常用參數：`-SkipGit`（原始碼用複製／解壓縮方式部署時必加）、`-SkipDeps`、
+`-SkipBackup`、`-Port`（Direct 模式，預設 8000）、`-Branch`、
+`-HealthTimeoutSeconds`。
+
+### `scripts/deploy_db.py`
+
+部署腳本呼叫的資料庫工具，也可以單獨用：
+
+```bash
+python scripts/deploy_db.py check                    # 目前版本 / 最新版本 / 有無待跑的遷移
+python scripts/deploy_db.py backup --out-dir backups # 遷移前備份
+```
+
+`check` 的離開碼有意義（供腳本判斷）：`0` 已是最新、`1` 有待跑的遷移（正常，不是錯誤）、
+`2` 連不上資料庫或設定有問題。`backup` 會依 `DATABASE_URL` 自動選擇作法——SQLite 用
+內建 backup API（不是複製檔案，避免 WAL 未 checkpoint 拿到不一致快照），
+PostgreSQL 用 `pg_dump --format=custom`——並印出對應的還原指令。
+
+> 備份與 log 產出在 `backups/` 與 `logs/`，兩者都已加入 `.gitignore`。
+
 ## 1. 本機開發（零設定）
 
 不需要 Docker、不需要 PostgreSQL。預設 `DATABASE_URL` 指向本機 SQLite。

@@ -54,6 +54,12 @@
 >
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
 >
+> **重新部署**：`scripts/deploy.ps1`（Windows，`-Mode Direct` 直跑 uvicorn／
+> `-Mode IIS` 走 IIS + AD SSO），含前置檢查、遷移前備份、遷移失敗自動回滾與
+> 健康檢查；先用 `-DryRun` 看它打算做什麼。資料庫狀態與備份另可單獨用
+> `scripts/deploy_db.py check|backup`。詳見
+> [`docs/deployment.md`](docs/deployment.md) 第 0 節。
+>
 > **測試分層**（見 `CLAUDE.md` 第 4.2 節）：`tests/rules|repos`（純邏輯）、
 > `tests/web/test_contract.py`（前端依賴的 API 形狀）、`tests/architecture`
 > （跨檔案約定，例如分層方向、錯誤訊息必須是中文）、`tests/gateway`
