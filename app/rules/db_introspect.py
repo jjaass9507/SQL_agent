@@ -92,12 +92,60 @@ WHERE tbl.table_type = 'BASE TABLE'
   AND c.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND c.table_schema NOT LIKE 'pg\_%' ESCAPE '\'
   AND (%(schema)s IS NULL OR c.table_schema = %(schema)s)
+  AND (%(tables)s::text[] IS NULL OR c.table_name = ANY(%(tables)s::text[]))
 ORDER BY c.table_schema, c.table_name, c.ordinal_position
 """
 
 
-def extract_schema(db_url: str, schema: str | None = None) -> tuple[list[TableSpec], str]:
-    """Read one schema or every accessible non-system schema in one connection/query."""
+_TABLES_QUERY = r"""
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_type = 'BASE TABLE'
+  AND table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND table_schema NOT LIKE 'pg\_%' ESCAPE '\'
+  AND (%(schema)s IS NULL OR table_schema = %(schema)s)
+  AND (%(name_contains)s IS NULL OR table_name ILIKE '%%' || %(name_contains)s || '%%')
+ORDER BY table_schema, table_name
+"""
+
+
+def list_table_refs(
+    db_url: str,
+    schema: str | None = None,
+    name_contains: str | None = None,
+) -> tuple[list[tuple[str, str]], str]:
+    """List accessible tables without loading columns, constraints, indexes, or comments."""
+    try:
+        import psycopg2
+    except ImportError:
+        return [], "缺少 psycopg2-binary，請執行 pip install psycopg2-binary"
+
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+    except Exception as exc:
+        return [], f"連線失敗：{exc}"
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                _TABLES_QUERY,
+                {"schema": schema, "name_contains": name_contains or None},
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        return [], f"查詢失敗：{exc}"
+    finally:
+        conn.close()
+
+    return [(row[0], row[1]) for row in rows], ""
+
+
+def extract_schema(
+    db_url: str,
+    schema: str | None = None,
+    table_names: list[str] | None = None,
+) -> tuple[list[TableSpec], str]:
+    """Read detailed metadata for one schema/all schemas, optionally limited to tables."""
     try:
         import psycopg2
         import psycopg2.extras
@@ -111,7 +159,7 @@ def extract_schema(db_url: str, schema: str | None = None) -> tuple[list[TableSp
 
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute(_COLS_QUERY, {"schema": schema})
+            cur.execute(_COLS_QUERY, {"schema": schema, "tables": table_names or None})
             rows = cur.fetchall()
     except Exception as exc:
         return [], f"查詢失敗：{exc}"

@@ -34,6 +34,23 @@
     <p data-target="memory-backend">載入中…</p>
   </section>
 
+  <section class="card" data-target="agent-settings">
+    <h2 class="card-title">資料庫助手設定</h2>
+    <form data-action="save-agent-settings">
+      <div class="form-field">
+        <label class="form-label" for="agent-max-tool-calls">每回合工具呼叫上限</label>
+        <input class="form-input" type="number" id="agent-max-tool-calls"
+               data-target="agent-max-tool-calls" min="1" max="20" step="1">
+        <p class="form-hint">
+          預設 8。提高可完成較長的查詢鏈，但會增加延遲與 LLM／資料庫負載；下一回合起生效。
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">儲存助手設定</button>
+      </div>
+    </form>
+  </section>
+
   <section class="card" data-target="business-db-settings">
     <h2 class="card-title">業務資料庫連線</h2>
     <div data-target="business-db-list">

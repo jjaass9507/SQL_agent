@@ -30,9 +30,10 @@ from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
 from app.repos import settings as settings_repo
 from app.repos.models import Message
-from app.services import provider_factory, tool_registry
+from app.services import provider_factory, settings_service, tool_registry
 
-MAX_STEPS = 8
+# 相容既有測試／匯入；實際值每回合從平台設定讀取。
+MAX_STEPS = settings_service.DEFAULT_AGENT_MAX_TOOL_CALLS
 MAX_OBS_ROWS = 20
 MAX_OBS_CHARS = 4_000
 MAX_MESSAGES_CHARS = 24_000
@@ -42,6 +43,20 @@ _AGENT_SESSION_SETTING_KEY = "agent_session_id"
 _CAPABILITY_SETTING_KEY = "llm_capability_profile"
 
 _DESIGN_REQUEST_RE = re.compile(r"\[\[DESIGN_REQUEST\]\](.*?)\[\[/DESIGN_REQUEST\]\]", re.DOTALL)
+
+_DDL_INTENT_RE = re.compile(
+    r"\b(?:ALTER|CREATE\s+(?:UNIQUE\s+)?INDEX|COMMENT\s+ON|DROP|RENAME)\b",
+    re.IGNORECASE,
+)
+_CHANGE_INTENT_RE = re.compile(
+    r"(?:新增|增加|加入|建立|修改|變更|調整|刪除|移除|補上|加上|更新|撰寫|寫入|"
+    r"幫我加|幫我建).{0,24}(?:欄位|索引|約束|constraint|註解|備註|comment|schema|結構|資料表)",
+    re.IGNORECASE,
+)
+_CHANGE_CONFIRM_RE = re.compile(
+    r"(?:請|確認|同意|可以|好|直接)?.{0,8}(?:提交|送審|建立).{0,8}(?:變更)?提案",
+    re.IGNORECASE,
+)
 
 _REPEATED_CALL_HINT = (
     "（你已用完全相同的參數呼叫過這個工具，以下是上次的結果。"
@@ -226,6 +241,15 @@ def _extract_design_request(text: str) -> tuple[str, str | None]:
     return clean_text, design_request
 
 
+def allows_schema_changes(user_message: str) -> bool:
+    """只有本輪文字明確要求 DDL/結構修改時，才向模型開放變更工具。"""
+    return bool(
+        _DDL_INTENT_RE.search(user_message)
+        or _CHANGE_INTENT_RE.search(user_message)
+        or _CHANGE_CONFIRM_RE.search(user_message)
+    )
+
+
 # ── 主迴圈 ─────────────────────────────────────────────────────────────────
 
 
@@ -254,13 +278,20 @@ async def run_agent_turn_stream(
     ]
 
     provider = provider or await _build_provider(db)
-    ctx = tool_registry.ToolContext(db=db, db_name=db_name, actor=actor)
-    tool_defs = tool_registry.tool_defs()
+    allow_schema_changes = allows_schema_changes(user_message)
+    ctx = tool_registry.ToolContext(
+        db=db,
+        db_name=db_name,
+        actor=actor,
+        allow_schema_changes=allow_schema_changes,
+    )
+    tool_defs = tool_registry.tool_defs(allow_schema_changes=allow_schema_changes)
+    max_tool_calls = await settings_service.get_agent_max_tool_calls(db)
     seen_calls: dict[str, tuple[dict, str]] = {}
 
     steps: list[dict] = []
 
-    for _ in range(MAX_STEPS):
+    for _ in range(max_tool_calls):
         full_messages = _trim_to_budget(full_messages)
         result = await provider.chat(full_messages, tools=tool_defs)
 
