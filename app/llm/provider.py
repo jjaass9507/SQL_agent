@@ -32,6 +32,18 @@ _RETRY_DELAYS = (2.0, 4.0, 8.0)
 _STRUCTURED_RETRIES = 2
 
 
+def _proxy_error_detail(exc: BaseException) -> str | None:
+    """從 SDK 包裝的例外鏈找出 Proxy 拒絕，避免只留下 `Connection error`。"""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, httpx.ProxyError):
+            return str(current)[:200]
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def _structured_retry_prompt(model: type[BaseModel]) -> str:
     """重試指示同時附上 schema：不支援多輪的 gateway 會把歷史攤平成單一則訊息，
     只講「上一則不是 JSON」等於什麼格式資訊都沒給。"""
@@ -71,11 +83,17 @@ class LLMProvider:
         api_key: str | None,
         model: str | None,
         verify: bool = True,
+        trust_env: bool = True,
         timeout: float = 120.0,
         profile: CapabilityProfile | None = None,
     ) -> None:
-        # 自簽憑證 gateway：verify=False 時改用自訂 httpx.AsyncClient(verify=False)
-        http_client = None if verify else httpx.AsyncClient(verify=False)
+        # 非預設 TLS 或 Proxy 行為必須交給同一個自訂 client，避免 OpenAI SDK
+        # 另外建立一個仍會繼承系統環境變數的 httpx client。
+        http_client = (
+            None
+            if verify and trust_env
+            else httpx.AsyncClient(verify=verify, trust_env=trust_env)
+        )
         self._client = openai.AsyncOpenAI(
             base_url=base_url,
             api_key=api_key or "not-set",
@@ -94,7 +112,7 @@ class LLMProvider:
         profile: CapabilityProfile | None = None,
         apply_force_profile: bool = True,
     ) -> "LLMProvider":
-        """timeout / base_url / api_key / model / verify 一律來自 Settings。
+        """timeout / base_url / api_key / model / verify / trust_env 一律來自 Settings。
 
         `LLM_FORCE_PROFILE` 非空時，解析出的 profile 優先於傳入的 `profile` 參數
         （含 DB 持久化的探測結果）——這是探針誤判時的手動維運覆蓋。
@@ -110,6 +128,7 @@ class LLMProvider:
             api_key=settings.llm_api_key,
             model=settings.llm_model,
             verify=settings.llm_verify,
+            trust_env=settings.llm_trust_env,
             timeout=settings.llm_timeout,
             profile=profile,
         )
@@ -252,10 +271,18 @@ class LLMProvider:
                     continue
                 raise LLMError(f"llm gateway 回傳錯誤：{exc}") from exc
             except openai.APIConnectionError as exc:
-                logger.error(
-                    "llm_call_connection_error", extra={"attempt": attempt, "error": str(exc)}
+                proxy_detail = _proxy_error_detail(exc)
+                diagnostic = (
+                    f"HTTP Proxy 拒絕連線（{proxy_detail}）；"
+                    "請檢查 LLM_TRUST_ENV、NO_PROXY 或 Proxy allowlist"
+                    if proxy_detail
+                    else str(exc)
                 )
-                raise LLMError(f"llm 連線失敗：{exc}") from exc
+                logger.error(
+                    "llm_call_connection_error",
+                    extra={"attempt": attempt, "error": diagnostic},
+                )
+                raise LLMError(f"LLM 連線失敗：{diagnostic}") from exc
 
             elapsed = time.monotonic() - t0
             logger.info(
