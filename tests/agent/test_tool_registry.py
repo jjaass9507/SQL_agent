@@ -111,6 +111,50 @@ async def test_get_schema_returns_tables(db_session, monkeypatch):
     assert result["tables"][0]["table_name"] == "users"
 
 
+async def test_list_schemas_and_filter_schema(db_session, monkeypatch):
+    await seed_business_db(db_session, "shop", "sqlite://")
+    tables = [
+        TableSpec(schema_name="sales", table_name="orders", description="", columns=[]),
+        TableSpec(schema_name="archive", table_name="orders", description="", columns=[]),
+    ]
+
+    async def _fake_schema_tree(url):
+        return tables, ""
+
+    monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)
+    listed = await tool_registry.dispatch("list_schemas", {"db": "shop"}, _ctx(db_session))
+    assert listed == {"schemas": ["archive", "sales"]}
+
+    result = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "schema": "sales"}, _ctx(db_session)
+    )
+    assert [table["schema_name"] for table in result["tables"]] == ["sales"]
+
+
+async def test_get_schema_rejects_ambiguous_bare_table(db_session, monkeypatch):
+    await seed_business_db(db_session, "shop", "sqlite://")
+    tables = [
+        TableSpec(schema_name="sales", table_name="orders", description="", columns=[]),
+        TableSpec(schema_name="archive", table_name="orders", description="", columns=[]),
+    ]
+
+    async def _fake_schema_tree(url):
+        return tables, ""
+
+    monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)
+    ambiguous = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "tables": ["orders"]}, _ctx(db_session)
+    )
+    assert "error" in ambiguous
+    assert "sales.orders" in ambiguous["error"]
+    assert "archive.orders" in ambiguous["error"]
+
+    qualified = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "tables": ["sales.orders"]}, _ctx(db_session)
+    )
+    assert qualified["tables"][0]["schema_name"] == "sales"
+
+
 async def test_analyze_schema_returns_warnings(db_session, monkeypatch):
     await seed_business_db(db_session, "shop", "sqlite://")
 
@@ -277,7 +321,7 @@ async def test_propose_ddl_success_creates_pending_request(db_session, monkeypat
 
 async def test_tool_defs_are_openai_function_shaped():
     defs = tool_registry.tool_defs()
-    assert len(defs) == 11
+    assert len(defs) == 12
     for d in defs:
         assert d["type"] == "function"
         assert "name" in d["function"]
