@@ -30,6 +30,28 @@
 `-SkipBackup`、`-Port`（Direct 模式，預設 8000）、`-Branch`、
 `-HealthTimeoutSeconds`。
 
+### Windows PowerShell 5.1 相容性（寫腳本時務必注意）
+
+腳本要能在 **Windows PowerShell 5.1**（Windows Server 內建版本）與 PowerShell 7
+兩邊都跑。5.1 有三個會讓腳本無故失敗的行為，本腳本都已處理，改動時不要退回去：
+
+1. **原生指令寫到 stderr 會被當成錯誤。** 5.1 把 `git` / `alembic` / `pip` 寫到
+   stderr 的每一行都轉成 `ErrorRecord`，搭配 `$ErrorActionPreference = 'Stop'`
+   就變成終止性錯誤——但 alembic 只是把 INFO log 寫到 stderr
+   （`INFO [alembic.runtime.migration] Context impl SQLiteImpl.`），那**不是失敗**。
+   因此所有原生指令一律走 `Invoke-Native` / `Invoke-NativeCapture`：執行期間把
+   `$ErrorActionPreference` 降成 `Continue`，成功與否只看 `$LASTEXITCODE`。
+2. **`$IsWindows` 在 5.1 不存在**（PS 6 才有的自動變數），`Set-StrictMode` 下直接
+   讀會拋錯。要先 `Test-Path variable:IsWindows` 再用。
+3. **`.ps1` 檔必須存成 UTF-8 with BOM。** 5.1 讀沒有 BOM 的檔案會當成 ANSI
+   （繁中機器是 cp950），中文訊息全部變亂碼。
+
+另外 PowerShell 7.3+ 的 `$PSNativeCommandUseErrorActionPreference` 會讓原生指令的
+非零離開碼自動拋例外；腳本開頭把它關掉，改用自己的中文錯誤訊息。
+
+> 順帶一提，**單元素陣列從函式回傳時會被自動拆成純量**，`(...)[0]` 就會取到
+> 「字串的第一個字元」而不是第一個元素。需要取第一筆時一律寫 `@(...)[0]`。
+
 ### `scripts/deploy_db.py`
 
 部署腳本呼叫的資料庫工具，也可以單獨用：

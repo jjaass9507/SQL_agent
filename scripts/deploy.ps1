@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     SQL Agent v2 重新部署腳本（Windows）。
 
@@ -35,6 +35,8 @@
     IIS 模式需要系統管理員權限（操作應用程式集區）。
 #>
 
+#Requires -Version 5.1
+
 [CmdletBinding()]
 param(
     [ValidateSet('Direct', 'IIS')]
@@ -62,6 +64,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# PS 7.3+ 會讓原生指令的非零離開碼自動丟例外；本腳本自己檢查 $LASTEXITCODE，
+# 關掉它才能給出自己的中文訊息。5.1 沒有這個變數，用 Test-Path 判斷。
+if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+# $IsWindows 是 PS 6 才有的自動變數；5.1 沒有，而 5.1 本來就只跑在 Windows 上。
+# StrictMode 下直接讀未定義變數會炸，所以要先確認它存在。
+$IsWindowsOS = if (Test-Path variable:IsWindows) { $IsWindows } else { $true }
+
 $Root = Split-Path -Parent $PSScriptRoot
 $VenvPython = Join-Path $Root 'venv\Scripts\python.exe'
 $LogDir = Join-Path $Root 'logs'
@@ -70,12 +81,45 @@ $PidFile = Join-Path $LogDir 'uvicorn.pid'
 # venv 內的 .exe 進入點內嵌了建立當下的絕對路徑，venv 被搬動過就會噴
 # "Fatal error in launcher"（見 docs/deployment.md §4-4）。一律用 python -m
 # 呼叫，繞開所有 .exe launcher。
+# Windows PowerShell 5.1 會把原生指令寫到 stderr 的內容轉成 ErrorRecord，
+# 搭配 $ErrorActionPreference='Stop' 就變成終止性錯誤——alembic 只是把 INFO log
+# 寫到 stderr（例如「Context impl SQLiteImpl.」），完全不是失敗，卻會讓部署中止。
+# 因此執行原生指令期間一律把 EAP 降成 Continue，成功與否只看 $LASTEXITCODE。
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$Label,
+        [switch]$AllowFail
+    )
+    if (-not $Label) { $Label = "$FilePath $($Arguments -join ' ')" }
+    Write-Step $Label
+    if ($DryRun) { return }
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $FilePath @Arguments }
+    finally { $ErrorActionPreference = $previous }
+
+    if (-not $AllowFail -and $LASTEXITCODE -ne 0) { throw "$Label 失敗（exit $LASTEXITCODE）" }
+}
+
+# 需要讀取輸出時用這個。2>&1 會把 stderr 併進管線（5.1 是 ErrorRecord、7.x 也是），
+# 一律濾掉，只回傳標準輸出的字串陣列。
+function Invoke-NativeCapture {
+    param([Parameter(Mandatory)][string]$FilePath, [string[]]$Arguments = @())
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $raw = & $FilePath @Arguments 2>&1 }
+    finally { $ErrorActionPreference = $previous }
+    return @($raw |
+        Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
+        ForEach-Object { "$_" })
+}
+
 function Invoke-Py {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PyArgs)
-    Write-Step "python -m $($PyArgs -join ' ')"
-    if ($DryRun) { return }
-    & $VenvPython -m @PyArgs
-    if ($LASTEXITCODE -ne 0) { throw "python -m $($PyArgs -join ' ') 失敗（exit $LASTEXITCODE）" }
+    Invoke-Native -FilePath $VenvPython -Arguments (@('-m') + $PyArgs) -Label "python -m $($PyArgs -join ' ')"
 }
 
 function Write-Step { param([string]$Text) Write-Host "  → $Text" -ForegroundColor DarkGray }
@@ -146,12 +190,11 @@ function Test-Preflight {
         Write-Ok "IIS 應用程式集區：$AppPool"
     }
 
-    Write-Step 'scripts\deploy_db.py check'
-    if (-not $DryRun) {
-        & $VenvPython (Join-Path $Root 'scripts\deploy_db.py') check
-        # 0 = 已最新、1 = 有待跑的遷移，都是正常；2 才是連不上或設定有問題
-        if ($LASTEXITCODE -eq 2) { throw '資料庫檢查失敗，見上方訊息' }
-    }
+    # 0 = 已最新、1 = 有待跑的遷移，都是正常；2 才是連不上或設定有問題
+    Invoke-Native -FilePath $VenvPython `
+        -Arguments @((Join-Path $Root 'scripts\deploy_db.py'), 'check') `
+        -Label 'scripts\deploy_db.py check' -AllowFail
+    if (-not $DryRun -and $LASTEXITCODE -eq 2) { throw '資料庫檢查失敗，見上方訊息' }
 }
 
 # ---------------------------------------------------------------- 起停服務
@@ -232,7 +275,7 @@ function Start-App {
         RedirectStandardError  = $stderr
     }
     # -WindowStyle 只有 Windows 版 PowerShell 支援；沒有它 python.exe 會彈出主控台視窗。
-    if ($IsWindows -ne $false) { $startArgs['WindowStyle'] = 'Hidden' }
+    if ($IsWindowsOS) { $startArgs['WindowStyle'] = 'Hidden' }
     $proc = Start-Process @startArgs
     $proc.Id | Set-Content $PidFile
     Write-Ok "uvicorn 已啟動（PID $($proc.Id)），log：$stdout"
@@ -269,6 +312,7 @@ $backupHint = '（本次未備份）'
 
 try {
     Write-Host "SQL Agent v2 重新部署（模式：$Mode$(if ($DryRun) { '，DryRun' })）" -ForegroundColor White
+    Write-Host "  PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor DarkGray
 
     Test-Preflight
     Stop-App
@@ -279,17 +323,16 @@ try {
             throw "這個目錄不是 git repo，無法用 -Branch 更新原始碼。`n" +
                   "  若原始碼是用複製／解壓縮的方式部署，請加 -SkipGit 跳過這一步。"
         }
-        $previousCommit = (git rev-parse HEAD).Trim()
+        $previousCommit = @(Invoke-NativeCapture -FilePath 'git' -Arguments @('rev-parse', 'HEAD'))[0]
         Write-Step "目前 commit：$previousCommit"
-        Write-Step "git fetch origin $Branch && git checkout $Branch && git pull --ff-only"
+        # git 會把進度訊息寫到 stderr，一律走 Invoke-Native（見該函式的註解）
+        Invoke-Native -FilePath 'git' -Arguments @('fetch', 'origin', $Branch)
+        Invoke-Native -FilePath 'git' -Arguments @('checkout', $Branch)
+        Invoke-Native -FilePath 'git' -Arguments @('pull', '--ff-only', 'origin', $Branch) `
+            -Label "git pull --ff-only origin $Branch"
         if (-not $DryRun) {
-            git fetch origin $Branch
-            if ($LASTEXITCODE -ne 0) { throw 'git fetch 失敗' }
-            git checkout $Branch
-            if ($LASTEXITCODE -ne 0) { throw 'git checkout 失敗' }
-            git pull --ff-only origin $Branch
-            if ($LASTEXITCODE -ne 0) { throw 'git pull 失敗（可能有本機修改或分支已分岔）' }
-            Write-Ok "已更新到 $((git rev-parse --short HEAD).Trim())"
+            $short = @(Invoke-NativeCapture -FilePath 'git' -Arguments @('rev-parse', '--short', 'HEAD'))[0]
+            Write-Ok "已更新到 $short"
         }
     }
 
@@ -308,8 +351,12 @@ try {
         Write-Section '備份資料庫'
         Write-Step "scripts\deploy_db.py backup --out-dir $BackupDir"
         if (-not $DryRun) {
-            $output = & $VenvPython (Join-Path $Root 'scripts\deploy_db.py') backup --out-dir $BackupDir
-            if ($LASTEXITCODE -ne 0) { $output; throw '備份失敗，中止部署' }
+            $output = Invoke-NativeCapture -FilePath $VenvPython `
+                -Arguments @((Join-Path $Root 'scripts\deploy_db.py'), 'backup', '--out-dir', $BackupDir)
+            if ($LASTEXITCODE -ne 0) {
+                $output | ForEach-Object { Write-Host "    $_" }
+                throw '備份失敗，中止部署'
+            }
             $output | ForEach-Object { Write-Host "    $_" }
             $backupHint = ($output | Where-Object { $_ -match '還原指令' }) -join ''
             Write-Ok '備份完成'
@@ -321,7 +368,7 @@ try {
 
     Write-Section '資料庫遷移'
     if (-not $DryRun) {
-        $previousRevision = (& $VenvPython -m alembic current 2>$null |
+        $previousRevision = (Invoke-NativeCapture -FilePath $VenvPython -Arguments @('-m', 'alembic', 'current') |
             Select-String -Pattern '^[0-9a-f]+' | ForEach-Object { $_.Matches[0].Value }) -join ''
         Write-Step "目前版本：$(if ($previousRevision) { $previousRevision } else { '(空的資料庫)' })"
     }
@@ -332,7 +379,9 @@ try {
     catch {
         Write-Host "`n遷移失敗，正在回滾……" -ForegroundColor Red
         if ($previousRevision) {
-            & $VenvPython -m alembic downgrade $previousRevision
+            Invoke-Native -FilePath $VenvPython `
+                -Arguments @('-m', 'alembic', 'downgrade', $previousRevision) `
+                -Label "python -m alembic downgrade $previousRevision" -AllowFail
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "資料庫已回到 $previousRevision"
             }
