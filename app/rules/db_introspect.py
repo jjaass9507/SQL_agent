@@ -90,7 +90,7 @@ LEFT JOIN ix
  AND ix.column_name = c.column_name
 WHERE tbl.table_type = 'BASE TABLE'
   AND c.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-  AND c.table_schema NOT LIKE 'pg\_%' ESCAPE '\'
+  AND c.table_schema NOT LIKE 'pg\_%%' ESCAPE '\'
   AND (%(schema)s IS NULL OR c.table_schema = %(schema)s)
   AND (%(tables)s::text[] IS NULL OR c.table_name = ANY(%(tables)s::text[]))
 ORDER BY c.table_schema, c.table_name, c.ordinal_position
@@ -102,7 +102,7 @@ SELECT table_schema, table_name
 FROM information_schema.tables
 WHERE table_type = 'BASE TABLE'
   AND table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-  AND table_schema NOT LIKE 'pg\_%' ESCAPE '\'
+  AND table_schema NOT LIKE 'pg\_%%' ESCAPE '\'
   AND (%(schema)s IS NULL OR table_schema = %(schema)s)
   AND (%(name_contains)s IS NULL OR table_name ILIKE '%%' || %(name_contains)s || '%%')
 ORDER BY table_schema, table_name
