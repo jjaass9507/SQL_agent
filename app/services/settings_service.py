@@ -16,7 +16,12 @@ from app.services import dbops
 from app.services.workbench_service import sanitize_db_error
 
 _BUSINESS_DB_KEY = "business_databases"
+_AGENT_MAX_TOOL_CALLS_KEY = "agent_max_tool_calls"
 _ALLOWED_SCHEMES = ("postgresql://", "postgres://")
+
+DEFAULT_AGENT_MAX_TOOL_CALLS = 8
+MIN_AGENT_MAX_TOOL_CALLS = 1
+MAX_AGENT_MAX_TOOL_CALLS = 20
 
 
 class ConnectionTestFailed(Exception):
@@ -44,7 +49,29 @@ async def get_settings_overview(db: AsyncSession) -> dict:
         "backend": backend,
         "masked_url": mask_db_url(database_url),
         "business_databases": [_mask_entry(e) for e in entries],
+        "agent_max_tool_calls": await get_agent_max_tool_calls(db),
+        "agent_max_tool_calls_min": MIN_AGENT_MAX_TOOL_CALLS,
+        "agent_max_tool_calls_max": MAX_AGENT_MAX_TOOL_CALLS,
     }
+
+
+async def get_agent_max_tool_calls(db: AsyncSession) -> int:
+    record = await settings_repo.get_setting(db, _AGENT_MAX_TOOL_CALLS_KEY)
+    value = record.value_json if record and record.value_json is not None else None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(MIN_AGENT_MAX_TOOL_CALLS, min(MAX_AGENT_MAX_TOOL_CALLS, value))
+    return DEFAULT_AGENT_MAX_TOOL_CALLS
+
+
+async def set_agent_max_tool_calls(db: AsyncSession, value: int) -> int:
+    if isinstance(value, bool) or not MIN_AGENT_MAX_TOOL_CALLS <= value <= MAX_AGENT_MAX_TOOL_CALLS:
+        raise ValueError(
+            f"每回合工具呼叫上限必須介於 {MIN_AGENT_MAX_TOOL_CALLS} 到 "
+            f"{MAX_AGENT_MAX_TOOL_CALLS} 之間"
+        )
+    await settings_repo.set_setting(db, _AGENT_MAX_TOOL_CALLS_KEY, value)
+    await activity.log_activity(db, "agent_settings_updated", {"max_tool_calls": value})
+    return value
 
 
 async def upsert_business_database(db: AsyncSession, name: str, url: str) -> list[dict]:
