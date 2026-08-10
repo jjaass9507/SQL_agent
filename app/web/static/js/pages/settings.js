@@ -17,6 +17,12 @@ function renderBackend(settings) {
   if (backendEl) {
     backendEl.textContent = `${settings.backend}（${settings.masked_url}）`;
   }
+  const maxCalls = document.querySelector('[data-target="agent-max-tool-calls"]');
+  if (maxCalls) {
+    maxCalls.value = settings.agent_max_tool_calls;
+    maxCalls.min = settings.agent_max_tool_calls_min;
+    maxCalls.max = settings.agent_max_tool_calls_max;
+  }
 }
 
 function renderBusinessDbs(entries) {
@@ -136,6 +142,28 @@ async function loadActivity() {
 
 document.addEventListener("submit", async (event) => {
   const form = event.target;
+  if (form.matches('[data-action="save-agent-settings"]')) {
+    event.preventDefault();
+    const input = form.querySelector('[data-target="agent-max-tool-calls"]');
+    const maxToolCalls = Number(input.value);
+    if (!Number.isInteger(maxToolCalls)) {
+      showToast("工具呼叫上限必須是整數", "warning");
+      return;
+    }
+    try {
+      const result = await api.put(
+        ENDPOINTS.settingsAgent(),
+        { max_tool_calls: maxToolCalls },
+        { headers: adminHeaders() }
+      );
+      input.value = result.max_tool_calls;
+      showToast("助手設定已儲存", "success");
+      loadActivity();
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
   if (!form.matches('[data-action="add-business-db"]')) return;
   event.preventDefault();
 

@@ -15,8 +15,17 @@ from tests.agent.conftest import install_fake_psycopg2, sample_table_dict, seed_
 from tests.specs import col
 
 
-def _ctx(db_session, db_name: str | None = None) -> tool_registry.ToolContext:
-    return tool_registry.ToolContext(db=db_session, db_name=db_name)
+def _ctx(
+    db_session,
+    db_name: str | None = None,
+    *,
+    allow_schema_changes: bool = False,
+) -> tool_registry.ToolContext:
+    return tool_registry.ToolContext(
+        db=db_session,
+        db_name=db_name,
+        allow_schema_changes=allow_schema_changes,
+    )
 
 
 def _existing_tables() -> list[TableSpec]:
@@ -102,13 +111,74 @@ async def test_get_schema_unknown_db_name(db_session):
 async def test_get_schema_returns_tables(db_session, monkeypatch):
     await seed_business_db(db_session, "shop", "sqlite://")
 
-    async def _fake_schema_tree(url):
+    async def _fake_list_tables(url, schema=None, name_contains=None):
+        return [("public", "users")], ""
+
+    async def _fake_schema_tree(url, schema=None, table_names=None):
         return _existing_tables(), ""
 
+    monkeypatch.setattr(tool_registry.dbops, "list_tables", _fake_list_tables)
     monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)
     result = await tool_registry.dispatch("get_schema", {"db": "shop"}, _ctx(db_session))
     assert "tables" in result
     assert result["tables"][0]["table_name"] == "users"
+
+
+async def test_list_schemas_and_filter_schema(db_session, monkeypatch):
+    await seed_business_db(db_session, "shop", "sqlite://")
+    tables = [
+        TableSpec(schema_name="sales", table_name="orders", description="", columns=[]),
+        TableSpec(schema_name="archive", table_name="orders", description="", columns=[]),
+    ]
+
+    async def _fake_list_schemas(url):
+        return ["archive", "sales"], ""
+
+    async def _fake_list_tables(url, schema=None, name_contains=None):
+        refs = [("sales", "orders"), ("archive", "orders")]
+        return [ref for ref in refs if not schema or ref[0] == schema], ""
+
+    async def _fake_schema_tree(url, schema=None, table_names=None):
+        return [table for table in tables if table.schema_name == schema], ""
+
+    monkeypatch.setattr(tool_registry.dbops, "list_schemas", _fake_list_schemas)
+    monkeypatch.setattr(tool_registry.dbops, "list_tables", _fake_list_tables)
+    monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)
+    listed = await tool_registry.dispatch("list_schemas", {"db": "shop"}, _ctx(db_session))
+    assert listed == {"schemas": ["archive", "sales"]}
+
+    result = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "schema": "sales"}, _ctx(db_session)
+    )
+    assert [table["schema_name"] for table in result["tables"]] == ["sales"]
+
+
+async def test_get_schema_rejects_ambiguous_bare_table(db_session, monkeypatch):
+    await seed_business_db(db_session, "shop", "sqlite://")
+    tables = [
+        TableSpec(schema_name="sales", table_name="orders", description="", columns=[]),
+        TableSpec(schema_name="archive", table_name="orders", description="", columns=[]),
+    ]
+
+    async def _fake_list_tables(url, schema=None, name_contains=None):
+        return [(table.schema_name, table.table_name) for table in tables], ""
+
+    async def _fake_schema_tree(url, schema=None, table_names=None):
+        return [table for table in tables if table.schema_name == schema], ""
+
+    monkeypatch.setattr(tool_registry.dbops, "list_tables", _fake_list_tables)
+    monkeypatch.setattr(tool_registry.dbops, "schema_tree", _fake_schema_tree)
+    ambiguous = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "tables": ["orders"]}, _ctx(db_session)
+    )
+    assert "error" in ambiguous
+    assert "sales.orders" in ambiguous["error"]
+    assert "archive.orders" in ambiguous["error"]
+
+    qualified = await tool_registry.dispatch(
+        "get_schema", {"db": "shop", "tables": ["sales.orders"]}, _ctx(db_session)
+    )
+    assert qualified["tables"][0]["schema_name"] == "sales"
 
 
 async def test_analyze_schema_returns_warnings(db_session, monkeypatch):
@@ -189,7 +259,9 @@ async def test_check_table_docs_returns_summary(db_session, monkeypatch):
 async def test_draft_comment_ddl(db_session):
     comments = {"table_comment": "使用者資料表", "columns": {"id": "主鍵"}}
     result = await tool_registry.dispatch(
-        "draft_comment_ddl", {"table": "users", "comments": comments}, _ctx(db_session)
+        "draft_comment_ddl",
+        {"table": "users", "comments": comments},
+        _ctx(db_session, allow_schema_changes=True),
     )
     assert "ddl" in result
     assert "COMMENT ON TABLE" in result["ddl"]
@@ -257,7 +329,9 @@ async def test_propose_ddl_requires_ddl(db_session):
 async def test_propose_ddl_rejects_disallowed_ddl(db_session):
     await seed_business_db(db_session, "shop", "postgresql://x/y")
     result = await tool_registry.dispatch(
-        "propose_ddl", {"db": "shop", "ddl": "DROP TABLE users;"}, _ctx(db_session)
+        "propose_ddl",
+        {"db": "shop", "ddl": "DROP TABLE users;"},
+        _ctx(db_session, allow_schema_changes=True),
     )
     assert "error" in result
 
@@ -268,7 +342,7 @@ async def test_propose_ddl_success_creates_pending_request(db_session, monkeypat
     result = await tool_registry.dispatch(
         "propose_ddl",
         {"db": "shop", "ddl": "CREATE INDEX idx_users_name ON users(name);", "reason": "加速查詢"},
-        _ctx(db_session),
+        _ctx(db_session, allow_schema_changes=True),
     )
     assert result["status"] == "pending"
     assert result["dry_run_ok"] is True
@@ -277,8 +351,26 @@ async def test_propose_ddl_success_creates_pending_request(db_session, monkeypat
 
 async def test_tool_defs_are_openai_function_shaped():
     defs = tool_registry.tool_defs()
-    assert len(defs) == 11
+    assert len(defs) == 10
+    assert {item["function"]["name"] for item in defs}.isdisjoint(
+        {"draft_comment_ddl", "propose_ddl"}
+    )
     for d in defs:
         assert d["type"] == "function"
         assert "name" in d["function"]
         assert "parameters" in d["function"]
+
+    mutation_defs = tool_registry.tool_defs(allow_schema_changes=True)
+    assert {item["function"]["name"] for item in mutation_defs} >= {
+        "draft_comment_ddl",
+        "propose_ddl",
+    }
+
+
+async def test_schema_change_dispatch_requires_explicit_turn_permission(db_session):
+    result = await tool_registry.dispatch(
+        "propose_ddl",
+        {"ddl": "CREATE INDEX idx_users_name ON users(name);"},
+        _ctx(db_session),
+    )
+    assert "唯讀詢問" in result["error"]

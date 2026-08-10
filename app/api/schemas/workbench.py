@@ -2,7 +2,7 @@
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class QueryRequest(BaseModel):
@@ -37,11 +37,17 @@ class SchemaColumn(BaseModel):
     nullable: bool
     is_pk: bool
     is_fk: bool
+    fk_schema: str | None = None
     fk_table: str | None = None
+    fk_column: str | None = None
 
 
 class SchemaTable(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    schema_name: str = Field(alias="schema")
     name: str
+    qualified_name: str
     columns: list[SchemaColumn]
 
 

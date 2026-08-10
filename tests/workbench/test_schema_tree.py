@@ -50,12 +50,14 @@ async def test_schema_tree_design_mode_uses_latest_version(client, make_session,
 async def test_schema_tree_db_mode_uses_live_introspection(client, make_session, monkeypatch):
     record = await make_session(db_url="postgresql://user:secret@host/db")
     live_table = TableSpec(
+        schema_name="sales",
         table_name="orders",
         description="訂單",
         columns=[col("id", "uuid", False, "PK", is_primary_key=True)],
     )
 
-    def _fake_extract_schema(db_url, schema="public"):
+    def _fake_extract_schema(db_url, schema=None):
+        assert schema is None
         return [live_table], ""
 
     monkeypatch.setattr("app.services.dbops.extract_schema", _fake_extract_schema)
@@ -65,6 +67,8 @@ async def test_schema_tree_db_mode_uses_live_introspection(client, make_session,
     body = resp.json()
     assert body["source"] == "db"
     assert body["tables"][0]["name"] == "orders"
+    assert body["tables"][0]["schema"] == "sales"
+    assert body["tables"][0]["qualified_name"] == "sales.orders"
 
 
 async def test_schema_tree_db_mode_falls_back_to_design_on_introspection_failure(
@@ -75,7 +79,8 @@ async def test_schema_tree_db_mode_falls_back_to_design_on_introspection_failure
     await versions.create_version(db_session, record.id, tables_json=[asdict(table)])
     await db_session.commit()
 
-    def _fake_extract_schema(db_url, schema="public"):
+    def _fake_extract_schema(db_url, schema=None):
+        assert schema is None
         return [], "連線失敗"
 
     monkeypatch.setattr("app.services.dbops.extract_schema", _fake_extract_schema)

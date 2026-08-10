@@ -36,9 +36,21 @@ def big_database(db_session, monkeypatch):
     tables = [_table(f"table_{i:03d}") for i in range(300)]
     tables.append(_table("orders", 8))  # 使用者真正要找的那張，排在最後
 
-    async def fake_schema_tree(db_url):
-        return tables, ""
+    async def fake_list_tables(db_url, schema=None, name_contains=None):
+        refs = [(table.schema_name, table.table_name) for table in tables]
+        if schema:
+            refs = [ref for ref in refs if ref[0] == schema]
+        if name_contains:
+            refs = [ref for ref in refs if name_contains.lower() in ref[1].lower()]
+        return refs, ""
 
+    async def fake_schema_tree(db_url, schema=None, table_names=None):
+        selected = [table for table in tables if not schema or table.schema_name == schema]
+        if table_names:
+            selected = [table for table in selected if table.table_name in table_names]
+        return selected, ""
+
+    monkeypatch.setattr(tool_registry.dbops, "list_tables", fake_list_tables)
     monkeypatch.setattr(tool_registry.dbops, "schema_tree", fake_schema_tree)
 
     async def _setup():
@@ -125,9 +137,13 @@ async def test_small_database_still_returns_full_structure(db_session, monkeypat
     """表不多時維持原本行為——完整結構對模型最有用。"""
     tables = [_table("orders", 6), _table("refunds", 4)]
 
-    async def fake_schema_tree(db_url):
+    async def fake_list_tables(db_url, schema=None, name_contains=None):
+        return [(table.schema_name, table.table_name) for table in tables], ""
+
+    async def fake_schema_tree(db_url, schema=None, table_names=None):
         return tables, ""
 
+    monkeypatch.setattr(tool_registry.dbops, "list_tables", fake_list_tables)
     monkeypatch.setattr(tool_registry.dbops, "schema_tree", fake_schema_tree)
     await settings_repo.set_setting(
         db_session,

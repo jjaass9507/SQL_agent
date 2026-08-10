@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 
 from app.rules import sql_safety
-from app.rules.db_introspect import extract_schema
+from app.rules.db_introspect import extract_schema, list_table_refs
 from app.rules.spec_models import TableSpec
 
 MAX_ROWS = 200
@@ -79,6 +79,28 @@ async def explain_query(db_url: str, sql: str) -> dict[str, Any]:
         return await asyncio.to_thread(_run_sync, db_url, f"EXPLAIN {sql}", MAX_ROWS)
 
 
-async def schema_tree(db_url: str) -> tuple[list[TableSpec], str]:
-    """擷取業務資料庫結構（委派 rules.db_introspect.extract_schema）。"""
-    return await asyncio.to_thread(extract_schema, db_url)
+async def list_tables(
+    db_url: str,
+    schema: str | None = None,
+    name_contains: str | None = None,
+) -> tuple[list[tuple[str, str]], str]:
+    """輕量列出 schema/table；不讀欄位、constraint、index 或 comment。"""
+    return await asyncio.to_thread(list_table_refs, db_url, schema, name_contains)
+
+
+async def list_schemas(db_url: str) -> tuple[list[str], str]:
+    """列出至少含一張可存取資料表的 schema。"""
+    refs, err = await list_tables(db_url)
+    return sorted({schema for schema, _table in refs}), err
+
+
+async def schema_tree(
+    db_url: str,
+    schema: str | None = None,
+    table_names: list[str] | None = None,
+) -> tuple[list[TableSpec], str]:
+    """擷取完整結構；呼叫端可縮到單一 schema 與指定資料表。"""
+    if schema is None and table_names is None:
+        # 保留既有呼叫／monkeypatch 契約。
+        return await asyncio.to_thread(extract_schema, db_url)
+    return await asyncio.to_thread(extract_schema, db_url, schema, table_names)

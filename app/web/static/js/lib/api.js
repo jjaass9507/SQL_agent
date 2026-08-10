@@ -53,6 +53,7 @@ export const ENDPOINTS = {
   changeRequestReject: (id) => `${API_PREFIX}/change-requests/${id}/reject`,
   settings: () => `${API_PREFIX}/settings`,
   settingsBusinessDb: () => `${API_PREFIX}/settings/business-db`,
+  settingsAgent: () => `${API_PREFIX}/settings/agent`,
   activity: () => `${API_PREFIX}/activity`,
   authLogin: () => `${API_PREFIX}/auth/login`,
   authLogout: () => `${API_PREFIX}/auth/logout`,

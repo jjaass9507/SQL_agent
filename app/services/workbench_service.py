@@ -30,6 +30,9 @@ _CRED_RE = re.compile(r"://[^\s/]+:[^\s/@]+@")
 _NL2SQL_SYSTEM = (
     "你是 SQL 產生助手。根據使用者的自然語言問題與下方資料庫結構，"
     "產生一句唯讀的 PostgreSQL SELECT 查詢，並附上簡短說明。\n"
+    "SQL 中每個資料表都必須使用雙引號包住的完整 schema.table 名稱，"
+    "例如 \"sales\".\"orders\"；不可依賴 search_path。若同名表有歧義，"
+    "只能使用結構中明確提供的 schema，不可自行猜測。\n"
     "說明是寫給看不懂 SQL 的業務單位使用者看的：用日常中文描述這個數字是怎麼算出來的"
     "（例如「把訂單依通路分組，數每組有幾筆，再依金額由高到低排序」），"
     "不要出現聚合、子查詢、JOIN、索引這類技術詞彙，也不要複述 SQL 語法本身。"
@@ -151,20 +154,37 @@ async def _draft_sql(question: str, tables: list[TableSpec], llm: LLMProvider) -
 
 
 def _table_to_tree(table: TableSpec) -> dict:
-    """把 TableSpec 轉成結構瀏覽器用的精簡樹狀節點。"""
+    """把 TableSpec 轉成保留 schema 與跨 schema FK 身分的樹狀節點。"""
     columns = []
-    for c in table.columns:
+    for column in table.columns:
+        fk_table = None
+        if column.reference_table:
+            fk_schema = column.reference_schema or "public"
+            fk_table = f"{fk_schema}.{column.reference_table}"
+        elif column.references:
+            # Backward compatibility for old design snapshots.
+            fk_table = column.references.rsplit(".", 1)[0]
         columns.append(
             {
-                "name": c.name,
-                "type": f"{c.data_type}({c.length})" if c.length else c.data_type,
-                "nullable": c.nullable,
-                "is_pk": c.is_primary_key,
-                "is_fk": c.is_foreign_key,
-                "fk_table": c.references.split(".")[0] if c.references else None,
+                "name": column.name,
+                "type": (
+                    f"{column.data_type}({column.length})"
+                    if column.length else column.data_type
+                ),
+                "nullable": column.nullable,
+                "is_pk": column.is_primary_key,
+                "is_fk": column.is_foreign_key,
+                "fk_schema": column.reference_schema,
+                "fk_table": fk_table,
+                "fk_column": column.reference_column,
             }
         )
-    return {"name": table.table_name, "columns": columns}
+    return {
+        "schema": table.schema_name,
+        "name": table.table_name,
+        "qualified_name": table.qualified_name,
+        "columns": columns,
+    }
 
 
 async def get_schema_tree(db: AsyncSession, session_id: uuid.UUID) -> dict:

@@ -14,7 +14,10 @@ class ColumnSpec(BaseModel):
     description: str
     is_primary_key: bool = False
     is_foreign_key: bool = False
-    references: str | None = None  # "other_table.column"
+    references: str | None = None  # backward-compatible display value
+    reference_schema: str | None = None
+    reference_table: str | None = None
+    reference_column: str | None = None
     is_unique: bool = False
     is_indexed: bool = False
     length: int | None = None
@@ -22,11 +25,18 @@ class ColumnSpec(BaseModel):
 
 
 class TableSpec(BaseModel):
+    # Old snapshots omit schema_name; treating them as public keeps them readable.
+    schema_name: str = "public"
     table_name: str
     description: str
     columns: list[ColumnSpec]
     constraints: list[str] = Field(default_factory=list)  # extra CHECK constraints
     related_tables: list[str] = Field(default_factory=list)
+
+    @property
+    def qualified_name(self) -> str:
+        """Stable identity used by SQL generation and cross-schema lookups."""
+        return f"{self.schema_name}.{self.table_name}"
 
 
 def asdict(obj: BaseModel) -> dict:
