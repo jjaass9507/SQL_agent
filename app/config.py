@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_verify: bool = False          # 自簽憑證 gateway 預設不驗證
+    llm_trust_env: bool = True        # 是否繼承 HTTP_PROXY / HTTPS_PROXY / NO_PROXY
     llm_timeout: float = 120.0        # read timeout 秒數
     llm_force_profile: str | None = None  # JSON，覆蓋自動偵測的 CapabilityProfile（除錯用）
 
