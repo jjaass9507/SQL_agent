@@ -84,6 +84,21 @@ uvicorn app.main:app --reload
 若要接真實 LLM gateway，於 `.env` 填入 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
 未設定 gateway 時，LLM 相關端點會回錯誤，但其餘功能（含健康檢查、靜態頁面）不受影響。
 
+### LLM Proxy 路由
+
+`LLM_TRUST_ENV=true`（預設）會讓 LLM HTTP client 繼承程序環境中的
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`。若內網 LLM gateway
+不應經過系統 Proxy，設為：
+
+```env
+LLM_TRUST_ENV=false
+```
+
+這只影響送往 LLM gateway 的 HTTP client，不會修改或清除作業系統環境變數。
+若 gateway 必須經過公司 Proxy，請維持 `true`，並由網路管理員放行目的主機或設定
+`NO_PROXY`。Proxy 在 CONNECT 階段拒絕時，伺服器 log 會明確記錄
+`HTTP Proxy 拒絕連線` 及狀態文字，不再只顯示泛用的 `Connection error`。
+
 ## 2. Docker Compose（app + PostgreSQL）
 
 ```bash
