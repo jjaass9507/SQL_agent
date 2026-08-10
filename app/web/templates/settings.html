@@ -7,9 +7,18 @@
   <section class="card" data-target="llm-settings">
     <h2 class="card-title">LLM 連線設定</h2>
     <p class="form-hint">
-      連線參數（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）由伺服器環境變數設定，
-      此處僅提供連線測試與能力探測。
+      兩組連線參數由伺服器環境變數設定；此處選擇實際使用的後端，下一次 LLM 呼叫立即生效。
     </p>
+    <form data-action="save-llm-backend">
+      <div class="form-field">
+        <label class="form-label" for="llm-backend-select">目前 LLM 後端</label>
+        <select class="form-input" id="llm-backend-select" data-target="llm-backend-select"></select>
+        <p class="form-hint" data-target="llm-backend-hint"></p>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">切換後端</button>
+      </div>
+    </form>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" data-action="test-connection">測試連線</button>
     </div>

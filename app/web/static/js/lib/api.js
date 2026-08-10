@@ -54,6 +54,7 @@ export const ENDPOINTS = {
   settings: () => `${API_PREFIX}/settings`,
   settingsBusinessDb: () => `${API_PREFIX}/settings/business-db`,
   settingsAgent: () => `${API_PREFIX}/settings/agent`,
+  settingsLlmBackend: () => `${API_PREFIX}/settings/llm-backend`,
   activity: () => `${API_PREFIX}/activity`,
   authLogin: () => `${API_PREFIX}/auth/login`,
   authLogout: () => `${API_PREFIX}/auth/logout`,

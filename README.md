@@ -31,6 +31,10 @@
 > `GET|PUT /sessions/{id}/tables-ddl`、`POST /agent/conversations`。
 > `agent` / `settings` / `activity` / `change-requests` 補上認證依賴——
 > `AUTH_ENABLED=false` 的行為完全不變，`true` 時才會實際生效。
+> LLM 連線可同時設定 OpenAI 相容 `/chat/completions` 與內部 Pensieve envelope，
+> 管理員在設定頁切換後會持久化並於下一次呼叫生效；新增端點
+> `PUT /settings/llm-backend`。Pensieve 缺少的 tool calling、JSON Schema 與串流能力
+> 由既有降級層自動補齊。
 >
 > **使用者功能強化（依三位使用者角色的討論與逐階段驗收，見
 > [`docs/user_feature_backlog.md`](docs/user_feature_backlog.md)）：**

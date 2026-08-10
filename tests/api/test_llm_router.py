@@ -4,6 +4,8 @@ import httpx
 import respx
 
 from app.config import get_settings
+from app.repos import settings as settings_repo
+from app.services import provider_factory
 from tests.api.conftest import BASE_URL
 from tests.llm.conftest import (
     chat_completion_response,
@@ -45,6 +47,29 @@ async def test_health_ok_false_when_ping_fails(client):
 
     assert resp.status_code == 200
     assert resp.json()["ok"] is False
+
+
+async def test_health_uses_persisted_pensieve_backend(
+    client, session_factory, monkeypatch
+):
+    monkeypatch.setenv("PENSIEVE_URL", "http://pensieve.test/api")
+    monkeypatch.setenv("PENSIEVE_TOKEN", "token")
+    monkeypatch.setenv("PENSIEVE_EMPNO", "E123")
+    get_settings.cache_clear()
+    async with session_factory() as db:
+        await settings_repo.set_setting(db, provider_factory.BACKEND_SETTING_KEY, "pensieve")
+        await db.commit()
+
+    with respx.mock(base_url="http://pensieve.test") as mock:
+        mock.post("/api").mock(
+            return_value=httpx.Response(200, json={"isSuccess": True, "Result": "pong"})
+        )
+        resp = await client.get("/api/v1/llm/health")
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["backend"] == "pensieve"
+    assert resp.json()["profile"]["native_tools"] is False
 
 
 async def test_diagnose_probes_and_persists_profile(client):

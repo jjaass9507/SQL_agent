@@ -81,8 +81,36 @@ uvicorn app.main:app --reload
 
 啟動後 `http://127.0.0.1:8000/healthz` 應回 `{"status": "ok"}`。
 
-若要接真實 LLM gateway，於 `.env` 填入 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
-未設定 gateway 時，LLM 相關端點會回錯誤，但其餘功能（含健康檢查、靜態頁面）不受影響。
+### 可切換 LLM 後端
+
+平台支援同時設定兩種後端，管理員可在「設定 → LLM 連線設定」切換；選擇存於
+`app_settings`，下一次 LLM 呼叫立即生效，不需重啟服務：
+
+- `openai`：設定 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`，使用標準
+  OpenAI 相容 `/chat/completions`。
+- `pensieve`：設定 `PENSIEVE_URL` / `PENSIEVE_TOKEN` / `PENSIEVE_EMPNO`
+  （亦相容 `EMPNO`）與 `PENSIEVE_BUILDING`，使用內部
+  `token` / `empno` / `variables` envelope 並解析 `isSuccess` / `Result`。
+
+`LLM_BACKEND=openai|pensieve` 只指定資料庫尚未保存選擇時的預設值。未完成必要環境
+變數的後端會在設定頁標示「未設定」且不能切換。Pensieve 沒有原生 tool calling、
+JSON Schema 與串流，因此 SQL Agent 會自動使用既有的文字工具、JSON prompt 與單段串流
+降級層；呼叫端不需分別實作。
+
+### LLM Proxy 路由
+
+`LLM_TRUST_ENV=true`（預設）會讓 LLM HTTP client 繼承程序環境中的
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`。若內網 LLM gateway
+不應經過系統 Proxy，設為：
+
+```env
+LLM_TRUST_ENV=false
+```
+
+這只影響送往 LLM gateway 的 HTTP client，不會修改或清除作業系統環境變數。
+若 gateway 必須經過公司 Proxy，請維持 `true`，並由網路管理員放行目的主機或設定
+`NO_PROXY`。Proxy 在 CONNECT 階段拒絕時，伺服器 log 會明確記錄
+`HTTP Proxy 拒絕連線` 及狀態文字，不再只顯示泛用的 `Connection error`。
 
 ## 2. Docker Compose（app + PostgreSQL）
 

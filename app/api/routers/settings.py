@@ -30,6 +30,12 @@ class BusinessDatabaseOut(BaseModel):
     masked_url: str
 
 
+class LLMBackendOut(BaseModel):
+    id: str
+    label: str
+    configured: bool
+
+
 class SettingsOut(BaseModel):
     configured: bool
     backend: str
@@ -38,6 +44,8 @@ class SettingsOut(BaseModel):
     agent_max_tool_calls: int
     agent_max_tool_calls_min: int
     agent_max_tool_calls_max: int
+    llm_backend: str
+    llm_backends: list[LLMBackendOut]
 
 
 class BusinessDatabaseIn(BaseModel):
@@ -55,6 +63,14 @@ class AgentSettingsIn(BaseModel):
 
 class AgentSettingsOut(BaseModel):
     max_tool_calls: int
+
+
+class LLMBackendIn(BaseModel):
+    backend: str
+
+
+class LLMBackendSelectionOut(BaseModel):
+    backend: str
 
 
 class ActivityEntry(BaseModel):
@@ -76,6 +92,17 @@ async def update_agent_settings(body: AgentSettingsIn, db: DbDep):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     return {"max_tool_calls": value}
+
+
+@router.put(
+    "/settings/llm-backend", response_model=LLMBackendSelectionOut, dependencies=[_AdminDep]
+)
+async def update_llm_backend(body: LLMBackendIn, db: DbDep):
+    try:
+        backend = await svc.set_llm_backend(db, body.backend)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"backend": backend}
 
 
 @router.post(

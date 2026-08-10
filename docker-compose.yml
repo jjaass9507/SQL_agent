@@ -25,13 +25,24 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # LLM gateway（OpenAI 相容 Chat Completions）
+      # 可切換 LLM 後端
+      LLM_BACKEND: ${LLM_BACKEND:-openai}
+      LLM_LABEL: ${LLM_LABEL:-OpenAI 相容 API}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_VERIFY: ${LLM_VERIFY:-false}
+      LLM_TRUST_ENV: ${LLM_TRUST_ENV:-true}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-120.0}
       LLM_FORCE_PROFILE: ${LLM_FORCE_PROFILE:-}
+      PENSIEVE_LABEL: ${PENSIEVE_LABEL:-Pensieve}
+      PENSIEVE_URL: ${PENSIEVE_URL:-}
+      PENSIEVE_TOKEN: ${PENSIEVE_TOKEN:-}
+      PENSIEVE_EMPNO: ${PENSIEVE_EMPNO:-}
+      EMPNO: ${EMPNO:-}
+      PENSIEVE_BUILDING: ${PENSIEVE_BUILDING:-option}
+      PENSIEVE_VERIFY: ${PENSIEVE_VERIFY:-false}
+      PENSIEVE_TIMEOUT: ${PENSIEVE_TIMEOUT:-300.0}
       # 平台自身資料庫（正式環境用這個 compose 起的 PostgreSQL）
       DATABASE_URL: postgresql+asyncpg://sql_agent:sql_agent@postgres:5432/sql_agent
       # 安全

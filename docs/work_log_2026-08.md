@@ -380,3 +380,13 @@ b8d2a47 feat: Session 標籤與釘選
 a84f03d feat: 常用問題清單與「已核可」標記
 104bd9b docs: 同步兩份 backlog 至實際完成狀態
 ```
+## 2026-08-10 — 可切換 LLM 後端
+
+- 參考 `expert-knowledge-rag`，保留 OpenAI 相容 `/chat/completions`，新增 Pensieve
+  `token` / `empno` / `variables` envelope 與 `isSuccess` / `Result` 解析。
+- 設定頁可由管理員切換後端，選擇寫入 `app_settings`，所有 LLM 使用點下一次呼叫
+  即經 `provider_factory` 使用新後端。
+- Pensieve 的工具、JSON Schema、串流缺口由既有降級 adapter 處理；OpenAI 舊能力
+  探測 key 保留向後相容，之後改為按 backend 分開保存。
+- 納入 `LLM_TRUST_ENV` 與 Proxy 403 診斷，兩個後端使用一致的 Proxy 策略。
+- 驗證：662 passed、2 skipped；Ruff 與 `git diff --check` 通過。
