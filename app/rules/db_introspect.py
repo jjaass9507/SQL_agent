@@ -22,9 +22,13 @@ fk AS (
     JOIN information_schema.key_column_usage ku
       ON tc.constraint_name = ku.constraint_name
      AND tc.constraint_schema = ku.constraint_schema
-    JOIN information_schema.constraint_column_usage ccu
-      ON tc.constraint_name = ccu.constraint_name
-     AND tc.constraint_schema = ccu.constraint_schema
+    JOIN information_schema.referential_constraints rc
+      ON tc.constraint_name = rc.constraint_name
+     AND tc.constraint_schema = rc.constraint_schema
+    JOIN information_schema.key_column_usage ccu
+      ON rc.unique_constraint_name = ccu.constraint_name
+     AND rc.unique_constraint_schema = ccu.constraint_schema
+     AND ccu.ordinal_position = ku.position_in_unique_constraint
     WHERE tc.constraint_type = 'FOREIGN KEY'
 ),
 uq AS (
