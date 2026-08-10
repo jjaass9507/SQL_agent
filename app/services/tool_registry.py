@@ -47,6 +47,7 @@ class ToolContext:
     db: AsyncSession
     db_name: str | None = None  # 本回合選擇的資料庫（工具的 db 參數可覆蓋）
     actor: str | None = None  # 稽核用；AUTH_ENABLED=false 時為 None
+    allow_schema_changes: bool = False  # 必須由本輪明確變更意圖開啟
 
 
 @dataclass
@@ -130,10 +131,9 @@ async def _tool_list_schemas(args: dict, ctx: ToolContext) -> dict:
     url, err = await _resolve_db_url(ctx, args)
     if err:
         return {"error": err}
-    tables, err = await dbops.schema_tree(url)
-    if err and not tables:
+    schemas, err = await dbops.list_schemas(url)
+    if err and not schemas:
         return {"error": err}
-    schemas = sorted({table.schema_name for table in tables})
     return {"schemas": schemas}
 
 
@@ -148,27 +148,25 @@ async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
     url, err = await _resolve_db_url(ctx, args)
     if err:
         return {"error": err}
-    tables, err = await dbops.schema_tree(url)
-    if err and not tables:
-        return {"error": err}
-
     schema = (args.get("schema") or "").strip()
-    if schema:
-        tables = [table for table in tables if table.schema_name.lower() == schema.lower()]
-        if not tables:
-            return {"error": f"找不到 schema「{schema}」，請先呼叫 list_schemas。"}
+    keyword = (args.get("name_contains") or "").strip()
+    refs, err = await dbops.list_tables(url, schema or None, keyword or None)
+    if err and not refs:
+        return {"error": err}
+    if schema and not refs:
+        return {"error": f"找不到 schema「{schema}」或其中沒有可存取的資料表。"}
 
     wanted = args.get("tables")
     if wanted:
-        picked = []
+        selected: list[tuple[str, str]] = []
         for raw_name in wanted:
             name = str(raw_name).strip().lower()
             if "." in name:
-                matches = [table for table in tables if table.qualified_name.lower() == name]
+                matches = [ref for ref in refs if f"{ref[0]}.{ref[1]}".lower() == name]
             else:
-                matches = [table for table in tables if table.table_name.lower() == name]
+                matches = [ref for ref in refs if ref[1].lower() == name]
                 if len(matches) > 1:
-                    choices = ", ".join(table.qualified_name for table in matches)
+                    choices = ", ".join(f"{s}.{t}" for s, t in matches)
                     return {
                         "error": (
                             f"資料表「{raw_name}」存在於多個 schema：{choices}。"
@@ -176,36 +174,39 @@ async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
                         )
                     }
             if not matches:
-                available = ", ".join(table.qualified_name for table in tables[:20])
+                available = ", ".join(f"{s}.{t}" for s, t in refs[:20])
                 return {"error": f"找不到資料表「{raw_name}」。可用資料表：{available}…"}
-            picked.extend(matches)
-        return {"tables": [spec_models.asdict(table) for table in picked]}
+            selected.extend(matches)
+        refs = selected
 
-    keyword = (args.get("name_contains") or "").strip().lower()
-    if keyword:
-        matched = [
-            table for table in tables
-            if keyword in table.table_name.lower() or keyword in table.qualified_name.lower()
-        ]
-        if not matched:
+    if not refs:
+        if keyword:
             return {"error": f"沒有資料表的名稱包含「{keyword}」。"}
-        if len(matched) <= _FULL_SCHEMA_MAX_TABLES:
-            return {"tables": [spec_models.asdict(table) for table in matched]}
-        tables = matched
+        return {"tables": []}
 
-    if len(tables) > _FULL_SCHEMA_MAX_TABLES:
-        names = [table.qualified_name for table in tables]
+    if len(refs) > _FULL_SCHEMA_MAX_TABLES:
+        names = [f"{schema_name}.{table_name}" for schema_name, table_name in refs]
         shown = names[:_SUMMARY_MAX_NAMES]
         omitted = len(names) - len(shown)
         hint = (
-            f"這個範圍有 {len(tables)} 張表，數量太多無法一次回傳完整結構。"
+            f"這個範圍有 {len(refs)} 張表，數量太多無法一次回傳完整結構。"
             '請用 tables 指定 schema.table（例如 {"tables": ["sales.orders"]}），'
             '或用 schema / name_contains 縮小範圍。'
         )
         if omitted:
             hint += f"（表名清單只列出前 {len(shown)} 張，還有 {omitted} 張未列出）"
-        return {"table_count": len(tables), "summary": shown, "hint": hint}
+        return {"table_count": len(refs), "summary": shown, "hint": hint}
 
+    # 只有確定要看的少量表才載入昂貴的完整 metadata。
+    grouped: dict[str, list[str]] = {}
+    for schema_name, table_name in refs:
+        grouped.setdefault(schema_name, []).append(table_name)
+    tables = []
+    for schema_name, table_names in grouped.items():
+        batch, detail_err = await dbops.schema_tree(url, schema_name, table_names)
+        if detail_err and not batch:
+            return {"error": detail_err}
+        tables.extend(batch)
     return {"tables": [spec_models.asdict(table) for table in tables]}
 
 async def _tool_get_table_ddl(args: dict, ctx: ToolContext) -> dict:
@@ -488,7 +489,10 @@ _register(Tool(
 ))
 
 
-def tool_defs() -> list[dict]:
+_SCHEMA_CHANGE_TOOLS = frozenset({"draft_comment_ddl", "propose_ddl"})
+
+
+def tool_defs(*, allow_schema_changes: bool = False) -> list[dict]:
     """回傳 OpenAI function calling 格式的工具目錄，直接送進 `LLMProvider.chat(tools=...)`。"""
     return [
         {
@@ -500,6 +504,7 @@ def tool_defs() -> list[dict]:
             },
         }
         for tool in _REGISTRY.values()
+        if allow_schema_changes or tool.name not in _SCHEMA_CHANGE_TOOLS
     ]
 
 
@@ -543,6 +548,10 @@ async def dispatch(name: str, args: dict, ctx: ToolContext) -> dict:
         return {"error": f"未知工具：{name}"}
     if not isinstance(args, dict):
         return {"error": "工具參數必須是 JSON 物件"}
+    if name in _SCHEMA_CHANGE_TOOLS and not ctx.allow_schema_changes:
+        return {
+            "error": "本輪是唯讀詢問，未偵測到使用者明確要求結構變更；不得建立變更提案。"
+        }
     try:
         result = await tool.handler(args, ctx)
     except Exception as exc:
