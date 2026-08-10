@@ -35,6 +35,9 @@ class SettingsOut(BaseModel):
     backend: str
     masked_url: str
     business_databases: list[BusinessDatabaseOut]
+    agent_max_tool_calls: int
+    agent_max_tool_calls_min: int
+    agent_max_tool_calls_max: int
 
 
 class BusinessDatabaseIn(BaseModel):
@@ -44,6 +47,14 @@ class BusinessDatabaseIn(BaseModel):
 
 class BusinessDatabasesOut(BaseModel):
     business_databases: list[BusinessDatabaseOut]
+
+
+class AgentSettingsIn(BaseModel):
+    max_tool_calls: int
+
+
+class AgentSettingsOut(BaseModel):
+    max_tool_calls: int
 
 
 class ActivityEntry(BaseModel):
@@ -56,6 +67,15 @@ class ActivityEntry(BaseModel):
 @router.get("/settings", response_model=SettingsOut, dependencies=[_AuthDep])
 async def get_settings_route(db: DbDep):
     return await svc.get_settings_overview(db)
+
+
+@router.put("/settings/agent", response_model=AgentSettingsOut, dependencies=[_AdminDep])
+async def update_agent_settings(body: AgentSettingsIn, db: DbDep):
+    try:
+        value = await svc.set_agent_max_tool_calls(db, body.max_tool_calls)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"max_tool_calls": value}
 
 
 @router.post(
