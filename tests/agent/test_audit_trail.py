@@ -113,7 +113,9 @@ async def test_agent_run_query_is_logged_with_sql(db_session, register_db):
 
 async def test_agent_ddl_proposal_is_logged(db_session, register_db):
     await register_db()
-    ctx = tool_registry.ToolContext(db=db_session, db_name="shop")
+    ctx = tool_registry.ToolContext(
+        db=db_session, db_name="shop", allow_schema_changes=True
+    )
 
     await tool_registry.dispatch(
         "propose_ddl", {"ddl": "CREATE TABLE t (id int);", "reason": "測試"}, ctx
