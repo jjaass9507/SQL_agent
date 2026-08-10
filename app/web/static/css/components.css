@@ -793,3 +793,373 @@ h6.md-heading {
   color: var(--color-text-500);
   cursor: help;
 }
+
+/* ── 查詢工作台（DB Agent 頁的「查詢資料」分頁） ────────────────────────── */
+
+.workbench-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-success-600);
+  border-radius: var(--radius-md);
+  background: var(--color-success-100);
+  color: var(--color-success-500);
+  font-size: var(--font-size-sm);
+}
+
+.workbench-modes {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.workbench-explanation {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-accent-500);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-active);
+}
+
+.workbench-explanation-title {
+  margin-bottom: var(--space-1);
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+}
+
+.workbench-explanation p {
+  margin: 0;
+  color: var(--color-text-900);
+}
+
+/* 預設收合：不會寫 SQL 的人不必看到語法，要覆核的人點得開。 */
+.workbench-sql-advanced {
+  margin-bottom: var(--space-3);
+}
+
+.workbench-sql-advanced > summary {
+  cursor: pointer;
+  color: var(--color-text-500);
+  font-size: var(--font-size-sm);
+}
+
+.workbench-sql-advanced > summary:hover {
+  color: var(--color-accent-500);
+}
+
+.workbench-trust {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning-600);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-100);
+  color: var(--color-warning-500);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.form-mono {
+  font-family: var(--font-family-mono);
+}
+
+/* hidden 屬性只由 UA 樣式表給 display:none，會被任何帶 display 的 class 蓋掉
+   （例如 .form-field 的 flex）。工作台用 hidden 切換表單，必須讓它真的生效。 */
+[hidden] {
+  display: none !important;
+}
+
+/* ── 執行計畫樹 ─────────────────────────────────────────────────────────── */
+
+.plan-tree {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+}
+
+.plan-node {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.plan-node.is-detail {
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+}
+
+.plan-node.is-warning {
+  background: var(--color-error-100);
+  color: var(--color-error-500);
+}
+
+.plan-node-label {
+  flex: 1;
+}
+
+.plan-node-meta {
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.plan-node-hint {
+  padding-bottom: var(--space-2);
+  color: var(--color-text-500);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-xs);
+}
+
+.plan-node-hint.is-warning {
+  color: var(--color-warning-500);
+}
+
+/* ── 確認頁 DDL 驗證結果 ────────────────────────────────────────────────── */
+
+.ddl-validate-result {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+
+.ddl-validate-result.is-ok {
+  border: 1px solid var(--color-success-600);
+  background: var(--color-success-100);
+  color: var(--color-success-500);
+}
+
+.ddl-validate-result.is-error {
+  border: 1px solid var(--color-error-600);
+  background: var(--color-error-100);
+  color: var(--color-error-500);
+}
+
+/* ── 結構瀏覽器 / 資料字典 ─────────────────────────────────────────────── */
+
+.schema-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.schema-table-card {
+  border: var(--border-width-thin) solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.schema-table-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-3);
+  border: none;
+  background: var(--color-bg-panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schema-table-head:hover {
+  background: var(--color-bg-active);
+}
+
+.schema-table-title {
+  color: var(--color-text-900);
+  font-size: var(--font-size-sm);
+}
+
+/* 業務單位看不懂英文表名：有中文說明時表名退成小字副標。 */
+.schema-table-sub {
+  color: var(--color-text-500);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.schema-table-body {
+  padding: var(--space-3);
+  border-top: var(--border-width-thin) solid var(--border-color);
+}
+
+.schema-column {
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+}
+
+.schema-column:last-child {
+  border-bottom: none;
+}
+
+.schema-column-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.schema-column-name {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+}
+
+.schema-column-type {
+  margin-left: auto;
+  color: var(--color-text-500);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.schema-column-badges {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.schema-badge {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-active);
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+}
+
+.schema-badge.is-pk {
+  background: var(--color-accent-100);
+  color: var(--color-accent-500);
+}
+
+.schema-badge.is-fk {
+  background: var(--color-warning-100);
+  color: var(--color-warning-500);
+}
+
+.schema-note {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-700);
+  font-size: var(--font-size-sm);
+}
+
+.schema-note-owner {
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+}
+
+.schema-note-edit {
+  margin-top: var(--space-1);
+}
+
+.ddl-validate-warning {
+  margin: var(--space-2) 0 0;
+  color: var(--color-warning-500);
+  font-size: var(--font-size-sm);
+}
+
+/* 已寫過說明的欄位要看得出來，否則分不清哪些內容是可信的。 */
+.schema-column.is-documented {
+  border-left: 2px solid var(--color-accent-500);
+  padding-left: var(--space-2);
+}
+
+.schema-column:not(.is-documented) .schema-column-name,
+.schema-column:not(.is-documented) .schema-column-type {
+  opacity: 0.65;
+}
+
+/* 首頁 session 卡片的「下一步是什麼」——狀態 pill 講系統狀態，這句講使用者要做什麼。 */
+.page-index-session-next {
+  color: var(--color-accent-400);
+  font-size: var(--font-size-sm);
+}
+
+/* ── Session 標籤與釘選 ─────────────────────────────────────────────────── */
+
+.session-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.session-tag {
+  padding: 1px var(--space-2);
+  border: var(--border-width-thin) solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  color: var(--color-text-700);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.session-tag:hover {
+  border-color: var(--color-accent-500);
+  color: var(--color-accent-500);
+}
+
+.btn.is-pinned {
+  color: var(--color-warning-500);
+}
+
+/* ── 常用問題 ───────────────────────────────────────────────────────────── */
+
+.saved-questions {
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border: var(--border-width-thin) solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.saved-question {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width-thin) solid var(--border-color);
+}
+
+.saved-question:last-child {
+  border-bottom: none;
+}
+
+.saved-question-run {
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--color-accent-500);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.saved-question-run:hover {
+  text-decoration: underline;
+}
+
+.saved-question-badge {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  color: var(--color-text-500);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.saved-question-badge.is-approved {
+  background: var(--color-success-100);
+  color: var(--color-success-500);
+}
+
+/* 口徑過期比「從未覆核」更需要注意：使用者可能已經在用它交報表了。 */
+.saved-question-badge.is-stale {
+  background: var(--color-warning-100);
+  color: var(--color-warning-500);
+}
+
+.workbench-trust.is-approved {
+  border-color: var(--color-success-600);
+  background: var(--color-success-100);
+  color: var(--color-success-500);
+}

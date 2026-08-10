@@ -123,12 +123,11 @@ async def generate_documents(
     session_id: UUID,
     tables: list[TableSpec],
     *,
-    provider: LLMProvider | None = None,
+    provider: LLMProvider,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> dict[str, str | None]:
     """並行產出四份核心文件（01 規格書零 API、02 ER 圖 Mermaid 確定性產生 + LLM 關聯說明、
     03 DDL、04 安全規劃），成果寫入 outputs repo，progress_json 逐步更新。"""
-    provider = provider or LLMProvider.from_settings()
     session_factory = session_factory or get_session_factory()
 
     progress: dict[str, str] = dict.fromkeys(FILENAMES, "waiting")
@@ -182,9 +181,18 @@ async def generate_extra(
     if template_cls is not None:
         return template_cls().generate(tables)
 
-    provider = provider or LLMProvider.from_settings()
     context_tables = context_tables or []
 
+    # incremental 在「沒有差異」時會短路、完全不呼叫 LLM，所以這條路徑允許 provider
+    # 為 None；真的要呼叫時由 writer 自己擋（見 IncrementalMigrationWriter.generate）。
     if kind == "incremental":
         return await IncrementalMigrationWriter(provider).generate(tables, context_tables)
+
+    if provider is None:
+        # 不再默默退回 from_settings()——那會拿到「gateway 全能力」的預設值，
+        # 繞過 /llm/diagnose 的探測結果（見 services/provider_factory.py）。
+        raise ValueError(
+            f"extra kind「{kind}」需要 LLM provider，請由呼叫端以 "
+            "provider_factory.build_provider(db) 建立後傳入"
+        )
     return await writers.write(provider, kind, tables)

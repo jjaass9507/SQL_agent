@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import os
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -17,6 +18,14 @@ from app.rules.spec_models import TableSpec
 
 MAX_ROWS = 200
 _STATEMENT_TIMEOUT_MS = 30_000
+
+# 同時間最多幾個查詢打到業務資料庫。每次查詢都會新開連線（用完即 dispose），
+# 沒有上限的話，多人同時操作工作台／DB Agent 會把正式庫的 max_connections 頂滿，
+# 導致該資料庫上其他正式服務出現 too many connections。
+# 30 秒的 statement_timeout 對「短查詢但很多人同時打」完全無效。
+MAX_CONCURRENT_QUERIES = int(os.environ.get("MAX_CONCURRENT_QUERIES", "10"))
+
+_query_slots = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
 
 
 class QueryRejected(ValueError):
@@ -57,7 +66,8 @@ async def execute_query(db_url: str, sql: str, max_rows: int = MAX_ROWS) -> dict
     error = sql_safety.check_read_only(sql)
     if error:
         raise QueryRejected(error)
-    return await asyncio.to_thread(_run_sync, db_url, sql, max_rows)
+    async with _query_slots:
+        return await asyncio.to_thread(_run_sync, db_url, sql, max_rows)
 
 
 async def explain_query(db_url: str, sql: str) -> dict[str, Any]:
@@ -65,7 +75,8 @@ async def explain_query(db_url: str, sql: str) -> dict[str, Any]:
     error = sql_safety.check_read_only(sql)
     if error:
         raise QueryRejected(error)
-    return await asyncio.to_thread(_run_sync, db_url, f"EXPLAIN {sql}", MAX_ROWS)
+    async with _query_slots:
+        return await asyncio.to_thread(_run_sync, db_url, f"EXPLAIN {sql}", MAX_ROWS)
 
 
 async def schema_tree(db_url: str) -> tuple[list[TableSpec], str]:

@@ -22,13 +22,13 @@ from app.api.schemas.sessions import (
     MessageOut,
     SendMessageRequest,
     SessionDetail,
+    SessionLabelsRequest,
     SessionSummary,
     TablesDdlRequest,
     TurnResponse,
     VersionOut,
 )
 from app.config import get_settings
-from app.llm.provider import LLMProvider
 from app.repos import activity as activity_repo
 from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
@@ -37,7 +37,13 @@ from app.repos.models import Job, SchemaVersion, SessionRecord
 from app.rules import ddl_parser
 from app.rules.schema_diff import compute_diff
 from app.rules.spec_models import tables_from_json
-from app.services import agent_service, interview_service, session_service
+from app.services import (
+    agent_service,
+    interview_service,
+    provider_factory,
+    session_labels,
+    session_service,
+)
 from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -52,13 +58,16 @@ _DELTA_CHUNK_SIZE = 40
 # -- request/response 轉換 -------------------------------------------------
 
 
-def _to_summary(session: SessionRecord) -> SessionSummary:
+def _to_summary(session: SessionRecord, labels: dict | None = None) -> SessionSummary:
+    entry = labels or {}
     return SessionSummary(
         id=session.id,
         title=session.title,
         mode=session.mode,
         phase=session.phase,
         created_at=session.created_at,
+        tags=entry.get("tags") or [],
+        pinned=bool(entry.get("pinned")),
     )
 
 
@@ -73,7 +82,9 @@ def _to_job_summary(job: Job) -> JobSummary:
     )
 
 
-def _to_detail(data: session_service.SessionDetailData) -> SessionDetail:
+def _to_detail(
+    data: session_service.SessionDetailData, labels: dict | None = None
+) -> SessionDetail:
     session = data.session
     context_tables = (
         tables_from_json(session.context_tables_json) if session.context_tables_json else None
@@ -104,6 +115,8 @@ def _to_detail(data: session_service.SessionDetailData) -> SessionDetail:
         latest_tables=latest_tables,
         latest_key_points=latest_key_points,
         schema_diff=schema_diff,
+        tags=(labels or {}).get("tags") or [],
+        pinned=bool((labels or {}).get("pinned")),
         jobs=[_to_job_summary(j) for j in data.jobs],
     )
 
@@ -162,7 +175,11 @@ async def list_sessions(db: DbDep, current_user: CurrentUserDep) -> list[Session
     settings = get_settings()
     if settings.auth_enabled and current_user is not None and current_user.role != "admin":
         sessions = [s for s in sessions if s.user_id == current_user.id]
-    return [_to_summary(s) for s in sessions]
+    labels = await session_labels.get_labels_map(db)
+    summaries = [_to_summary(s, labels.get(str(s.id))) for s in sessions]
+    # 釘選的排到最前面，其餘維持原本的排序（在忙的案子會被新建的案子擠下去）。
+    summaries.sort(key=lambda s: not s.pinned)
+    return summaries
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -173,16 +190,29 @@ async def delete_session(session_id: UUID, db: DbDep, current_user: CurrentUserD
         raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
     await check_session_access(db, record, current_user)
     await sessions_repo.delete_session(db, session_id)
+    await session_labels.forget(db, session_id)
     await activity_repo.log_activity(db, "session.delete", {"session_id": str(session_id)})
+
+
+@router.put("/{session_id}/labels")
+async def set_session_labels(
+    session_id: UUID, body: SessionLabelsRequest, db: DbDep, current_user: CurrentUserDep
+) -> dict:
+    """設定標籤與釘選。未提供的欄位保持原值。"""
+    record = await sessions_repo.get_session(db, session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="找不到這筆設計紀錄，可能已經被刪除了")
+    await check_session_access(db, record, current_user)
+    return await session_labels.set_labels(db, session_id, tags=body.tags, pinned=body.pinned)
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
 async def get_session(session_id: UUID, db: DbDep, current_user: CurrentUserDep) -> SessionDetail:
     detail = await session_service.get_session_detail(db, session_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, detail.session, current_user)
-    return _to_detail(detail)
+    return _to_detail(detail, await session_labels.get_labels(db, session_id))
 
 
 @router.get("/{session_id}/messages", response_model=list[MessageOut])
@@ -251,10 +281,10 @@ async def send_message(
 ):
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
 
-    provider = LLMProvider.from_settings()
+    provider = await provider_factory.build_provider(db)
     turn = await interview_service.run_turn(db, provider, session, payload.content)
     turn_response = TurnResponse(
         reply=turn.reply,
@@ -274,12 +304,12 @@ async def confirm_session(
 ) -> ConfirmResponse:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
     try:
         job = await session_service.confirm_session(db, session_id)
     except session_service.SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。") from exc
     except session_service.ConfirmConflictError as exc:
         raise HTTPException(status_code=409, detail="session 目前不是 confirming 狀態") from exc
     return ConfirmResponse(session_id=session_id, phase="generating", job_id=job.id)
@@ -291,7 +321,7 @@ async def list_versions(
 ) -> list[VersionOut]:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
     versions = await versions_repo.list_versions(db, session_id)
     return [_to_version_out(v) for v in versions]
@@ -303,14 +333,14 @@ async def restore_version(
 ) -> VersionOut:
     session = await sessions_repo.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, session, current_user)
     try:
         restored = await session_service.restore_version(db, session_id, version_num)
     except session_service.SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。") from exc
     except session_service.VersionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="version not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個版本，可能已經被刪除了。") from exc
     return _to_version_out(restored)
 
 
@@ -320,12 +350,12 @@ async def import_db(
 ) -> ImportDbResponse:
     existing = await sessions_repo.get_session(db, session_id)
     if existing is None:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。")
     await check_session_access(db, existing, current_user)
     try:
         session = await session_service.import_db(db, session_id, payload.db_url)
     except session_service.SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=404, detail="找不到這個對話，可能已經被刪除了。") from exc
     except session_service.DbConnectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     tables = tables_from_json(session.context_tables_json) if session.context_tables_json else []

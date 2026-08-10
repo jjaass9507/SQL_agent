@@ -24,6 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -88,6 +89,11 @@ class SessionRecord(Base):
     context_tables_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # AES-256-GCM 加密後的 DB 連線字串（見 app/repos/crypto.py）
     db_url_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 一旦本輪動到既有表就固定為 True，此後每輪都注入既有結構
+    # （見 app/services/interview_service.py 的 sticky 規則）
+    inject_db_context: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa_false()
+    )
 
 
 class Message(Base):

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.services import agent_service
+from app.services.auth_service import CurrentUser
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -29,6 +30,7 @@ _DbDep = Depends(get_db)
 # true 時缺少或無效憑證一律 401。Agent 能透過工具讀取業務資料庫的真實資料，
 # 不該是未登入即可呼叫的端點。
 _AuthDep = Depends(get_current_user)
+_CurrentUserDep = Depends(get_current_user)
 
 
 class ChatBody(BaseModel):
@@ -41,10 +43,19 @@ def _format_sse(event: str, data: dict) -> str:
 
 
 @router.post("/chat", dependencies=[_AuthDep])
-async def chat(body: ChatBody, request: Request, db: AsyncSession = _DbDep):
+async def chat(
+    body: ChatBody,
+    request: Request,
+    db: AsyncSession = _DbDep,
+    current_user: CurrentUser | None = _CurrentUserDep,
+):
+    # agent 讀得到業務資料庫的真實資料，是全平台唯一沒有留痕的路徑——身分要往下傳。
+    actor = getattr(current_user, "email", None) if current_user else None
     events = [
         event
-        async for event in agent_service.run_agent_turn_stream(db, body.message, body.db_name)
+        async for event in agent_service.run_agent_turn_stream(
+            db, body.message, body.db_name, actor=actor
+        )
     ]
 
     accept = request.headers.get("accept", "")

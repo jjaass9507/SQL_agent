@@ -20,11 +20,13 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repos import activity as activity_repo
 from app.repos import settings as settings_repo
 from app.rules import (
     convention_checker,
     metadata_checker,
     schema_advisor,
+    sensitive_columns,
     spec_models,
     table_relation,
 )
@@ -33,12 +35,18 @@ from app.services import change_service, dbops
 logger = logging.getLogger(__name__)
 
 
+# DB Agent 目前是全平台共用的一條對話，沒有具名使用者可歸屬。標記清楚比留白好：
+# 空白看起來像資料遺失，明確標記才看得出「當時就是不知道是誰」。
+ANONYMOUS_AGENT = "anonymous(db-agent)"
+
+
 @dataclass
 class ToolContext:
     """每回合共用的工具上下文。"""
 
     db: AsyncSession
     db_name: str | None = None  # 本回合選擇的資料庫（工具的 db 參數可覆蓋）
+    actor: str | None = None  # 稽核用；AUTH_ENABLED=false 時為 None
 
 
 @dataclass
@@ -118,6 +126,13 @@ async def _tool_list_databases(args: dict, ctx: ToolContext) -> dict:
     return {"databases": [d.get("name") for d in databases]}
 
 
+# 超過這個表數就不再回完整結構。observation 會被硬砍在 4,000 字元、而且是字元
+# 邊界不是表邊界——使用者要的那張表可能整段落在截斷點之後，模型只好憑殘缺
+# 資料硬猜，或用同樣的參數重查（截斷是決定性的，重查不會有新結果）。
+_FULL_SCHEMA_MAX_TABLES = 15
+_SUMMARY_MAX_NAMES = 150
+
+
 async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
     url, err = await _resolve_db_url(ctx, args)
     if err:
@@ -125,6 +140,41 @@ async def _tool_get_schema(args: dict, ctx: ToolContext) -> dict:
     tables, err = await dbops.schema_tree(url)
     if err and not tables:
         return {"error": err}
+
+    wanted = args.get("tables")
+    if wanted:
+        names = {str(n).lower() for n in wanted}
+        picked = [t for t in tables if t.table_name.lower() in names]
+        if not picked:
+            available = ", ".join(t.table_name for t in tables[:20])
+            return {"error": f"找不到指定的資料表。這個資料庫有：{available}…"}
+        return {"tables": [spec_models.asdict(t) for t in picked]}
+
+    keyword = (args.get("name_contains") or "").strip().lower()
+    if keyword:
+        matched = [t for t in tables if keyword in t.table_name.lower()]
+        if not matched:
+            return {"error": f"沒有資料表的名稱包含「{keyword}」。"}
+        if len(matched) <= _FULL_SCHEMA_MAX_TABLES:
+            return {"tables": [spec_models.asdict(t) for t in matched]}
+        tables = matched
+
+    if len(tables) > _FULL_SCHEMA_MAX_TABLES:
+        # 只給表名，讓模型看得到「有哪些表」，再指名要細節。清單本身也可能超過
+        # observation 預算，因此在**表名邊界**截斷並講清楚少了幾張——絕不能像
+        # 原本那樣砍在字元中間，那會讓模型讀到半個表名而不自知。
+        names = [t.table_name for t in tables]
+        shown = names[:_SUMMARY_MAX_NAMES]
+        omitted = len(names) - len(shown)
+        hint = (
+            f"這個資料庫有 {len(tables)} 張表，數量太多無法一次回傳完整結構。"
+            '請用 tables 參數指名你需要的資料表（例如 {"tables": ["orders"]}）'
+            '，或用 name_contains 依關鍵字搜尋（例如 {"name_contains": "order"}）。'
+        )
+        if omitted:
+            hint += f"（表名清單只列出前 {len(shown)} 張，還有 {omitted} 張未列出）"
+        return {"table_count": len(tables), "summary": shown, "hint": hint}
+
     return {"tables": [spec_models.asdict(t) for t in tables]}
 
 
@@ -150,9 +200,12 @@ async def _tool_run_query(args: dict, ctx: ToolContext) -> dict:
     if err:
         return {"error": err}
     try:
-        return await dbops.execute_query(url, args["sql"])
+        result = await dbops.execute_query(url, args["sql"])
     except dbops.QueryRejected as exc:
         return {"error": str(exc)}
+    # agent 讀到的資料會進入全平台共用的 transcript 並送往 LLM——這裡遮，
+    # 人工查詢頁不遮（那裡的使用者本來就有權限，且結果不進 LLM）。
+    return sensitive_columns.mask_result(result)
 
 
 async def _tool_explain_query(args: dict, ctx: ToolContext) -> dict:
@@ -257,8 +310,26 @@ _register(Tool(
 ))
 _register(Tool(
     name="get_schema",
-    description="取得指定資料庫的完整結構（資料表、欄位、型態、PK/FK、註解）。",
-    parameters={"type": "object", "properties": {"db": _DB_PARAM}},
+    description=(
+        "取得資料庫結構（資料表、欄位、型態、PK/FK、註解）。"
+        "資料表很多時只會回傳表名清單——請用 tables 參數指名你需要的資料表，"
+        "才會拿到完整欄位。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "db": _DB_PARAM,
+            "tables": {
+                "type": "array",
+                "description": "只取這幾張資料表的完整結構（省略則回傳全部或表名摘要）",
+                "items": {"type": "string"},
+            },
+            "name_contains": {
+                "type": "string",
+                "description": "依關鍵字搜尋資料表名稱（資料表很多時用這個找到目標）",
+            },
+        },
+    },
     handler=_tool_get_schema,
 ))
 _register(Tool(
@@ -392,6 +463,38 @@ def tool_defs() -> list[dict]:
     ]
 
 
+# 會碰到業務資料庫、事後需要追溯的工具。純讀結構的工具（get_schema 等）不記，
+# 否則稽核紀錄會被雜訊淹沒、真正該看的東西反而找不到。
+_AUDITED_TOOLS = frozenset({"run_query", "explain_query", "propose_ddl", "draft_comment_ddl"})
+
+_AUDIT_SQL_MAX = 500
+
+
+async def _log_tool_call(name: str, args: dict, ctx: ToolContext, result: dict) -> None:
+    """把 agent 對業務資料庫做的事寫進 activity_log。
+
+    沒有這筆紀錄，「有沒有人透過 DB Agent 查過薪資表」事後完全查不出來——
+    agent 能讀到真實資料，卻是全平台唯一沒有留痕的路徑。
+    """
+    if name not in _AUDITED_TOOLS:
+        return
+    statement = args.get("sql") or args.get("ddl") or ""
+    try:
+        await activity_repo.log_activity(
+            ctx.db,
+            "agent.tool_called",
+            {
+                "tool": name,
+                "db": args.get("db") or ctx.db_name,
+                "actor": ctx.actor or ANONYMOUS_AGENT,
+                "sql": str(statement)[:_AUDIT_SQL_MAX],
+                "ok": "error" not in result,
+            },
+        )
+    except Exception:  # noqa: BLE001 - 稽核失敗不該讓使用者的操作跟著失敗
+        logger.exception("audit log failed for tool %s", name)
+
+
 async def dispatch(name: str, args: dict, ctx: ToolContext) -> dict:
     """查表並執行一個工具呼叫。永不 raise——錯誤一律回傳 {"error": ...}，
     讓 agent_service 能把它當作 observation 回饋給 LLM 自我修正。"""
@@ -401,7 +504,9 @@ async def dispatch(name: str, args: dict, ctx: ToolContext) -> dict:
     if not isinstance(args, dict):
         return {"error": "工具參數必須是 JSON 物件"}
     try:
-        return await tool.handler(args, ctx)
+        result = await tool.handler(args, ctx)
     except Exception as exc:
         logger.exception("tool %s failed", name)
-        return {"error": f"工具執行錯誤：{str(exc)[:200]}"}
+        result = {"error": f"工具執行錯誤：{str(exc)[:200]}"}
+    await _log_tool_call(name, args, ctx, result)
+    return result

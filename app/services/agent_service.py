@@ -4,9 +4,12 @@
 其 id 存於 app_settings，key 見 `_AGENT_SESSION_SETTING_KEY`）。每回合從
 `messages` repo 重建完整 transcript：工具呼叫/結果以 role="ai"、content 為
 JSON 字串（`{"type": "tool_call"|"tool_result", ...}`）持久化——`messages.role`
-的 CheckConstraint 只允許 'user'/'ai'（app/repos/models.py 不在本階段可改動
-範圍內），因此不新增 role="tool"，改以內容型別區分，重建時再展開成原生
-`assistant(tool_calls)` + `tool` 訊息對送給 LLM。
+的 CheckConstraint 只允許 'user'/'ai'，因此不新增 role="tool"，改以內容型別
+區分，重建時再展開成原生 `assistant(tool_calls)` + `tool` 訊息對送給 LLM。
+
+這個形狀原本是「不得改動 models.py」凍結期的產物；凍結已解除（見 HANDOFF.md
+§6.1），改成 role="tool" 是可行的，但需要放寬 CheckConstraint 的遷移並回填既有
+資料。目前的形狀能正確運作，尚未有改動的理由。
 
 `propose_ddl` 是 terminal 工具：呼叫後立即結束本回合，回覆由本模組合成
 （不再呼叫 LLM）。「新建資料表」意圖由 prompt 要求模型在最終回覆文字附上
@@ -22,13 +25,12 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.capabilities import CapabilityProfile
 from app.llm.provider import LLMProvider
 from app.repos import messages as messages_repo
 from app.repos import sessions as sessions_repo
 from app.repos import settings as settings_repo
 from app.repos.models import Message
-from app.services import tool_registry
+from app.services import provider_factory, tool_registry
 
 MAX_STEPS = 8
 MAX_OBS_ROWS = 20
@@ -40,6 +42,11 @@ _AGENT_SESSION_SETTING_KEY = "agent_session_id"
 _CAPABILITY_SETTING_KEY = "llm_capability_profile"
 
 _DESIGN_REQUEST_RE = re.compile(r"\[\[DESIGN_REQUEST\]\](.*?)\[\[/DESIGN_REQUEST\]\]", re.DOTALL)
+
+_REPEATED_CALL_HINT = (
+    "（你已用完全相同的參數呼叫過這個工具，以下是上次的結果。"
+    "再查一次不會有新資訊，請改用其他參數，或直接用現有資訊回答。）\n"
+)
 
 _MAX_STEPS_REPLY = (
     "已達到單回合最大工具呼叫次數，以下是目前已知的資訊，如需進一步協助請再詢問一次。"
@@ -72,9 +79,7 @@ async def start_new_conversation(db: AsyncSession) -> uuid.UUID:
 
 
 async def _build_provider(db: AsyncSession) -> LLMProvider:
-    setting = await settings_repo.get_setting(db, _CAPABILITY_SETTING_KEY)
-    profile = CapabilityProfile(**setting.value_json) if setting and setting.value_json else None
-    return LLMProvider.from_settings(profile=profile)
+    return await provider_factory.build_provider(db)
 
 
 # ── transcript 編碼／重建 ──────────────────────────────────────────────────
@@ -157,6 +162,18 @@ def _trim_to_budget(messages: list[dict]) -> list[dict]:
 # ── observation 截斷／摘要 ─────────────────────────────────────────────────
 
 
+def tool_call_key(name: str, args: dict) -> str:
+    """工具呼叫的指紋，用來辨識「同一個工具、同一組參數」被重複呼叫。
+
+    參數順序不影響結果——模型每次產生的 JSON 欄位順序不保證一致。
+    """
+    try:
+        normalized = json.dumps(args or {}, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        normalized = str(args)
+    return f"{name}:{normalized}"
+
+
 def _cap_rows(result: dict) -> dict:
     """每則 observation 最多 20 列。"""
     rows = result.get("rows") if isinstance(result, dict) else None
@@ -217,6 +234,7 @@ async def run_agent_turn_stream(
     user_message: str,
     db_name: str | None = None,
     *,
+    actor: str | None = None,
     provider: LLMProvider | None = None,
 ) -> AsyncIterator[dict]:
     """執行一回合原生 function calling 的 ReAct 工具迴圈，以 async generator 即時吐出事件。
@@ -236,8 +254,9 @@ async def run_agent_turn_stream(
     ]
 
     provider = provider or await _build_provider(db)
-    ctx = tool_registry.ToolContext(db=db, db_name=db_name)
+    ctx = tool_registry.ToolContext(db=db, db_name=db_name, actor=actor)
     tool_defs = tool_registry.tool_defs()
+    seen_calls: dict[str, tuple[dict, str]] = {}
 
     steps: list[dict] = []
 
@@ -264,9 +283,18 @@ async def run_agent_turn_stream(
         call = result.tool_calls[0]
         yield {"event": "tool_call", "data": {"tool": call.name, "args": call.arguments}}
 
-        raw_result = await tool_registry.dispatch(call.name, call.arguments, ctx)
-        capped = _cap_rows(raw_result)
-        obs_text = _obs_text(capped)
+        # 同一個工具、同一組參數重複呼叫不會有新資訊（observation 的截斷是
+        # 決定性的），只會白白燒掉本回合僅有的 MAX_STEPS 次預算。直接回上次的
+        # 結果並提示換路，順便省下一次真實的資料庫查詢。
+        call_key = tool_call_key(call.name, call.arguments)
+        if call_key in seen_calls:
+            capped, obs_text = seen_calls[call_key]
+            obs_text = _REPEATED_CALL_HINT + obs_text
+        else:
+            raw_result = await tool_registry.dispatch(call.name, call.arguments, ctx)
+            capped = _cap_rows(raw_result)
+            obs_text = _obs_text(capped)
+            seen_calls[call_key] = (capped, obs_text)
         summary = _summarize(capped)
         steps.append({"tool": call.name, "args": call.arguments, "result_summary": summary})
         yield {"event": "tool_result", "data": {"tool": call.name, "result_summary": summary}}
@@ -289,7 +317,12 @@ async def run_agent_turn_stream(
         })
         full_messages.append({"role": "tool", "tool_call_id": call.id, "content": obs_text})
 
-        if call.name == "propose_ddl":
+        # propose_ddl 只有「成功」才是 terminal。失敗時（例如 dry-run 撞到真實
+        # 資料的 UNIQUE 違例）當成一般 observation 餵回去——模型可以先用
+        # run_query 查出哪些值重複，再改用別的做法，這正是 run_query 已有的
+        # 自我修正行為。原本不論成敗都直接結束，使用者只會拿到一句原始的
+        # Postgres 錯誤然後對話就沒了。
+        if call.name == "propose_ddl" and "error" not in capped:
             reply, proposal = _finish_propose_ddl(capped)
             await messages_repo.add_message(db, session_id, "ai", reply)
             yield {"event": "delta", "data": {"text": reply}}

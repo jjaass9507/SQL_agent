@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.repos import outputs as outputs_repo
 from app.repos.models import Job
 from app.rules.spec_models import tables_from_json
-from app.services import generation_service, review_service
+from app.services import generation_service, provider_factory, review_service
 
 
 async def handle_generate_job(
@@ -28,8 +28,13 @@ async def handle_generate_job(
     if not tables_raw:
         raise ValueError("generate job payload 缺少 tables")
     tables = tables_from_json(tables_raw)
+    # 帶入探測到的 gateway 能力檔，否則四份文件的 writer 會假設 gateway 全能力
     await generation_service.generate_documents(
-        job.id, job.session_id, tables, session_factory=session_factory
+        job.id,
+        job.session_id,
+        tables,
+        provider=await provider_factory.build_provider(db),
+        session_factory=session_factory,
     )
 
 
@@ -55,6 +60,11 @@ async def handle_extra_job(
     tables = tables_from_json(tables_raw)
     context_tables = tables_from_json(payload.get("context_tables") or [])
 
-    content = await generation_service.generate_extra(kind, tables, context_tables=context_tables)
+    content = await generation_service.generate_extra(
+        kind,
+        tables,
+        context_tables=context_tables,
+        provider=await provider_factory.build_provider(db),
+    )
     filename = generation_service.EXTRA_FILENAMES[kind]
     await outputs_repo.upsert_output(db, job.session_id, filename, content)

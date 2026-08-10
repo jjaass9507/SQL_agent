@@ -49,7 +49,8 @@ async def list_sessions(
 
 
 async def update_session(db: AsyncSession, session_id: uuid.UUID, **fields) -> SessionRecord | None:
-    """更新指定欄位（title/mode/phase/context_text/context_tables_json/db_url_encrypted）。"""
+    """更新指定欄位（title/mode/phase/context_text/context_tables_json/
+    db_url_encrypted/inject_db_context）。"""
     record = await get_session(db, session_id)
     if record is None:
         return None

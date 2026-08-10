@@ -11,6 +11,18 @@ class QueryRequest(BaseModel):
     sql: str = Field(min_length=1, max_length=10_000)
 
 
+class BusinessDbQueryRequest(BaseModel):
+    """DB Agent 頁工作台的請求：對象是設定頁登錄的業務資料庫，不是 session。"""
+
+    sql: str = Field(min_length=1, max_length=10_000)
+    db_name: str | None = None
+
+
+class BusinessDbNL2SQLRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+    db_name: str | None = None
+
+
 class QueryResult(BaseModel):
     """查詢／EXPLAIN 共用的回應本體。"""
 
@@ -54,6 +66,22 @@ class ValidateDDLResponse(BaseModel):
     error: str | None = None
 
 
+class ValidateDDLTextRequest(BaseModel):
+    """確認頁編輯器裡尚未存檔的 DDL 文字。"""
+
+    ddl: str = Field(min_length=1, max_length=100_000)
+
+
+class ValidateDDLTextResponse(BaseModel):
+    """`checked` 為 "parse"（僅結構解析）或 "database"（已對真實資料庫試跑）。"""
+
+    ok: bool
+    error: str | None = None
+    checked: str
+    table_count: int | None = None
+    warnings: list[str] = []
+
+
 class DDLImportRequest(BaseModel):
     title: str | None = None
     ddl: str = Field(min_length=1, max_length=100_000)
@@ -62,3 +90,26 @@ class DDLImportRequest(BaseModel):
 class DDLImportResponse(BaseModel):
     id: uuid.UUID
     table_count: int
+
+
+class DictionaryEntryRequest(BaseModel):
+    """資料字典的一則註記：column 省略時代表整張表的說明。"""
+
+    db_name: str
+    table: str = Field(min_length=1, max_length=200)
+    column: str | None = None
+    note: str = Field(default="", max_length=2_000)
+    owner: str = Field(default="", max_length=100)
+
+
+class SavedQuestionRequest(BaseModel):
+    """新增或更新一則常用問題（帶 id 即為更新）。"""
+
+    db_name: str
+    question: str = Field(min_length=1, max_length=500)
+    sql: str = Field(min_length=1, max_length=10_000)
+    id: str | None = None
+
+
+class ApproveQuestionRequest(BaseModel):
+    db_name: str

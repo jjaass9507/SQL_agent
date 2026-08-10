@@ -37,10 +37,10 @@
 
   <div class="page-docs-toolbar">
     <div class="tabs" role="tablist" data-target="doc-tabs">
-      <button type="button" class="tab is-active" role="tab" data-action="switch-tab" data-target="spec">📄 規格書</button>
-      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="er_diagram">🗺 關聯圖</button>
-      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="ddl">💾 DDL</button>
-      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="security_plan">🔒 安全規劃</button>
+      <button type="button" class="tab is-active" role="tab" data-action="switch-tab" data-target="spec" title="規格書：用文字描述這次要建哪些資料表、每個欄位放什麼">📄 規格書</button>
+      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="er_diagram" title="關聯圖（ER Diagram）：用圖表示哪張表跟哪張表有關係">🗺 關聯圖</button>
+      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="ddl" title="DDL：建立資料表用的程式語法，交給工程師執行就好，你不用看懂">💾 DDL</button>
+      <button type="button" class="tab" role="tab" data-action="switch-tab" data-target="security_plan" title="安全規劃：哪些欄位是敏感資料、查詢會不會太慢的建議">🔒 安全規劃</button>
     </div>
     <div class="topbar-spacer"></div>
     <button type="button" class="btn btn-ghost btn-sm" data-action="download-single">下載此份</button>
@@ -53,6 +53,12 @@
     </div>
   </section>
   <section class="tab-panel" data-target="doc-panel" data-panel="er_diagram">
+    <div class="data-table-header-bar">
+      <span class="form-hint">資料表之間怎麼互相關聯</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="download-diagram">
+        下載圖片（SVG）
+      </button>
+    </div>
     <div class="card" data-target="doc-content-er_diagram">
       <p class="form-hint">文件尚未產出。</p>
     </div>

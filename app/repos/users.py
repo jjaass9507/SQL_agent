@@ -1,8 +1,9 @@
 """使用者帳號與 refresh token 的 repository 函式（Phase 7 認證）。
 
-`RefreshToken` 是本次新增的資料表，定義於此檔（而非 `app/repos/models.py`——
-依任務範圍規定既有內容不可更動），沿用同一個 declarative `Base`，schema 由
-`alembic/versions/0002_refresh_tokens.py` 建立。
+`RefreshToken` 定義於此檔而非 `app/repos/models.py`，沿用同一個 declarative
+`Base`，schema 由 `alembic/versions/0002_refresh_tokens.py` 建立。當初分開放是
+因為「不得改動 models.py」的凍結；凍結已解除（見 HANDOFF.md §6.1），要收回
+`models.py` 只是搬動類別定義、不需要遷移，但也沒有非搬不可的理由。
 """
 
 import uuid

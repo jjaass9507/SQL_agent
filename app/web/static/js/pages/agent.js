@@ -3,6 +3,8 @@ import { ADMIN_TOKEN_STORAGE_KEY, ENDPOINTS, api, adminHeaders } from "../lib/ap
 import { createAgentChat } from "../lib/agent-chat.js";
 import { confirmDialog } from "../lib/confirm-dialog.js";
 import { analyzeDdl } from "../lib/ddl-impact.js";
+import { createQueryWorkbench } from "../lib/query-workbench.js";
+import { createSchemaBrowser } from "../lib/schema-browser.js";
 import { showToast } from "../lib/toast.js";
 
 const messagesEl = document.querySelector('[data-target="agent-messages"]');
@@ -95,6 +97,100 @@ const chat = createAgentChat({
     if (data.design_request) appendDesignRequestCard(data.design_request);
   },
 });
+
+// ── 查詢工作台（「查詢資料」分頁） ──────────────────────────────────────
+
+const workbench = createQueryWorkbench({
+  resultEl: document.querySelector('[data-target="workbench-result"]'),
+  getDbName: () => (dbSelect && dbSelect.value ? dbSelect.value : null),
+  onSaved: () => loadSavedQuestions(),
+});
+
+const savedQuestions = new Map();
+
+/** 常用問題清單：每項顯示核可狀態，過期的要看得出來。 */
+async function loadSavedQuestions() {
+  const panel = document.querySelector('[data-target="saved-questions"]');
+  const list = document.querySelector('[data-target="saved-questions-list"]');
+  if (!panel || !list) return;
+
+  let entries;
+  try {
+    entries = await api.get(
+      ENDPOINTS.workbenchSavedQuestions(dbSelect && dbSelect.value ? dbSelect.value : ""),
+      { silent: true }
+    );
+  } catch {
+    panel.hidden = true;
+    return;
+  }
+
+  savedQuestions.clear();
+  list.textContent = "";
+  panel.hidden = !entries.length;
+  for (const entry of entries) {
+    savedQuestions.set(entry.id, entry);
+    const row = el("div", "saved-question");
+
+    const run = el("button", "saved-question-run", entry.question);
+    run.type = "button";
+    run.dataset.action = "run-saved-question";
+    run.dataset.target = entry.id;
+    row.appendChild(run);
+
+    // 口徑確認狀態直接顯示在清單上——不然要跑一次才知道能不能信
+    if (entry.approved && !entry.stale) {
+      row.appendChild(el("span", "saved-question-badge is-approved", "口徑已確認"));
+    } else if (entry.stale) {
+      row.appendChild(el("span", "saved-question-badge is-stale", "口徑待重新確認"));
+    } else {
+      row.appendChild(el("span", "saved-question-badge", "尚未覆核"));
+    }
+
+    if (!entry.approved || entry.stale) {
+      const approve = el("button", "btn btn-ghost btn-sm", "確認口徑");
+      approve.type = "button";
+      approve.dataset.action = "approve-question";
+      approve.dataset.target = entry.id;
+      row.appendChild(approve);
+    }
+
+    const remove = el("button", "btn btn-ghost btn-sm", "刪除");
+    remove.type = "button";
+    remove.dataset.action = "delete-question";
+    remove.dataset.target = entry.id;
+    row.appendChild(remove);
+    list.appendChild(row);
+  }
+}
+
+const schemaBrowser = createSchemaBrowser({
+  containerEl: document.querySelector('[data-target="schema-browser"]'),
+  getDbName: () => (dbSelect && dbSelect.value ? dbSelect.value : null),
+});
+
+let schemaLoaded = false;
+
+function switchQueryMode(mode) {
+  document.querySelectorAll('[data-action="switch-query-mode"]').forEach((btn) => {
+    const active = btn.dataset.target === mode;
+    btn.classList.toggle("btn-primary", active);
+    btn.classList.toggle("btn-ghost", !active);
+  });
+  for (const name of ["ask", "sql", "plan", "browse"]) {
+    const form = document.querySelector(`[data-target="query-mode-${name}"]`);
+    if (form) form.hidden = name !== mode;
+  }
+  // 結構樹要連資料庫，切到這個模式才載入，不要一進頁面就打
+  if (mode !== "browse") loadSavedQuestions();
+  if (mode === "browse" && !schemaLoaded) {
+    schemaLoaded = true;
+    schemaBrowser.load();
+  }
+  // 結構瀏覽器有自己的顯示區，查詢結果留著會很混亂
+  const result = document.querySelector('[data-target="workbench-result"]');
+  if (result && mode === "browse") result.textContent = "";
+}
 
 // ── 待審變更請求面板 ────────────────────────────────────────────────────
 
@@ -203,15 +299,48 @@ async function loadDatabases() {
 // ── 事件委派 ────────────────────────────────────────────────────────────
 
 document.addEventListener("submit", (event) => {
-  const form = event.target.closest('[data-action="agent-send-message"]');
-  if (!form) return;
-  event.preventDefault();
+  const chatForm = event.target.closest('[data-action="agent-send-message"]');
+  if (chatForm) {
+    event.preventDefault();
+    const input = chatForm.querySelector('[data-target="agent-message-input"]');
+    const message = input.value.trim();
+    if (!message || input.disabled) return;
+    chat.send(message);
+    input.value = "";
+    return;
+  }
 
-  const input = form.querySelector('[data-target="agent-message-input"]');
-  const message = input.value.trim();
-  if (!message || input.disabled) return;
-  chat.send(message);
-  input.value = "";
+  const askForm = event.target.closest('[data-action="run-ask"]');
+  if (askForm) {
+    event.preventDefault();
+    const input = askForm.querySelector('[data-target="workbench-question"]');
+    const question = input.value.trim();
+    if (question) workbench.runAsk(question);
+    return;
+  }
+
+  const sqlForm = event.target.closest('[data-action="run-sql"]');
+  if (sqlForm) {
+    event.preventDefault();
+    const input = sqlForm.querySelector('[data-target="workbench-sql"]');
+    const sql = input.value.trim();
+    if (sql) workbench.runSql(sql);
+    return;
+  }
+
+  const planForm = event.target.closest('[data-action="run-plan"]');
+  if (planForm) {
+    event.preventDefault();
+    const input = planForm.querySelector('[data-target="workbench-plan-sql"]');
+    const sql = input.value.trim();
+    if (sql) workbench.runPlan(sql);
+  }
+});
+
+document.addEventListener("input", (event) => {
+  if (event.target.matches('[data-target="schema-search"]')) {
+    schemaBrowser.handleSearch(event.target.value);
+  }
 });
 
 document.addEventListener("keydown", (event) => {
@@ -229,6 +358,85 @@ document.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
   const action = target.dataset.action;
+
+  if (action === "switch-agent-tab") {
+    document.querySelectorAll('[data-action="switch-agent-tab"]').forEach((tab) => {
+      tab.classList.toggle("is-active", tab === target);
+    });
+    document.querySelectorAll('[data-target="agent-panel"]').forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.panel === target.dataset.target);
+    });
+    if (target.dataset.target === "query") loadSavedQuestions();
+    return;
+  }
+
+  if (action === "switch-query-mode") {
+    switchQueryMode(target.dataset.target);
+    return;
+  }
+
+  if (action === "toggle-table") {
+    schemaBrowser.toggleTable(target.dataset.table);
+    return;
+  }
+
+  if (action === "edit-dictionary") {
+    const { table, column } = target.dataset;
+    const current = schemaBrowser.noteOf(table, column);
+    const label = column ? `${table}.${column}` : table;
+    const note = window.prompt(`${label} 是做什麼用的？（清空即刪除說明）`, current.note || "");
+    if (note === null) return;
+    const owner = window.prompt("負責人（可留空）", current.owner || "");
+    if (owner === null) return;
+    schemaBrowser.saveEntry(table, column || null, note, owner);
+    return;
+  }
+
+  if (action === "export-query-result") {
+    workbench.exportResult();
+    return;
+  }
+
+  if (action === "save-question") {
+    await workbench.saveCurrentQuestion();
+    return;
+  }
+
+  if (action === "run-saved-question") {
+    const entry = savedQuestions.get(target.dataset.target);
+    if (entry) await workbench.runSaved(entry);
+    return;
+  }
+
+  if (action === "approve-question") {
+    try {
+      await api.post(
+        ENDPOINTS.workbenchApproveQuestion(target.dataset.target),
+        { db_name: dbSelect && dbSelect.value ? dbSelect.value : "" },
+        { headers: adminHeaders() }
+      );
+      showToast("已標記為口徑確認", "success");
+      await loadSavedQuestions();
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
+
+  if (action === "delete-question") {
+    try {
+      await api.delete(
+        ENDPOINTS.workbenchDeleteQuestion(
+          target.dataset.target,
+          dbSelect && dbSelect.value ? dbSelect.value : ""
+        )
+      );
+      await loadSavedQuestions();
+    } catch {
+      // apiFetch 已 toast
+    }
+    return;
+  }
 
   if (action === "approve-change-request" || action === "reject-change-request") {
     const decision = action === "approve-change-request" ? "approve" : "reject";
@@ -299,6 +507,19 @@ document.addEventListener("click", async (event) => {
 const tokenInput = document.querySelector('[data-target="agent-admin-token"]');
 if (tokenInput && sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)) {
   tokenInput.placeholder = "已設定（重新輸入可覆蓋）";
+}
+
+if (dbSelect) {
+  dbSelect.addEventListener("change", () => {
+    // 常用問題與結構樹都是依資料庫分開存的，換了就必須重載
+    schemaLoaded = false;
+    loadSavedQuestions();
+    const browser = document.querySelector('[data-target="query-mode-browse"]');
+    if (browser && !browser.hidden) {
+      schemaLoaded = true;
+      schemaBrowser.load();
+    }
+  });
 }
 
 loadDatabases();

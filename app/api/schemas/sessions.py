@@ -72,6 +72,15 @@ class SessionSummary(BaseModel):
     mode: str
     phase: str
     created_at: datetime
+    tags: list[str] = []
+    pinned: bool = False
+
+
+class SessionLabelsRequest(BaseModel):
+    """PUT /sessions/{id}/labels：未提供的欄位保持原值。"""
+
+    tags: list[str] | None = None
+    pinned: bool | None = None
 
 
 class SessionDetail(BaseModel):
@@ -90,6 +99,8 @@ class SessionDetail(BaseModel):
     # （含型態／NULL／UNIQUE／索引變更）。未匯入現有 DB 時為 None。
     schema_diff: dict | None = None
     jobs: list[JobSummary] = Field(default_factory=list)
+    tags: list[str] = []
+    pinned: bool = False
 
 
 class TurnResponse(BaseModel):

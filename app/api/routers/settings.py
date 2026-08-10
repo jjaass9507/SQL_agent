@@ -83,7 +83,7 @@ async def add_business_db(body: BusinessDatabaseIn, db: DbDep):
 async def remove_business_db(db: DbDep, name: str = Query(...)):
     name = name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="name required")
+        raise HTTPException(status_code=400, detail="請填寫資料庫名稱。")
     entries = await svc.remove_business_database(db, name)
     return {"business_databases": entries}
 

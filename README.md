@@ -2,6 +2,10 @@
 
 透過對話式 AI 收集資料表設計需求，自動產出規格書、ER Diagram、DDL、效能安全規劃四份技術文件，並提供現有資料庫審查、DB Agent 助手與人工審批（HITL）變更流程。
 
+> 🧭 **要接手繼續開發，先讀 [`HANDOFF.md`](HANDOFF.md)** —— 現況、必須遵守的約束、
+> 程式碼地圖、環境重建與待辦優先序。過程紀錄在
+> [`docs/work_log_2026-08.md`](docs/work_log_2026-08.md)。
+
 > **目前狀態：Phase 0–9 全部完成。**
 > 已完成：Phase 0 專案骨架、Phase 1 LLM Provider 層（openai SDK + 能力探針 +
 > 降級轉接）、Phase 2 資料層（SQLAlchemy 2.0 async + Alembic + 加密）、
@@ -28,7 +32,40 @@
 > `agent` / `settings` / `activity` / `change-requests` 補上認證依賴——
 > `AUTH_ENABLED=false` 的行為完全不變，`true` 時才會實際生效。
 >
+> **使用者功能強化（依三位使用者角色的討論與逐階段驗收，見
+> [`docs/user_feature_backlog.md`](docs/user_feature_backlog.md)）：**
+> DB Agent 頁新增「查詢資料」分頁——一個唯讀查詢工作台，含四種模式：
+> 中文提問（nl2sql 產生語法後直接執行，語法收在進階區）、自己寫 SQL、
+> 查詢為什麼慢（EXPLAIN 樹狀圖，掃全表標紅並附白話說明）、
+> 找資料表（結構瀏覽器 + 資料字典，可為表與欄位加註說明與負責人）。
+> 結果附「尚未經人工覆核」標記與帶 BOM 的 CSV 匯出（Excel 可直接開啟中文）。
+> 確認頁 DDL 編輯器加「驗證語法」；文件頁 ER 圖可下載 SVG、術語有白話解釋；
+> 首頁每筆紀錄顯示「下一步要做什麼」的白話進度。
+>
+> 同期修正三個既有缺陷：唯讀護欄改用允許清單（原本 `EXPLAIN ANALYZE DELETE`、
+> `setval()`、`dblink_exec()`、`CALL`、`COPY ... TO PROGRAM` 皆可通過，
+> 且此路徑不經 HITL）；ER 關聯圖原本在隱藏分頁渲染導致每份文件的圖都畫不出來；
+> 中文表名原本被逐字轉成底線。
+>
+> 本階段新增端點：`POST /workbench/{query,explain,nl2sql}`、
+> `GET /workbench/schema-tree`、`GET|PUT /workbench/dictionary`、
+> `POST /sessions/{id}/validate-ddl-text`。前四個以業務資料庫名稱為範圍
+> （DB Agent 頁沒有 session），與既有 session 範圍的版本共用 service 層核心。
+>
 > 開發環境：`pip install -e ".[dev]"`；測試 `python3 -m pytest`；lint `ruff check .`
+>
+> **重新部署**：`scripts/deploy.ps1`（Windows，`-Mode Direct` 直跑 uvicorn／
+> `-Mode IIS` 走 IIS + AD SSO），含前置檢查、遷移前備份、遷移失敗自動回滾與
+> 健康檢查；先用 `-DryRun` 看它打算做什麼。資料庫狀態與備份另可單獨用
+> `scripts/deploy_db.py check|backup`。詳見
+> [`docs/deployment.md`](docs/deployment.md) 第 0 節。
+>
+> **測試分層**（見 `CLAUDE.md` 第 4.2 節）：`tests/rules|repos`（純邏輯）、
+> `tests/web/test_contract.py`（前端依賴的 API 形狀）、`tests/architecture`
+> （跨檔案約定，例如分層方向、錯誤訊息必須是中文）、`tests/gateway`
+> （LLM gateway 能力降級）、`tests/e2e`（瀏覽器煙霧測試，預設不跑，
+> `pip install -e ".[e2e]" && python -m playwright install chromium`
+> 之後以 `pytest -m e2e` 執行）。
 
 ---
 
@@ -54,6 +91,10 @@
 | [`workflow_diagrams.md`](docs/workflow_diagrams.md) | 工作流程圖 |
 | [`test_cases.md`](docs/test_cases.md) | 測試案例 |
 | [`go_live_checklist.md`](docs/go_live_checklist.md) | 上線檢查清單 |
+| [`feature_backlog.md`](docs/feature_backlog.md) | 系統面缺口盤點與優先順序（安全、稽核、agent 行為；含已複驗的證據與裁決） |
+| [`user_feature_backlog.md`](docs/user_feature_backlog.md) | 使用者功能盤點（三方使用者角色辯論後整合，依後端現況分批） |
+| [`work_log_2026-08.md`](docs/work_log_2026-08.md) | 2026-08 工作紀錄：討論方法、實作與驗收過程、實測發現的缺陷、被推翻的判斷 |
+| [`../HANDOFF.md`](HANDOFF.md) | 交接手冊（在專案根目錄）：現況、約束、程式碼地圖、環境重建、待辦優先序 |
 | `v05/` | v0.5 舊實作的架構/部署/維運文件（歷史參考，不適用於 v2） |
 
 ## 開發輔助 Skills（`.claude/skills/`）

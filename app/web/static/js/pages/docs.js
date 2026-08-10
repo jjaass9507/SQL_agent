@@ -114,6 +114,11 @@ function renderMarkdownPanel(target, content) {
   panel.appendChild(body);
 }
 
+// mermaid 需要量測文字尺寸才能算出線條座標，在 display:none 的分頁裡量到的是 0，
+// 會產生 NaN 座標並拋出 getPointAtLength 錯誤（畫面上就是那張紅色炸彈圖）。
+// 因此 ER 圖必須等它的分頁真的被打開、有版面尺寸之後才畫。
+let pendingErDiagram = null;
+
 async function renderErDiagramPanel(content) {
   const panel = document.querySelector('[data-target="doc-content-er_diagram"]');
   if (!panel) return;
@@ -128,8 +133,20 @@ async function renderErDiagramPanel(content) {
     try {
       window.mermaid.initialize({ startOnLoad: false });
       await window.mermaid.run({ nodes: [holder] });
-    } catch {
-      // Mermaid 語法渲染失敗時保留原始碼文字
+    } catch (err) {
+      // 技術細節留給開發者，使用者看到的是下面那句白話（同 lib/api.js 的慣例）
+      console.error("mermaid render failed", err);
+      // mermaid 失敗時會先把「Syntax error in text」的紅色炸彈圖畫進節點才拋錯，
+      // 所以這裡必須主動清掉——留著會讓使用者以為整個平台壞了而不敢再操作。
+      holder.remove();
+      const notice = el(
+        "p",
+        "form-hint",
+        "關聯圖沒辦法畫出來（通常是資料表或欄位名稱含有繪圖工具不支援的字元）。" +
+          "下面是原始定義，其他三份文件不受影響，可以照常使用。"
+      );
+      panel.appendChild(notice);
+      panel.appendChild(el("pre", "code-block", mermaidCode));
     }
   } else if (mermaidCode) {
     // mermaid 未載入（static/vendor/mermaid.min.js 缺檔或載入失敗）時降級顯示原始碼
@@ -140,6 +157,14 @@ async function renderErDiagramPanel(content) {
     renderMarkdown(prose, rest);
     panel.appendChild(prose);
   }
+}
+
+/** ER 圖分頁被打開時才真的畫；重複開啟不重畫。 */
+function renderPendingErDiagram() {
+  if (pendingErDiagram === null) return;
+  const content = pendingErDiagram;
+  pendingErDiagram = null;
+  renderErDiagramPanel(content);
 }
 
 function renderDdlPanel(content) {
@@ -182,7 +207,10 @@ async function loadOutputs() {
   }
 
   if (outputsCache.has(TAB_FILES.spec)) renderMarkdownPanel("spec", outputsCache.get(TAB_FILES.spec));
-  if (outputsCache.has(TAB_FILES.er_diagram)) renderErDiagramPanel(outputsCache.get(TAB_FILES.er_diagram));
+  if (outputsCache.has(TAB_FILES.er_diagram)) {
+    pendingErDiagram = outputsCache.get(TAB_FILES.er_diagram);
+    if (activeTab === "er_diagram") renderPendingErDiagram();
+  }
   if (outputsCache.has(TAB_FILES.ddl)) renderDdlPanel(outputsCache.get(TAB_FILES.ddl));
   if (outputsCache.has(TAB_FILES.security_plan)) {
     renderMarkdownPanel("security_plan", outputsCache.get(TAB_FILES.security_plan));
@@ -221,6 +249,30 @@ document.addEventListener("click", async (event) => {
     document.querySelectorAll('[data-target="doc-panel"]').forEach((panel) => {
       panel.classList.toggle("is-active", panel.dataset.panel === activeTab);
     });
+    if (activeTab === "er_diagram") renderPendingErDiagram();
+  }
+
+  if (action === "download-diagram") {
+    // mermaid 算完之後就是一段 inline <svg>，直接序列化下載即可，
+    // 不必經過「列印成 PDF 再截圖」那條會糊掉的路。
+    const svg = document.querySelector('[data-target="doc-content-er_diagram"] svg');
+    if (!svg) {
+      showToast("關聯圖還沒畫出來", "warning");
+      return;
+    }
+    const source = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob(
+      ['<?xml version="1.0" encoding="UTF-8"?>\n', source],
+      { type: "image/svg+xml;charset=utf-8" }
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "er_diagram.svg";
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("已下載 SVG，可直接拖進簡報或文件", "success");
+    return;
   }
 
   if (action === "copy-code") {

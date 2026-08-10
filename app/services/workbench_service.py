@@ -9,6 +9,7 @@ DDL dry-run 驗證、貼上 DDL 建立設計 session。
 import asyncio
 import re
 import uuid
+from datetime import UTC, datetime
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,18 +17,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm.provider import LLMProvider
 from app.llm.types import Message
 from app.repos import activity, outputs, sessions, versions
+from app.repos import settings as settings_repo
 from app.repos.crypto import decrypt_db_url
 from app.repos.models import SessionRecord
 from app.rules import ddl_parser, ddl_validator, sql_safety
 from app.rules.db_introspect import format_context
 from app.rules.spec_models import TableSpec, asdict
-from app.services import dbops
+from app.services import change_service, dbops
 
 _CRED_RE = re.compile(r"://[^\s/]+:[^\s/@]+@")
 
 _NL2SQL_SYSTEM = (
     "你是 SQL 產生助手。根據使用者的自然語言問題與下方資料庫結構，"
-    "產生一句唯讀的 PostgreSQL SELECT 查詢，並附上簡短說明。"
+    "產生一句唯讀的 PostgreSQL SELECT 查詢，並附上簡短說明。\n"
+    "說明是寫給看不懂 SQL 的業務單位使用者看的：用日常中文描述這個數字是怎麼算出來的"
+    "（例如「把訂單依通路分組，數每組有幾筆，再依金額由高到低排序」），"
+    "不要出現聚合、子查詢、JOIN、索引這類技術詞彙，也不要複述 SQL 語法本身。"
 )
 
 
@@ -65,6 +70,18 @@ async def _require_db_url(db: AsyncSession, session_id: uuid.UUID) -> str:
     return decrypt_db_url(record.db_url_encrypted)
 
 
+async def _require_business_db_url(db: AsyncSession, db_name: str | None) -> tuple[str, str]:
+    """解析設定頁登錄的業務資料庫，回傳 (resolved_name, db_url)。
+
+    DB Agent 頁沒有 session，操作對象是頂欄下拉選的業務資料庫，因此工作台在該頁
+    走這條解析路徑；session 內的工作台仍走 `_require_db_url`。
+    """
+    resolved_name, db_url, error = await change_service.resolve_business_db(db, db_name)
+    if db_url is None:
+        raise NoDatabaseConfigured(error or "找不到資料庫連線")
+    return resolved_name or "", db_url
+
+
 async def run_query(db: AsyncSession, session_id: uuid.UUID, sql: str) -> dict:
     """對 session 的目標資料庫執行唯讀查詢（護欄不過拋 `dbops.QueryRejected`）。"""
     db_url = await _require_db_url(db, session_id)
@@ -79,6 +96,58 @@ async def run_explain(db: AsyncSession, session_id: uuid.UUID, sql: str) -> dict
     """對 session 的目標資料庫執行 EXPLAIN。"""
     db_url = await _require_db_url(db, session_id)
     return await dbops.explain_query(db_url, sql)
+
+
+async def run_query_on_business_db(db: AsyncSession, db_name: str | None, sql: str) -> dict:
+    """對指定的業務資料庫執行唯讀查詢（DB Agent 頁的工作台用）。"""
+    resolved_name, db_url = await _require_business_db_url(db, db_name)
+    result = await dbops.execute_query(db_url, sql)
+    await activity.log_activity(
+        db, "query_executed", {"db": resolved_name, "rows": len(result["rows"])}
+    )
+    return result
+
+
+async def run_explain_on_business_db(db: AsyncSession, db_name: str | None, sql: str) -> dict:
+    """對指定的業務資料庫執行 EXPLAIN。"""
+    _resolved_name, db_url = await _require_business_db_url(db, db_name)
+    return await dbops.explain_query(db_url, sql)
+
+
+async def get_schema_tree_on_business_db(db: AsyncSession, db_name: str | None) -> dict:
+    """指定業務資料庫的結構樹（DB Agent 頁的結構瀏覽器用）。"""
+    _resolved_name, db_url = await _require_business_db_url(db, db_name)
+    tables, err = await dbops.schema_tree(db_url)
+    if err and not tables:
+        raise NoDatabaseConfigured(sanitize_db_error(err))
+    return {"source": "db", "tables": [_table_to_tree(t) for t in tables]}
+
+
+async def generate_nl2sql_on_business_db(
+    db: AsyncSession, db_name: str | None, question: str, llm: LLMProvider
+) -> SQLDraft:
+    """對指定業務資料庫產生唯讀 SQL 草稿（不執行）。"""
+    resolved_name, db_url = await _require_business_db_url(db, db_name)
+    tables, _err = await dbops.schema_tree(db_url)
+    draft = await _draft_sql(question, tables, llm)
+    await activity.log_activity(
+        db, "nl2sql_generated", {"db": resolved_name, "q_len": len(question)}
+    )
+    return draft
+
+
+async def _draft_sql(question: str, tables: list[TableSpec], llm: LLMProvider) -> SQLDraft:
+    """NL2SQL 的共用核心：組 prompt、要 structured output、過唯讀護欄。"""
+    messages: list[Message] = [
+        {"role": "system", "content": _NL2SQL_SYSTEM},
+        {"role": "user", "content": f"{format_context(tables)}\n\n問題：{question}"},
+    ]
+    result = await llm.chat(messages, response_model=SQLDraft)
+    draft: SQLDraft = result.parsed
+    error = sql_safety.check_read_only(draft.sql)
+    if error:
+        raise dbops.QueryRejected(error)
+    return draft
 
 
 def _table_to_tree(table: TableSpec) -> dict:
@@ -118,16 +187,7 @@ async def generate_nl2sql(
     """依自然語言問題產生唯讀 SQL 草稿（不執行）。護欄不過拋 `dbops.QueryRejected`。"""
     db_url = await _require_db_url(db, session_id)
     tables, _err = await dbops.schema_tree(db_url)
-    schema_summary = format_context(tables)
-    messages: list[Message] = [
-        {"role": "system", "content": _NL2SQL_SYSTEM},
-        {"role": "user", "content": f"{schema_summary}\n\n問題：{question}"},
-    ]
-    result = await llm.chat(messages, response_model=SQLDraft)
-    draft: SQLDraft = result.parsed
-    error = sql_safety.check_read_only(draft.sql)
-    if error:
-        raise dbops.QueryRejected(error)
+    draft = await _draft_sql(question, tables, llm)
     await activity.log_activity(
         db, "nl2sql_generated", {"session_id": str(session_id), "q_len": len(question)}
     )
@@ -150,6 +210,141 @@ async def validate_session_ddl(db: AsyncSession, session_id: uuid.UUID) -> dict:
         result["error"] = sanitize_db_error(result.get("error", ""))
     await activity.log_activity(
         db, "ddl_validated", {"session_id": str(session_id), "ok": result.get("ok")}
+    )
+    return result
+
+
+# ── 資料字典（表／欄位的白話說明與負責人） ────────────────────────────────
+#
+# 存在 `app_settings` 的單一 JSON，不新增資料表：這份內容是人工少量維護的註記
+# （「這欄位誰在用」這種問題的答案），量級是幾百筆字串，不需要獨立 schema。
+# key 格式：`<db>|<table>` 或 `<db>|<table>|<column>`。
+
+DATA_DICTIONARY_KEY = "data_dictionary"
+
+
+def _dict_key(db_name: str, table: str, column: str | None) -> str:
+    return f"{db_name}|{table}|{column}" if column else f"{db_name}|{table}"
+
+
+async def get_data_dictionary(db: AsyncSession, db_name: str) -> dict:
+    """取出某個業務資料庫的所有註記（key 已去掉資料庫前綴，前端直接查表用）。"""
+    setting = await settings_repo.get_setting(db, DATA_DICTIONARY_KEY)
+    stored: dict = (setting.value_json if setting and setting.value_json else {}) or {}
+    prefix = f"{db_name}|"
+    return {k[len(prefix) :]: v for k, v in stored.items() if k.startswith(prefix)}
+
+
+async def set_dictionary_entry(
+    db: AsyncSession,
+    db_name: str,
+    table: str,
+    column: str | None,
+    note: str,
+    owner: str,
+) -> dict:
+    """新增或更新一則註記；note 與 owner 都空白時視為刪除。"""
+    setting = await settings_repo.get_setting(db, DATA_DICTIONARY_KEY)
+    stored: dict = dict((setting.value_json if setting and setting.value_json else {}) or {})
+    key = _dict_key(db_name, table, column)
+
+    note, owner = (note or "").strip(), (owner or "").strip()
+    if not note and not owner:
+        stored.pop(key, None)
+        entry = {}
+    else:
+        entry = {
+            "note": note,
+            "owner": owner,
+            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        stored[key] = entry
+
+    await settings_repo.set_setting(db, DATA_DICTIONARY_KEY, stored)
+    await activity.log_activity(
+        db, "dictionary_updated", {"db": db_name, "table": table, "column": column}
+    )
+    return entry
+
+
+# PostgreSQL 內建型態與常見別名。用途是抓 `varchr`／`intt` 這種拼字錯誤——
+# 解析器把型態當成任意字串照收，沒有這張表就得等到真的建表才會發現。
+# 自訂型態、domain、enum 都是合法但不在這張表裡的，因此結果只當「提醒」不當「錯誤」。
+_KNOWN_PG_TYPES = frozenset(
+    """
+    bigint bigserial bit boolean bool box bytea char character citext cidr circle date
+    decimal double float float4 float8 inet int int2 int4 int8 integer interval json
+    jsonb line lseg macaddr macaddr8 money numeric path pg_lsn point polygon real serial
+    serial2 serial4 serial8 smallint smallserial text time timestamp timestamptz timetz
+    tsquery tsvector txid_snapshot uuid varbit varchar xml
+    """.split()
+)
+
+
+def _unknown_type_warnings(tables: list[TableSpec]) -> list[str]:
+    """列出看起來像打錯字的型態名稱（不是錯誤，自訂型態也會落在這裡）。"""
+    unknown: dict[str, list[str]] = {}
+    for table in tables:
+        for column in table.columns:
+            base = (column.data_type or "").split("(")[0].strip().lower()
+            base = base.removesuffix("[]")  # 陣列型態
+            if base and base not in _KNOWN_PG_TYPES:
+                unknown.setdefault(base, []).append(f"{table.table_name}.{column.name}")
+    return [
+        f"型態「{name}」不是 PostgreSQL 內建型態，請確認有沒有打錯字"
+        f"（用到：{'、'.join(columns[:5])}）"
+        for name, columns in unknown.items()
+    ]
+
+
+async def validate_ddl_text(db: AsyncSession, session_id: uuid.UUID, ddl_text: str) -> dict:
+    """驗證確認頁編輯器裡「還沒存檔」的 DDL 文字。
+
+    與 `validate_session_ddl` 的差別：那個驗的是文件產出後的 `03_ddl.sql`，且一定
+    要有資料庫連線；確認頁的編輯器發生在文件產出之前，設計 session 也常常沒有接
+    業務資料庫，因此這裡分兩段——
+
+    1. 一律先做結構解析（不需要任何連線），抓得出「這根本不是 CREATE TABLE」
+       或欄位寫壞導致解析不出東西這類問題。
+    2. session 有連線時，再送去真實資料庫做 rollback dry-run，錯誤訊息才會帶
+       PostgreSQL 自己標出的位置（型態不存在、相依缺漏等只有資料庫知道的問題）。
+
+    回傳 `checked` 讓前端誠實告訴使用者驗到什麼程度，不要讓「語法正確」被誤讀成
+    「一定建得起來」。
+    """
+    record = await _get_session_or_raise(db, session_id)
+    ddl_text = (ddl_text or "").strip()
+    if not ddl_text:
+        return {"ok": False, "error": "請先填入建表語法。", "checked": "none"}
+
+    tables = ddl_parser.parse_ddl(ddl_text)
+    if not tables:
+        return {
+            "ok": False,
+            "error": "看不出任何 CREATE TABLE 語句，請確認語法格式是否正確。",
+            "checked": "parse",
+        }
+
+    warnings = _unknown_type_warnings(tables)
+
+    if not record.db_url_encrypted:
+        return {
+            "ok": True,
+            "error": None,
+            "checked": "parse",
+            "table_count": len(tables),
+            "warnings": warnings,
+        }
+
+    conn_url = decrypt_db_url(record.db_url_encrypted)
+    result = await asyncio.to_thread(ddl_validator.validate_ddl, ddl_text, conn_url)
+    if not result.get("ok"):
+        result["error"] = sanitize_db_error(result.get("error", ""))
+    result["checked"] = "database"
+    result["table_count"] = len(tables)
+    result["warnings"] = warnings
+    await activity.log_activity(
+        db, "ddl_text_validated", {"session_id": str(session_id), "ok": result.get("ok")}
     )
     return result
 
